@@ -77,6 +77,12 @@ export interface Task {
   created_at: string;
   created_by?: { cwd?: string; session?: string | null } | null;
   updated_at: string;
+  /**
+   * When the schedule last changed or the task was resumed. Cron slots before
+   * it are ignored (see `planSlots`' `since`), so an edit or a resume does not
+   * report a burst of `missed` slots.
+   */
+  schedule_since?: string | null;
 }
 
 export interface Attempt {
@@ -236,7 +242,8 @@ function checkSchedule(c: Checker, value: unknown): void {
   c.at("type").fail('must be "once" or "cron"');
 }
 
-const TASK_FIELDS = [
+/** Every task field, in the order they are written to disk. */
+export const TASK_FIELDS = [
   "id",
   "title",
   "description",
@@ -253,6 +260,7 @@ const TASK_FIELDS = [
   "created_at",
   "created_by",
   "updated_at",
+  "schedule_since",
 ] as const;
 
 /** Returns the list of problems with a task; empty when valid. */
@@ -284,6 +292,7 @@ export function taskErrors(value: unknown): string[] {
   if (typeof value.enabled !== "boolean") c.at("enabled").fail("must be a boolean");
   checkTimestamp(c.at("created_at"), value.created_at);
   checkTimestamp(c.at("updated_at"), value.updated_at);
+  checkTimestamp(c.at("schedule_since"), value.schedule_since, { optional: true, nullable: true });
   if (value.created_by !== undefined && value.created_by !== null && !isObject(value.created_by)) {
     c.at("created_by").fail("must be an object or null");
   }

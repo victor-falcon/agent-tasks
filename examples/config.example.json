@@ -1,0 +1,37 @@
+{
+  "data_dir": "~/.local/share/agent-tasks",
+  "timezone": "Europe/Madrid",
+
+  "runner": { "every": "5m" },
+
+  "launcher": { "preset": "process" },
+
+  "agent": { "command": "claude", "args": [], "shell": false },
+  "skill": "run-agent-task",
+
+  "profiles": [
+    {
+      "match": "~/Projects/work/**",
+      "agent": { "command": "claude", "args": ["--model", "opus"], "shell": false },
+      "env": { "EXAMPLE_FLAG": "1" },
+      "instructions": ["work.md"]
+    }
+  ],
+
+  "instructions": {
+    "subagent": ["subagent.md"],
+    "supervisor": ["supervisor.md"]
+  },
+
+  "notifiers": [
+    { "type": "system", "events": ["failed", "timed_out", "blocked"] }
+  ],
+
+  "supervisor": { "enabled": false },
+
+  "defaults": {
+    "catch_up": "latest",
+    "timeout": "45m",
+    "keep_open": "on_failure"
+  }
+}

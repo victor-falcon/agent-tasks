@@ -1,0 +1,19 @@
+{
+  "id": "weekly-deps-report",
+  "title": "Weekly dependencies report",
+  "description": "Every Monday morning, list outdated dependencies so they can be planned.",
+  "cwd": "~/Projects/example",
+  "instructions": "Run the package manager's outdated check (for example `bun outdated`) and write a short report to reports/deps-<date>.md: one line per outdated package with current and latest version, major upgrades first. Do not upgrade anything. Done when the report file exists.",
+  "schedule": { "type": "cron", "cron": "0 9 * * 1", "timezone": "Europe/Madrid", "starts_at": null, "until": null },
+  "agent": null,
+  "catch_up": "latest",
+  "max_delay": "2h",
+  "timeout": "45m",
+  "retries": 0,
+  "keep_open": "on_failure",
+  "enabled": true,
+  "created_at": "2026-11-16T15:00:00+01:00",
+  "created_by": { "cwd": "~/Projects/example", "session": null },
+  "updated_at": "2026-11-16T15:00:00+01:00",
+  "schedule_since": null
+}

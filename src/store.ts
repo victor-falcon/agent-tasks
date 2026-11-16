@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { CorruptFileError, NotFoundError, UsageError } from "./errors.ts";
+import { AgentTasksError, CorruptFileError, NotFoundError, UsageError } from "./errors.ts";
 import type { DataPaths } from "./paths.ts";
 import { type Run, runErrors, type Task, TASK_ID_RE, taskErrors, type Tick } from "./schema.ts";
 import { isManualSlotId, isSlotId, parseRunRef, runRef, runSlotId, slotIdToDate } from "./slot.ts";
@@ -260,4 +260,56 @@ export function readTicks(paths: DataPaths): ReadResult<Tick> {
     }
   });
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Archive: deleted tasks (`archive/<id>.json`); their runs stay in `runs/`
+// ---------------------------------------------------------------------------
+
+export function archivedTaskPath(paths: DataPaths, id: string): string {
+  if (!TASK_ID_RE.test(id)) throw new UsageError(`invalid task id "${id}" (lowercase letters, digits and dashes)`);
+  return join(paths.archiveDir, `${id}.json`);
+}
+
+export function isArchived(paths: DataPaths, id: string): boolean {
+  return existsSync(archivedTaskPath(paths, id));
+}
+
+export function readArchivedTask(paths: DataPaths, id: string): Task {
+  const path = archivedTaskPath(paths, id);
+  if (!existsSync(path)) throw new NotFoundError(`task "${id}" not found in ${paths.archiveDir}`);
+  const task = readTaskFile(path);
+  if (task.id !== id) throw new CorruptFileError(path, `id "${task.id}" does not match the file name`);
+  return task;
+}
+
+export function listArchivedTasks(paths: DataPaths): ReadResult<Task> {
+  return collect(jsonFilesIn(paths.archiveDir), (path) => {
+    const task = readTaskFile(path);
+    if (`${task.id}.json` !== basename(path)) throw new CorruptFileError(path, `id "${task.id}" does not match the file name`);
+    return task;
+  });
+}
+
+/**
+ * Moves a task to the archive: writes `task` (normally the stored task, paused)
+ * to `archive/<id>.json`, then removes `tasks/<id>.json`. Refuses to overwrite
+ * an archived task with the same id.
+ */
+export function archiveTask(paths: DataPaths, task: Task): string {
+  const target = archivedTaskPath(paths, task.id);
+  if (!createJsonExclusive(target, task)) {
+    throw new AgentTasksError("conflict", `an archived task "${task.id}" already exists in ${paths.archiveDir}`);
+  }
+  rmSync(taskPath(paths, task.id), { force: true });
+  return target;
+}
+
+/** Ids of every task that has runs on disk (including archived or removed tasks). */
+export function taskIdsWithRuns(paths: DataPaths): string[] {
+  if (!existsSync(paths.runsDir)) return [];
+  return readdirSync(paths.runsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && TASK_ID_RE.test(d.name))
+    .map((d) => d.name)
+    .sort();
 }
