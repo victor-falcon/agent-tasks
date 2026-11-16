@@ -50,3 +50,10 @@ export class NotFoundError extends AgentTasksError {
     super("not_found", message);
   }
 }
+
+/** A run's session no longer exists (closed, exited or gone). */
+export class SessionGoneError extends AgentTasksError {
+  constructor(message: string) {
+    super("session_gone", message);
+  }
+}
