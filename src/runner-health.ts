@@ -1,6 +1,5 @@
 import { closeSync, existsSync, fstatSync, openSync, readSync } from "node:fs";
 import type { Context } from "./context.ts";
-import { BUILTIN_DEFAULTS } from "./config.ts";
 import { parseDuration } from "./duration.ts";
 import type { DataPaths } from "./paths.ts";
 import type { Tick } from "./schema.ts";
@@ -48,8 +47,9 @@ export interface RunnerHealth {
   next_tick: string | null;
 }
 
-export function runnerEvery(ctx: Pick<Context, "config">): string {
-  return ctx.config.config.runner?.every ?? BUILTIN_DEFAULTS.runner_every;
+/** `runner.every` from the config, else the default (same precedence as `resolveFor`). */
+export function runnerEvery(ctx: Pick<Context, "resolveFor">): string {
+  return ctx.resolveFor({ cwd: "/" }).runner_every;
 }
 
 /** `next_tick` is written in `timezone`, like other timestamps the CLI prints. */
@@ -66,6 +66,7 @@ export function runnerHealth(paths: Pick<DataPaths, "ticksFile">, every: string,
   };
 }
 
+/** The runner's health for a command: its data folder, config interval, clock and display zone. */
 export function contextRunnerHealth(ctx: Context): RunnerHealth {
   return runnerHealth(ctx.paths, runnerEvery(ctx), ctx.now, displayTimezone(ctx));
 }

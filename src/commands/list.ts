@@ -9,11 +9,12 @@ import { scheduleText } from "../output/schedule-text.ts";
 import { stdoutStyle, type Style } from "../output/style.ts";
 import { paintMark, PENDING_MARK, RUN_MARKS, TASK_MARKS, type TaskMarkKind, taskMarkKind } from "../output/symbols.ts";
 import { renderTable } from "../output/table.ts";
-import { formatSpan, whenTime } from "../output/time.ts";
+import { DAY, formatSpan, whenTime } from "../output/time.ts";
+import { isInProgress } from "../run-info.ts";
 import { describeSchedule, displayTimezone, TASK_STATES, type TaskState, taskOverview, warnCorrupt } from "../task-info.ts";
 import type { Command } from "./types.ts";
 
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const WEEK_MS = 7 * DAY;
 const DEFAULT_STATES: readonly TaskState[] = ["active", "paused"];
 
 const HISTORY = 10;
@@ -47,7 +48,7 @@ function taskRow(ctx: Context, task: Task, archived: boolean): { row: TaskRow; e
   const count = (...statuses: RunStatus[]) => recent.filter((r) => statuses.includes(r.status)).length;
   const last = runs.at(-1);
   const statuses = runs.map((r) => r.status);
-  const inProgress = runs.filter((r) => r.status === "running" || r.status === "blocked").at(-1);
+  const inProgress = runs.filter((r) => isInProgress(r.status)).at(-1);
   return {
     row: {
       id: task.id,

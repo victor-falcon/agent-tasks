@@ -14,7 +14,6 @@ export const FIXTURE_NOW = "2026-11-17T10:02:00+01:00";
 export const FIXTURE_TZ = "Europe/Madrid";
 
 const MIN = 60_000;
-const HOUR = 60 * MIN;
 
 function task(id: string, title: string, schedule: Task["schedule"], extra: Partial<Task> = {}): Task {
   return {
@@ -107,7 +106,7 @@ export function writeFixture(paths: DataPaths, { ticks = true } = {}): void {
   // Running now (started 4 minutes ago); failed once last week.
   writeTask(paths, task("worktree-cleanup", "Worktree cleanup", cron("0 8 * * *"), { cwd: "~/Projects/bar" }));
   for (let d = 11; d <= 16; d++) writeRun(paths, scheduledRun("worktree-cleanup", day(d, "08:00"), d === 13 ? "failed" : "succeeded", { summary: d === 13 ? "git worktree prune failed" : "removed 2 worktrees" }));
-  writeRun(paths, { ...scheduledRun("worktree-cleanup", day(17, "08:00"), "running", { delayMin: 118, minutes: null }) });
+  writeRun(paths, scheduledRun("worktree-cleanup", day(17, "08:00"), "running", { delayMin: 118, minutes: null }));
 
   // Hourly task: missed overnight (runner stopped), failed at 09:00 after two attempts.
   writeTask(paths, task("sentry-summary", "Sentry summary", cron("0 * * * *"), { retries: 1 }));
@@ -123,7 +122,7 @@ export function writeFixture(paths: DataPaths, { ticks = true } = {}): void {
 
   // Waiting for a person.
   writeTask(paths, task("review-pr-123", "Review PR 123", { type: "once", at: "2026-11-17T09:30:00+01:00" }));
-  writeRun(paths, { ...scheduledRun("review-pr-123", day(17, "09:30"), "blocked", { summary: "asks to confirm the merge", minutes: null, delayMin: 20 }) });
+  writeRun(paths, scheduledRun("review-pr-123", day(17, "09:30"), "blocked", { summary: "asks to confirm the merge", minutes: null, delayMin: 20 }));
 
   // One-off still to come.
   writeTask(paths, task("release-notes", "Release notes", { type: "once", at: "2026-11-20T09:00:00+01:00" }));
@@ -136,7 +135,6 @@ export function writeFixture(paths: DataPaths, { ticks = true } = {}): void {
     writeTicks(paths, day(16, "20:00"), day(17, "01:10"));
     writeTicks(paths, day(17, "08:30"), new Date(now - 2 * MIN).toISOString());
   }
-  void HOUR;
 }
 
 if (import.meta.main) {

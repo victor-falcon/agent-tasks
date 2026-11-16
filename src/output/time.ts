@@ -1,9 +1,9 @@
 // Dates for people: relative near now ("4m ago", "in 6d"), absolute far away,
 // always in the display time zone. `now` is always passed in.
 
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
+export const MINUTE = 60_000;
+export const HOUR = 60 * MINUTE;
+export const DAY = 24 * HOUR;
 
 /** Up to this distance from now, dates are shown relative. */
 export const RELATIVE_LIMIT_MS = 7 * DAY;
@@ -87,6 +87,11 @@ export function absoluteTime(date: Date, timezone: string, now: Date): string {
   return `${p.month} ${p.day}${year} ${p.time}`;
 }
 
+/** `Nov 17 09:00:03` */
+export function absoluteTimeWithSeconds(date: Date, timezone: string, now: Date): string {
+  return `${absoluteTime(date, timezone, now)}:${localParts(date, timezone).seconds}`;
+}
+
 /** Relative near now, absolute beyond a week: `4m ago`, `in 6d`, `Nov 20 09:00`. */
 export function whenTime(date: Date, timezone: string, now: Date): string {
   return Math.abs(date.getTime() - now.getTime()) < RELATIVE_LIMIT_MS ? relativeTime(date, now) : absoluteTime(date, timezone, now);
@@ -96,6 +101,7 @@ export function whenTime(date: Date, timezone: string, now: Date): string {
 export function agendaTime(date: Date, timezone: string, now: Date): string {
   const p = localParts(date, timezone);
   if (p.date === localParts(now, timezone).date) return p.time;
+  // Under 6 days, so a weekday name is never ambiguous with today's.
   if (Math.abs(date.getTime() - now.getTime()) < 6 * DAY) return `${p.weekday} ${p.time}`;
   return absoluteTime(date, timezone, now);
 }

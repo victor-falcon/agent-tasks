@@ -1,3 +1,4 @@
+import { isDecisive, isFailure } from "../run-info.ts";
 import type { RunStatus } from "../schema.ts";
 import type { TaskState } from "../task-info.ts";
 import type { Color, Style } from "./style.ts";
@@ -47,8 +48,6 @@ export function statusLabel(style: Style, status: RunStatus): string {
   return style.paint(mark.color, `${mark.symbol} ${status === "succeeded" ? "ok" : status}`);
 }
 
-const DECISIVE: readonly RunStatus[] = ["succeeded", "failed", "timed_out"];
-
 /**
  * The mark for a task: blocked or running first, then whether its latest
  * decisive occurrence (ok / failed / timed out) failed.
@@ -59,12 +58,8 @@ export function taskMarkKind(state: TaskState, isOnce: boolean, statuses: readon
   if (statuses.includes("blocked")) return "blocked";
   if (statuses.includes("running")) return "running";
   if (state === "paused") return "paused";
-  const decisive = statuses.filter((s) => DECISIVE.includes(s)).at(-1);
-  if (decisive === "failed" || decisive === "timed_out") return "failing";
+  const decisive = statuses.filter(isDecisive).at(-1);
+  if (decisive !== undefined && isFailure(decisive)) return "failing";
   if (isOnce) return "once_pending";
   return "ok";
-}
-
-export function isFailure(status: RunStatus): boolean {
-  return status === "failed" || status === "timed_out";
 }

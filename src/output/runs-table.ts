@@ -1,7 +1,8 @@
+import { attemptDuration, isFailure, runSummary } from "../run-info.ts";
 import type { Run } from "../schema.ts";
 import type { StoredRun } from "../store.ts";
 import type { Style } from "./style.ts";
-import { isFailure, statusLabel } from "./symbols.ts";
+import { statusLabel } from "./symbols.ts";
 import { renderTable, truncate } from "./table.ts";
 import { absoluteTime, formatSpan, timeNear } from "./time.ts";
 
@@ -16,19 +17,6 @@ export interface RunsTableOptions {
   /** Attempts allowed per task id (`retries + 1`), to show `2/2`. */
   maxAttempts?: (taskId: string) => number | undefined;
   indent?: string;
-}
-
-/** How long the latest attempt took (or has been running). */
-export function attemptDuration(run: Run, now: Date): number | null {
-  const last = run.attempts.at(-1);
-  if (!last) return null;
-  const end = last.finished_at ? Date.parse(last.finished_at) : run.status === "running" || run.status === "blocked" ? now.getTime() : null;
-  return end === null ? null : end - Date.parse(last.started_at);
-}
-
-/** The summary of the latest attempt, else the reason (`runner_offline`, `paused`…). */
-export function runSummary(run: Run): string {
-  return run.attempts.at(-1)?.summary ?? run.reason ?? "";
 }
 
 /** `Nov 17 09:00`, or `Nov 17 09:12 (manual)`. */

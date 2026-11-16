@@ -23,7 +23,7 @@ export interface Style {
 
 /** True when the writer is a terminal (`process.stdout.isTTY`); test writers can set `isTTY` too. */
 export function isTerminal(writer: Writer): boolean {
-  return (writer as { isTTY?: boolean }).isTTY === true;
+  return writer.isTTY === true;
 }
 
 export function colorEnabled(writer: Writer, env: Env): boolean {

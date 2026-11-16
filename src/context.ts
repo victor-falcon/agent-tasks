@@ -5,6 +5,8 @@ import { buildPaths, type Env, type Paths, resolveConfigLocation, resolveDataDir
 
 export interface Writer {
   write(text: string): void;
+  /** Set by terminals (`process.stdout.isTTY`); decides whether output is colored. */
+  isTTY?: boolean;
 }
 
 /** Everything a command needs; built once per CLI invocation. */

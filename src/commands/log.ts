@@ -8,7 +8,8 @@ import { slotLabel } from "../output/runs-table.ts";
 import { stdoutStyle, type Style } from "../output/style.ts";
 import { statusLabel } from "../output/symbols.ts";
 import { renderTable } from "../output/table.ts";
-import { absoluteTime, clockTimeWithSeconds, formatSpan, sameDay, timeNear } from "../output/time.ts";
+import { absoluteTimeWithSeconds, clockTimeWithSeconds, formatSpan, sameDay, timeNear } from "../output/time.ts";
+import { isInProgress, neverStarted } from "../run-info.ts";
 import { tildify } from "../paths.ts";
 import { type Attempt, type Run, type RunEvent, TASK_ID_RE } from "../schema.ts";
 import { parseRunRef, runRef, runSlotId } from "../slot.ts";
@@ -55,7 +56,7 @@ function pairs(record: Record<string, unknown>, skip: readonly string[] = []): s
 
 function eventTime(at: string, run: Run, tz: string, now: Date): string {
   const date = new Date(at);
-  return sameDay(date, new Date(run.slot), tz) ? clockTimeWithSeconds(date, tz) : `${absoluteTime(date, tz, now)}:${clockTimeWithSeconds(date, tz).slice(-2)}`;
+  return sameDay(date, new Date(run.slot), tz) ? clockTimeWithSeconds(date, tz) : absoluteTimeWithSeconds(date, tz, now);
 }
 
 function renderEvents(run: Run, tz: string, now: Date): string {
@@ -95,9 +96,9 @@ function renderAttempt(ctx: Context, style: Style, run: Run, attempt: Attempt, l
 }
 
 function renderLog(ctx: Context, run: Run, log: CapturedLog | null): string {
-  if (!log) return run.status === "missed" || run.status === "superseded" || run.status === "cancelled" ? "Log: none (it never started)" : "Log: none (no attempt yet)";
+  if (!log) return neverStarted(run.status) ? "Log: none (it never started)" : "Log: none (no attempt yet)";
   const where = tildify(log.path, ctx.env);
-  if (log.content === null) return run.status === "running" || run.status === "blocked" ? `Log: not captured yet (still in progress): ${where}` : `Log: none captured (${where})`;
+  if (log.content === null) return isInProgress(run.status) ? `Log: not captured yet (still in progress): ${where}` : `Log: none captured (${where})`;
   if (log.content === "") return `Log (attempt ${log.attempt}): empty (${where})`;
   return `Log (attempt ${log.attempt}): ${where}\n\n${log.content.trimEnd()}`;
 }
@@ -132,7 +133,8 @@ of a run ref, shows the task's latest occurrence. Run refs are listed by
 
 Options:
   --attempt <n>  Only attempt n (and its log); by default every attempt and the latest log
-  --raw          Only the captured log, to pipe into less or another agent`,
+  --raw          Only the captured log, to pipe into less or another agent
+                 (with --json, the log content is in the JSON anyway)`,
   run(ctx, args) {
     const { values, positionals } = parseCommandArgs(args, { attempt: { type: "string" }, raw: { type: "boolean" } }, { minPositionals: 1, maxPositionals: 1 });
     const run = findRun(ctx, positionals[0]!);
