@@ -119,6 +119,8 @@ export interface Attempt {
 export interface RunEvent {
   at: string;
   event: string;
+  /** When the runner sent this event to the notifiers; set once so it is never notified twice. */
+  notified?: string;
   [key: string]: unknown;
 }
 

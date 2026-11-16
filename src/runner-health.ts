@@ -1,7 +1,8 @@
 import { closeSync, existsSync, fstatSync, openSync, readSync } from "node:fs";
 import type { Context } from "./context.ts";
-import { parseDuration } from "./duration.ts";
+import { isDuration, parseDuration } from "./duration.ts";
 import type { DataPaths } from "./paths.ts";
+import { pidAlive, readRunnerLock } from "./runner-lock.ts";
 import type { Tick } from "./schema.ts";
 import { displayTimezone } from "./task-info.ts";
 import { formatInZone } from "./time.ts";
@@ -47,8 +48,14 @@ export interface RunnerHealth {
   next_tick: string | null;
 }
 
-/** `runner.every` from the config, else the default (same precedence as `resolveFor`). */
-export function runnerEvery(ctx: Pick<Context, "resolveFor">): string {
+/**
+ * The interval of the live runner (from `state/runner.lock`, which records
+ * `--every`); without one, `runner.every` from the config, else the default
+ * (same precedence as `resolveFor`).
+ */
+export function runnerEvery(ctx: Pick<Context, "resolveFor" | "paths">): string {
+  const lock = readRunnerLock(ctx.paths);
+  if (lock && pidAlive(lock.pid) && isDuration(lock.every)) return lock.every;
   return ctx.resolveFor({ cwd: "/" }).runner_every;
 }
 
