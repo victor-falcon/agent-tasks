@@ -409,17 +409,27 @@ Prove the whole cycle works: a task runs, succeeds, and its session closes.
    env -u HC_TERMINAL_ID hc send <address> "agent-tasks runner"
    ```
 
-   Send it without your own address (`env -u HC_TERMINAL_ID`): you are an
-   agent, so once that terminal has run anything that reported an agent
-   status (an earlier runner, for example), `hc send` delivers your text
-   wrapped as `<hc from="…">…</hc>` and the shell answers with a parse error.
+   Always send it without your own address (`env -u HC_TERMINAL_ID`). You
+   are an agent, and once a terminal has run anything that reported an
+   agent status (an earlier runner, for example) it keeps that mark, so
+   `hc send` from you delivers `<hc from="…">agent-tasks runner</hc>` and
+   the shell answers with a parse error. A brand-new tab hasn't been marked
+   yet, so a plain `hc send` can work the first time and fail on a retry.
 
    `hc wait` doesn't help here: it waits for an agent, and a shell at its
-   prompt never reports one. Instead, check that the runner started: run
-   `agent-tasks runner status` every few seconds until it says a runner is
-   running (it exits with 1 while none is). If it doesn't after about 30
-   seconds, read the tab with `hc read --lines 5 <address>` to see what the
-   shell said.
+   prompt never reports one. Before opening the tab, run
+   `agent-tasks runner status`: if a runner is already running, don't start
+   another. After the send, check that this one started (`status` exits
+   with 1 while no runner is running):
+
+   ```sh
+   for i in $(seq 10); do agent-tasks runner status && break; sleep 3; done
+   ```
+
+   It must say a runner is running in terminal `<address>`. If it doesn't
+   after those 30 seconds, read the tab with `hc read --lines 5 <address>`,
+   fix what the shell complained about and send the command again, or ask
+   the user.
 
 3. Wait: the runner ticks every `runner.every` (5 minutes by default), so
    the task starts within about 7 minutes. Check:
