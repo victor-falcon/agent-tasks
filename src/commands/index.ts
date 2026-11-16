@@ -11,6 +11,8 @@ import resume from "./resume.ts";
 import retry from "./retry.ts";
 import rm from "./rm.ts";
 import run from "./run.ts";
+import runner from "./runner.ts";
+import runnerStatus from "./runner-status.ts";
 import runs from "./runs.ts";
 import sessionClose from "./session-close.ts";
 import sessionRead from "./session-read.ts";
@@ -42,6 +44,8 @@ export const commands: Command[] = [
   retry,
   rm,
   run,
+  runner,
+  runnerStatus,
   runs,
   sessionClose,
   sessionRead,
