@@ -85,15 +85,35 @@ export interface Task {
   schedule_since?: string | null;
 }
 
+/** What a run keeps about the session of an attempt (`attempt.session`), written by the launcher code. */
+export interface SessionRecord {
+  /** The launcher preset name, or `custom`. */
+  launcher: string;
+  handle: string;
+  name: string;
+  pid: number | null;
+  /** When `close` was run, or the session was found gone. */
+  closed_at: string | null;
+  close_error?: string | null;
+  /** Failed `close` attempts; tick stops trying after a few. */
+  close_attempts?: number;
+  /** True when `keep_open` left the session open on purpose. */
+  kept_open?: boolean;
+}
+
 export interface Attempt {
   n: number;
   started_at: string;
   finished_at: string | null;
-  session: Record<string, unknown> | null;
+  session: SessionRecord | null;
   agent: Record<string, unknown> | null;
   status: RunStatus;
   summary: string | null;
   log: string | null;
+  /** Why the attempt ended as it did, e.g. `exited_without_report` or `prompt_not_delivered`. */
+  reason?: string | null;
+  /** The file passed to `finish --output-file`, copied next to the log (relative to the data folder). */
+  output?: string | null;
 }
 
 export interface RunEvent {
@@ -306,7 +326,7 @@ export function validateTask(value: unknown): Task {
 }
 
 const RUN_FIELDS = ["task_id", "slot", "trigger", "status", "reason", "attempts", "events"] as const;
-const ATTEMPT_FIELDS = ["n", "started_at", "finished_at", "session", "agent", "status", "summary", "log"] as const;
+const ATTEMPT_FIELDS = ["n", "started_at", "finished_at", "session", "agent", "status", "summary", "log", "reason", "output"] as const;
 
 function checkObjectOrNull(c: Checker, value: unknown): void {
   if (value !== null && !isObject(value)) c.fail("must be an object or null");
@@ -348,6 +368,8 @@ export function runErrors(value: unknown): string[] {
       checkEnum(a.at("status"), attempt.status ?? null, RUN_STATUSES);
       checkStringOrNull(a.at("summary"), attempt.summary ?? null);
       checkStringOrNull(a.at("log"), attempt.log ?? null);
+      checkStringOrNull(a.at("reason"), attempt.reason ?? null);
+      checkStringOrNull(a.at("output"), attempt.output ?? null);
     });
   }
 

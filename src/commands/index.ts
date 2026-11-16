@@ -2,13 +2,21 @@ import add from "./add.ts";
 import configResolve from "./config-resolve.ts";
 import due from "./due.ts";
 import edit from "./edit.ts";
+import finish from "./finish.ts";
 import help from "./help.ts";
 import list from "./list.ts";
 import pause from "./pause.ts";
 import resume from "./resume.ts";
+import retry from "./retry.ts";
 import rm from "./rm.ts";
+import run from "./run.ts";
 import runs from "./runs.ts";
+import sessionClose from "./session-close.ts";
+import sessionRead from "./session-read.ts";
+import sessionStatus from "./session-status.ts";
 import show from "./show.ts";
+import task from "./task.ts";
+import tick from "./tick.ts";
 import type { Command } from "./types.ts";
 import version from "./version.ts";
 
@@ -23,13 +31,21 @@ export const commands: Command[] = [
   configResolve,
   due,
   edit,
+  finish,
   help,
   list,
   pause,
   resume,
+  retry,
   rm,
+  run,
   runs,
+  sessionClose,
+  sessionRead,
+  sessionStatus,
   show,
+  task,
+  tick,
   version,
 ];
 

@@ -1,0 +1,8 @@
+{
+  "description": "Child process of the runner with its output in the run's log. No agent state: only whether it is still alive. For tests and machines without a multiplexer.",
+  "launch": ["{{agent_argv}}"],
+  "background": true,
+  "close": ["kill", "{{handle}}"],
+  "status": ["kill", "-0", "{{handle}}"],
+  "read": ["tail", "-n", "200", "{{log}}"]
+}
