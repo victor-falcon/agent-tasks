@@ -127,12 +127,46 @@ describe("init", () => {
     expect(r.code).toBe(0);
     const config = JSON.parse(readFileSync(home.configFile, "utf8"));
     expect(config.launcher).toEqual({ preset: "process" });
+    // No terminal with the process preset: the agent runs in print mode, prompt last.
+    expect(config.agent.command).toBe("claude");
+    expect(config.agent.args.at(-1)).toBe("--print");
+    expect(r.stdout).toContain("Launcher: process (no Herdr, Rex or tmux found)");
     expect(readFileSync(join(home.configDir, "instructions", "subagent.md"), "utf8")).toContain("<!--");
     for (const f of ["supervisor.md", "work.md"]) expect(existsSync(join(home.configDir, "instructions", f))).toBe(true);
     expect(r.stdout).toContain("Next steps:");
     // The fresh config passes its own check (the agent command may be missing: only a warning).
     const check = await cli("config", "check", "--json");
     expect(check.json().checks.filter((c: any) => c.status === "error")).toEqual([]);
+  });
+
+  for (const [variable, preset] of [["HC_TERMINAL_ID", "herdr"], ["REX_SESSION", "rex"], ["TMUX", "tmux"]] as const) {
+    test(`picks the ${preset} preset when $${variable} is set, with the interactive agent`, async () => {
+      home.env[variable] = "x";
+      for (const program of ["hc", "rex", "jq", "tmux"]) stub(program);
+      const r = await cli("init", "--json");
+      expect(r.code).toBe(0);
+      expect(r.json().launcher).toEqual({ preset, reason: `found $${variable}` });
+      const config = JSON.parse(readFileSync(home.configFile, "utf8"));
+      expect(config.launcher).toEqual({ preset });
+      expect(config.agent).toEqual({ command: "claude", args: [], shell: false });
+      const check = await cli("config", "check", "--json");
+      expect(check.json().checks.filter((c: any) => c.status === "error")).toEqual([]);
+    });
+  }
+
+  test("Herdr wins over tmux, as in RECIPE.md", async () => {
+    Object.assign(home.env, { TMUX: "x", HC_TERMINAL_ID: "t1" });
+    expect((await cli("init", "--json")).json().launcher.preset).toBe("herdr");
+  });
+
+  test("--launcher overrides the detection; an unknown preset is a usage error", async () => {
+    home.env.HC_TERMINAL_ID = "t1";
+    const r = await cli("init", "--launcher", "process", "--json");
+    expect(r.json().launcher).toEqual({ preset: "process", reason: "--launcher" });
+    expect(JSON.parse(readFileSync(home.configFile, "utf8")).launcher).toEqual({ preset: "process" });
+    const bad = await cli("init", "--launcher", "screen");
+    expect(bad.code).toBe(2);
+    expect(bad.stderr).toContain("--launcher must be one of herdr, rex, tmux, process");
   });
 
   test("never overwrites existing files", async () => {
@@ -142,6 +176,7 @@ describe("init", () => {
     const r = await cli("init", "--json");
     expect(r.code).toBe(0);
     expect(r.json().files.map((f: any) => f.action)).toEqual(["kept", "kept"]);
+    expect(r.json().launcher).toBeNull();
     expect(JSON.parse(readFileSync(home.configFile, "utf8"))).toEqual({ timezone: "UTC" });
     expect(readFileSync(join(home.configDir, "instructions", "subagent.md"), "utf8")).toBe("my rules");
     expect(existsSync(join(home.configDir, "instructions", "work.md"))).toBe(false);

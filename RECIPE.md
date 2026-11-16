@@ -70,6 +70,10 @@ agent-tasks init
 - `agent-tasks init` creates `~/.config/agent-tasks/config.json` and
   `instructions/*.md`. It never overwrites a file. If the config already
   exists, keep it and edit it in the next steps.
+- `init` picks the launcher from the terminal it runs in, as in step 3, and
+  prints which one and why (`Launcher: herdr (found $HC_TERMINAL_ID)`). Run
+  it in a terminal of the multiplexer where the runner will live, or pass
+  `--launcher herdr|rex|tmux|process`.
 - If `agent-tasks` is not found after install, `~/.local/bin` is not on
   `PATH` (step 1). Until the user fixes it, call it as
   `~/.local/bin/agent-tasks`.
@@ -92,14 +96,16 @@ echo "HC_TERMINAL_ID=$HC_TERMINAL_ID REX_SESSION=$REX_SESSION TMUX=$TMUX"
 | `$HC_TERMINAL_ID` set | `{ "preset": "herdr" }` | Each run in its own Herdr tab, nested under the runner. Needs `hc` on `PATH`. |
 | `$REX_SESSION` set | `{ "preset": "rex" }` | Each run in its own Rex window. **Untested against a real Rex**: tell the user, and test each command of `presets/rex.json` by hand as described in 3a. Needs `rex` and `jq` on `PATH`. |
 | `$TMUX` set | `{ "preset": "tmux" }` | Each run in its own tmux window. tmux has no agent state, so a blocked agent is not detected (only the timeout catches it). Needs tmux 3.0+. |
-| none of them | ask the user | Ask which terminal or multiplexer they use. If they have none, or for a first try, use `{ "preset": "process" }`: the agent runs as a child process of the runner with its output in the run's log. It has no terminal, so the agent command must run without one: plain `claude` (the `init` default) will not work there; see step 4. |
+| none of them | ask the user | Ask which terminal or multiplexer they use. If they have none, or for a first try, use `{ "preset": "process" }`: the agent runs as a child process of the runner with its output in the run's log. It has no terminal, so the agent command must run without one; `init` writes `claude` in print mode for it (see step 4). |
 | something else (Orca, WezTerm, kitty, a custom tool) | a custom launcher | See 3a. |
 
 Your own environment may not be the user's: if you are not running in the
 terminal where the runner will live, ask the user instead of trusting these
 variables.
 
-Set it in the config:
+`init` (step 2) already wrote the preset this table gives for the terminal
+it ran in. Check it, and change it if the answer is different. Set it in the
+config:
 
 ```json
 "launcher": { "preset": "herdr" }
@@ -224,10 +230,22 @@ $SHELL -ic 'type <command>'
 
 - **The `process` preset needs an agent that runs without a terminal.**
   Interactive TUIs can't run there. Use the agent's non-interactive mode if it
-  has one and the user agrees (for Claude Code, print mode: `"args":
-  ["-p"]` plus whatever permission flags the user accepts; this combination
-  is not tested by agent-tasks, so rely on the smoke test), or an
-  interactive-shell preset.
+  has one and the user agrees, or an interactive-shell preset. For Claude
+  Code, `init` writes print mode, allowed to edit files and run `agent-tasks`
+  commands without asking:
+
+  ```json
+  "agent": {
+    "command": "claude",
+    "args": ["--permission-mode", "acceptEdits", "--allowedTools", "Bash(agent-tasks:*)", "--print"]
+  }
+  ```
+
+  Keep `--print` last: `--allowedTools` takes every argument after it up to
+  the next flag, and the prompt comes right after `args`. Any other command
+  the task needs (`git`, `bun`…) must be allowed too (`--allowedTools
+  "Bash(agent-tasks:*)" "Bash(git:*)"`), or the agent can't run it. With an
+  interactive-shell preset, use the plain command (`"args": []`).
 
 **Different command per folder.** If the user uses different commands,
 accounts or flags per project, add `profiles`. The first profile whose `match`

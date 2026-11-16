@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { join } from "node:path";
 import type { Run } from "../src/schema.ts";
 import { appendTick } from "../src/store.ts";
-import { at, DEMO_REF, type ExecHome, execTask, FAKE_AGENT, makeExecHome, pidAlive, REPO, T0, waitFor } from "./exec-helpers.ts";
+import { at, DEMO_REF, type ExecHome, execTask, FAKE_AGENT, makeExecHome, pidAlive, REPO, settled, T0, waitFor } from "./exec-helpers.ts";
 import { makeTask } from "./helpers.ts";
 
 // Full cycles with the `process` preset and a fake agent that calls
@@ -18,10 +18,8 @@ beforeEach(() => {
 });
 afterEach(() => home.cleanup());
 
-const finished = (ref = DEMO_REF, n = 1) => () => {
-  const run = home.run(ref);
-  return run.attempts[n - 1]?.finished_at ? run : null;
-};
+// `finish` fully done: the result recorded and the session kept open or closed.
+const finished = (ref = DEMO_REF, n = 1) => settled(home, ref, n);
 const pidOf = (run: Run, n = 1) => Number((run.attempts[n - 1]!.session as { pid: number }).pid);
 
 describe("process preset: launch → finish", () => {
@@ -60,14 +58,38 @@ describe("process preset: launch → finish", () => {
     execTask(home, "succeed");
     await home.tick(1);
     await waitFor(finished(), "finish");
-    // The first finish closes the session after recording the result (claim `closed_at`, run close, then log
-    // the `closed` event): wait for the end of that too.
-    await waitFor(() => home.run(DEMO_REF).events.some((e) => e.event === "closed"), "close");
     const before = home.run(DEMO_REF);
     const again = await home.cli("finish", DEMO_REF, "--status", "failed", "--summary", "late", "--json");
     expect(again.code).toBe(0);
     expect(again.json()).toMatchObject({ already_finished: true, status: "succeeded" });
     expect(home.run(DEMO_REF)).toEqual(before);
+  });
+
+  test("a close that kills the finish process itself still records the session as closed", async () => {
+    // Like `hc kill` in Herdr: closing the agent's terminal ends the `finish` running in it.
+    home.writeConfig({ agent: { command: "bun", args: [FAKE_AGENT] }, launcher: { preset: "process", close: "kill -KILL $PPID" } });
+    execTask(home, "succeed");
+    await home.tick(1);
+    const run = await waitFor(finished(), "finish");
+    expect(run.status).toBe("succeeded");
+    expect(run.attempts[0]!.session).toMatchObject({ kept_open: false, closed_at: expect.any(String), close_error: null });
+    expect(run.events.filter((e) => e.event === "closed")).toEqual([expect.objectContaining({ attempt: 1 })]);
+    // The next tick neither closes it again nor reports it as gone.
+    expect((await home.tick(6)).events.map((e) => e.type)).toEqual(["succeeded"]);
+  });
+
+  test("a failed close takes the closed event back, so a later tick retries", async () => {
+    // `status` says the session is still there, so the failed close counts.
+    home.writeConfig({ agent: { command: "bun", args: [FAKE_AGENT] }, launcher: { preset: "process", close: "exit 3", status: "true" } });
+    execTask(home, "succeed");
+    await home.tick(1);
+    const run = await waitFor(() => {
+      const r = home.run(DEMO_REF);
+      return r.events.some((e) => e.event === "close_failed") ? r : null;
+    }, "the failed close");
+    expect(run.attempts[0]!.session).toMatchObject({ closed_at: null, close_attempts: 1 });
+    expect(run.events.map((e) => e.event)).not.toContain("closed");
+    expect(run.events.filter((e) => e.event === "close_failed")).toHaveLength(1);
   });
 
   test("a finish after tick ended the attempt keeps the late report without changing the status", async () => {

@@ -345,15 +345,23 @@ export type SettleResult =
 
 /**
  * Closes the latest attempt's session according to `keep_open`. The session
- * is claimed under the run's lock (`closed_at` is set) before `close` runs,
- * so two processes never close it twice, and because closing may kill the
- * very process that called it (an agent calling `finish` from its terminal).
- * A failed close clears `closed_at` again so a later tick retries it.
+ * is claimed and recorded as closed (`closed_at` and the `closed` event)
+ * under the run's lock before `close` runs, so two processes never close it
+ * twice, and because closing may kill the very process that called it (an
+ * agent calling `finish` from its terminal: `hc kill` ends the whole
+ * terminal, `finish` included). A failed close takes the `closed` event back
+ * and clears `closed_at`, so a later tick retries it.
  */
 export function settleSession(ctx: Context, task: Task, ref: string, opts: SettleOptions): SettleResult {
   const resolution = ctx.resolveFor(task);
   const at = stamp(ctx, resolution.timezone);
   let decision = "none" as "none" | "kept" | "close";
+  let hasClose = true;
+  try {
+    hasClose = Boolean(resolveLauncher(resolution.launcher).close);
+  } catch {
+    // Reported by sessionFor below, which takes the claim back.
+  }
   const run = updateRun(ctx, ref, (r) => {
     const attempt = lastAttempt(r);
     const s = attempt?.session;
@@ -367,6 +375,8 @@ export function settleSession(ctx: Context, task: Task, ref: string, opts: Settl
     }
     s.closed_at = at;
     s.kept_open = false;
+    s.close_error = null;
+    r.events.push({ at, event: "closed", attempt: attempt.n, ...(hasClose ? {} : { note: "the launcher has no close command" }) });
     decision = "close";
   });
   if (decision !== "close") return { action: decision };
@@ -375,6 +385,8 @@ export function settleSession(ctx: Context, task: Task, ref: string, opts: Settl
   const fail = (error: string): SettleResult => {
     updateRun(ctx, ref, (r) => {
       const s = r.attempts[n - 1]!.session!;
+      const claim = r.events.findLastIndex((e) => e.event === "closed" && e.attempt === n && e.at === at);
+      if (claim >= 0) r.events.splice(claim, 1);
       s.closed_at = null;
       s.close_error = error;
       s.close_attempts = (s.close_attempts ?? 0) + 1;
@@ -401,11 +413,6 @@ export function settleSession(ctx: Context, task: Task, ref: string, opts: Settl
     }
     if (!gone) return fail(result.error ?? "close failed");
   }
-  updateRun(ctx, ref, (r) => {
-    const s = r.attempts[n - 1]!.session!;
-    s.close_error = null;
-    r.events.push({ at, event: "closed", attempt: n, ...(result ? {} : { note: "the launcher has no close command" }) });
-  });
   return { action: "closed" };
 }
 
