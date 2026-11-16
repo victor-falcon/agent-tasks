@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { configErrors, loadConfig, profileMatches, resolveFor, type UserConfig } from "../src/config.ts";
+import { configErrors, formatSource, loadConfig, profileMatches, resolveFor, type UserConfig } from "../src/config.ts";
 import { ConfigError } from "../src/errors.ts";
 import { resolveConfigLocation, resolveDataDir } from "../src/paths.ts";
 import { systemTimezone } from "../src/time.ts";
@@ -47,7 +47,8 @@ describe("loadConfig", () => {
     expect(r.max_delay).toBe("15m");
     expect(r.timezone).toBe(systemTimezone());
     expect(r.profile).toBeNull();
-    expect(new Set(Object.values(r.sources).map((s) => s.split(" ")[0]))).toEqual(new Set(["default"]));
+    expect(new Set(Object.values(r.sources).map((s) => s.layer))).toEqual(new Set(["default"]));
+    expect(formatSource(r.sources.timezone)).toBe("default (system)");
   });
 
   test("invalid JSON is a clear error", () => {
@@ -109,16 +110,16 @@ describe("resolveFor precedence: task > first matching profile > config root > d
     const r = resolveFor(makeTask({ cwd: "~/Projects/work/api" }), load(config));
     expect(r.profile).toBe("~/Projects/work/**");
     expect(r.agent).toEqual({ command: "clc", args: [], shell: true });
-    expect(r.sources.agent).toBe("profile ~/Projects/work/**");
+    expect(formatSource(r.sources.agent)).toBe("profile ~/Projects/work/**");
     expect(r.env).toEqual({ SOME_FLAG: "1" });
     expect(r.timeout).toBe("2h");
-    expect(r.sources.timeout).toBe("profile ~/Projects/work/**");
+    expect(formatSource(r.sources.timeout)).toBe("profile ~/Projects/work/**");
     // Not set by the first profile: falls through to the root, not to the second profile.
     expect(r.skill).toBe("run-agent-task");
-    expect(r.sources.skill).toBe("config");
+    expect(formatSource(r.sources.skill)).toBe("config");
     expect(r.launcher).toEqual({ preset: "herdr" });
     expect(r.instructions).toEqual([join(home.configDir, "instructions", "subagent.md"), join(home.configDir, "instructions", "work.md")]);
-    expect(r.sources.instructions).toBe("config + profile ~/Projects/work/**");
+    expect(formatSource(r.sources.instructions)).toBe("profile ~/Projects/work/** (after config)");
   });
 
   test("second profile applies when the first does not match", () => {
@@ -128,7 +129,7 @@ describe("resolveFor precedence: task > first matching profile > config root > d
     expect(r.skill).toBe("my-skill");
     expect(r.launcher).toEqual({ preset: "tmux" });
     expect(r.timeout).toBe("30m");
-    expect(r.sources.timeout).toBe("config defaults");
+    expect(formatSource(r.sources.timeout)).toBe("config defaults");
     expect(r.env).toEqual({});
   });
 
@@ -136,12 +137,12 @@ describe("resolveFor precedence: task > first matching profile > config root > d
     const r = resolveFor(makeTask({ cwd: "/srv/app" }), load(config));
     expect(r.profile).toBeNull();
     expect(r.agent).toEqual({ command: "claude", args: ["--verbose"], shell: false });
-    expect(r.sources.agent).toBe("config");
+    expect(formatSource(r.sources.agent)).toBe("config");
     expect(r.catch_up).toBe("all");
     expect(r.keep_open).toBe("never");
     expect(r.runner_every).toBe("10m");
     expect(r.max_delay).toBe("30m");
-    expect(r.sources.max_delay).toMatch(/^default/);
+    expect(formatSource(r.sources.max_delay)).toBe("default (3 × runner.every, at least 15m)");
     expect(r.timezone).toBe("Europe/Madrid");
   });
 
@@ -165,7 +166,7 @@ describe("resolveFor precedence: task > first matching profile > config root > d
     expect(r.retries).toBe(2);
     expect(r.timezone).toBe("America/New_York");
     for (const key of ["agent", "timeout", "catch_up", "keep_open", "max_delay", "retries", "timezone"] as const) {
-      expect(r.sources[key]).toBe("task");
+      expect(formatSource(r.sources[key])).toBe("task");
     }
   });
 });

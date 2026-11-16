@@ -68,24 +68,24 @@ export async function main(argv: string[], opts: MainOptions = {}): Promise<numb
     const flags = extractGlobalFlags(argv);
     json = flags.json;
     const now = flags.now === undefined ? new Date() : parseNow(flags.now);
-    const ctx = createContext({ now, json, env: opts.env ?? process.env, cwd: opts.cwd ?? process.cwd(), stdout, stderr });
+    const ctx = createContext({ now, json, env: opts.env ?? process.env, cwd: opts.cwd ?? process.cwd(), stdout, stderr, commands });
 
     const [first, second, ...more] = flags.rest;
     if (first === undefined) {
-      printHelp(ctx, commands, []);
+      printHelp(ctx, []);
       return EXIT_OK;
     }
 
     const pair = second !== undefined ? findCommand(`${first} ${second}`) : undefined;
     const cmd = pair ?? findCommand(first);
     const args = pair ? more : flags.rest.slice(1);
-    hint = `Run "agent-tasks help${cmd ? ` ${cmd.name}` : ""}" for usage.`;
+    hint = `Run "agent-tasks help${cmd && cmd.name !== "help" ? ` ${cmd.name}` : ""}" for usage.`;
 
     if (!cmd) {
       const subs = subcommandsOf(first);
       if (subs.length === 0) throw new UsageError(`unknown command "${first}"`);
       if (flags.help) {
-        printHelp(ctx, commands, [first]);
+        printHelp(ctx, [first]);
         return EXIT_OK;
       }
       hint = `Run "agent-tasks help ${first}" for its subcommands.`;
@@ -93,7 +93,7 @@ export async function main(argv: string[], opts: MainOptions = {}): Promise<numb
       throw new UsageError(second === undefined ? `"${first}" needs a subcommand: ${names}` : `unknown command "${first} ${second}" (subcommands: ${names})`);
     }
     if (flags.help) {
-      printHelp(ctx, commands, cmd.name.split(" "));
+      printHelp(ctx, cmd.name.split(" "));
       return EXIT_OK;
     }
     return (await cmd.run(ctx, args)) ?? EXIT_OK;

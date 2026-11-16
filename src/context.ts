@@ -1,3 +1,4 @@
+import type { Command } from "./commands/types.ts";
 import { type LoadedConfig, loadConfig, type Resolution, type ResolvableTask, resolveFor } from "./config.ts";
 import { buildPaths, type Env, type Paths, resolveConfigLocation, resolveDataDir } from "./paths.ts";
 
@@ -14,6 +15,8 @@ export interface Context {
   cwd: string;
   stdout: Writer;
   stderr: Writer;
+  /** The command registry (for `help`). */
+  commands: readonly Command[];
   /** Resolved paths. Loads the config on first use (data_dir may come from it). */
   readonly paths: Paths;
   /** The user config. Loaded on first use, so `help` works even with a broken config. */
@@ -22,14 +25,7 @@ export interface Context {
   resolveFor(task: ResolvableTask): Resolution;
 }
 
-export interface ContextOptions {
-  now: Date;
-  json: boolean;
-  env: Env;
-  cwd: string;
-  stdout: Writer;
-  stderr: Writer;
-}
+export type ContextOptions = Pick<Context, "now" | "json" | "env" | "cwd" | "stdout" | "stderr" | "commands">;
 
 export function createContext(opts: ContextOptions): Context {
   const configLocation = resolveConfigLocation(opts.env);

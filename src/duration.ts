@@ -7,6 +7,9 @@ const UNIT_MS: Record<string, number> = {
 
 const DURATION_RE = /^(?:\d+[smhd])+$/;
 
+/** Longest accepted duration. */
+const MAX_DURATION_MS = 366 * UNIT_MS.d!;
+
 /** Parses durations such as `15m`, `2h`, `1d` or `1h30m` into milliseconds. */
 export function parseDuration(input: string): number {
   const text = input.trim();
@@ -18,6 +21,7 @@ export function parseDuration(input: string): number {
     total += Number(amount) * UNIT_MS[unit!]!;
   }
   if (total <= 0) throw new Error(`invalid duration "${input}": must be greater than zero`);
+  if (total > MAX_DURATION_MS) throw new Error(`invalid duration "${input}": must be at most 366d`);
   return total;
 }
 
@@ -45,4 +49,9 @@ export function formatDuration(ms: number): string {
     }
   }
   return out || "0s";
+}
+
+/** Default `max_delay`: 3 × the runner interval, never less than 15 minutes. */
+export function defaultMaxDelay(runnerEveryMs: number): number {
+  return Math.max(3 * runnerEveryMs, 15 * UNIT_MS.m!);
 }

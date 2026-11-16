@@ -9,20 +9,16 @@ import {
   latestRuns,
   listRuns,
   listTasks,
-  manualSlotId,
-  parseRunRef,
   readRun,
   readTask,
   readTicks,
   recordedSlots,
   runPath,
-  runRef,
-  slotId,
-  slotIdToDate,
   writeJsonAtomic,
   writeRun,
   writeTask,
 } from "../src/store.ts";
+import { manualSlotId, parseRunRef, runRef, runSlotId, slotId, slotIdToDate } from "../src/slot.ts";
 import { makeTask, makeTempHome, type TempHome } from "./helpers.ts";
 
 let home: TempHome;
@@ -51,6 +47,8 @@ describe("slot ids and run refs", () => {
     expect(manualSlotId(new Date("2026-11-17T10:15:30.250Z"))).toBe("manual-20261117T101530Z");
     expect(slotIdToDate("20261117T080000Z").toISOString()).toBe("2026-11-17T08:00:00.000Z");
     expect(slotIdToDate("manual-20261117T101530Z").toISOString()).toBe("2026-11-17T10:15:30.000Z");
+    expect(runSlotId({ slot: "2026-11-17T09:00:00+01:00", trigger: "schedule" })).toBe("20261117T080000Z");
+    expect(runSlotId({ slot: "2026-11-17T09:00:00+01:00", trigger: "manual" })).toBe("manual-20261117T080000Z");
   });
 
   test("run refs round-trip and reject garbage", () => {
@@ -102,13 +100,15 @@ describe("tasks", () => {
     expect(errors.find((e) => e.file.endsWith("invalid.json"))!.message).toMatch(/enabled: must be a boolean/);
     expect(() => readTask(home.paths, "broken")).toThrow(CorruptFileError);
     expect(() => readTask(home.paths, "missing")).toThrow(NotFoundError);
+    expect(() => readTask(home.paths, "../secrets")).toThrow(UsageError);
+    expect(() => readTask(home.paths, "Weekly-Report")).toThrow(/invalid task id/);
   });
 });
 
 describe("runs", () => {
   test("claim is exclusive", () => {
-    expect(claimRun(home.paths, "20261117T080000Z", makeRun())).toBe(true);
-    expect(claimRun(home.paths, "20261117T080000Z", makeRun({ status: "failed" }))).toBe(false);
+    expect(claimRun(home.paths, makeRun())).toBe(true);
+    expect(claimRun(home.paths, makeRun({ status: "failed" }))).toBe(false);
     expect(readRun(home.paths, "weekly-report", "20261117T080000Z").status).toBe("running");
     expect(readdirSync(join(home.paths.runsDir, "weekly-report"))).toEqual(["20261117T080000Z.json"]);
   });
@@ -116,7 +116,7 @@ describe("runs", () => {
   test("concurrent claims from separate processes: exactly one wins", async () => {
     const script = join(import.meta.dir, "fixtures", "claim.ts");
     const procs = Array.from({ length: 8 }, (_, i) =>
-      Bun.spawn(["bun", script, home.dataDir, "20261117T080000Z", `p${i}`], { stdout: "pipe", stderr: "inherit" }),
+      Bun.spawn(["bun", script, home.dataDir, `p${i}`], { stdout: "pipe", stderr: "inherit" }),
     );
     const results = await Promise.all(procs.map(async (p) => {
       await p.exited;
@@ -130,10 +130,10 @@ describe("runs", () => {
   });
 
   test("list, latest and recorded slots", () => {
-    claimRun(home.paths, "20261124T080000Z", makeRun({ slot: "2026-11-24T09:00:00+01:00" }));
-    claimRun(home.paths, "20261117T080000Z", makeRun());
-    claimRun(home.paths, "manual-20261120T100000Z", makeRun({ trigger: "manual", slot: "2026-11-20T10:00:00Z" }));
-    writeRun(home.paths, "20261117T080000Z", makeRun({ status: "succeeded" }));
+    claimRun(home.paths, makeRun({ slot: "2026-11-24T09:00:00+01:00" }));
+    claimRun(home.paths, makeRun());
+    claimRun(home.paths, makeRun({ trigger: "manual", slot: "2026-11-20T10:00:00Z" }));
+    writeRun(home.paths, makeRun({ status: "succeeded" }));
 
     const all = listRuns(home.paths, "weekly-report");
     expect(all.items.map((r) => r.slot)).toEqual(["20261117T080000Z", "manual-20261120T100000Z", "20261124T080000Z"]);
@@ -154,6 +154,14 @@ describe("runs", () => {
     expect(errors[0]).toBeInstanceOf(CorruptFileError);
     expect(recordedSlots(home.paths, "weekly-report").has("20261117T080000Z")).toBe(true);
     expect(() => readRun(home.paths, "weekly-report", "20261117T080000Z")).toThrow(CorruptFileError);
+  });
+
+  test("a run whose content does not match its file name is reported", () => {
+    const file = runPath(home.paths, "weekly-report", "20261124T080000Z");
+    mkdirSync(join(home.paths.runsDir, "weekly-report"), { recursive: true });
+    writeFileSync(file, JSON.stringify(makeRun()));
+    expect(() => readRun(home.paths, "weekly-report", "20261124T080000Z")).toThrow(/does not match the file name/);
+    expect(listRuns(home.paths, "weekly-report").errors).toHaveLength(1);
   });
 });
 

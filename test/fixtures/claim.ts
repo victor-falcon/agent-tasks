@@ -3,8 +3,8 @@
 import { dataPaths } from "../../src/paths.ts";
 import { claimRun } from "../../src/store.ts";
 
-const [dataDir, slot, id] = process.argv.slice(2) as [string, string, string];
-const claimed = claimRun(dataPaths(dataDir), slot, {
+const [dataDir, id] = process.argv.slice(2) as [string, string];
+const claimed = claimRun(dataPaths(dataDir), {
   task_id: "weekly-report",
   slot: "2026-11-17T09:00:00+01:00",
   trigger: "schedule",

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { formatDuration, parseDuration } from "../src/duration.ts";
-import { defaultMaxDelay, isTaskFinished, nextRunTimes, type PlanInput, planSlots, slotsInWindow } from "../src/schedule.ts";
+import { defaultMaxDelay, formatDuration, parseDuration } from "../src/duration.ts";
+import { isTaskFinished, nextRunTimes, type PlanInput, planSlots, slotsInWindow } from "../src/schedule.ts";
 import type { CatchUp, Schedule } from "../src/schema.ts";
 import { formatInZone } from "../src/time.ts";
 import { makeTask } from "./helpers.ts";
@@ -105,7 +105,7 @@ describe("planSlots", () => {
   const every15 = makeTask({ schedule: { type: "cron", cron: "*/15 * * * *", timezone: "UTC" }, created_at: "2026-11-17T00:00:00Z" });
   const settings = (catch_up: CatchUp, max_delay = "15m") => ({ catch_up, max_delay, runner_every: "5m", timezone: "UTC" });
   const plan = (overrides: Partial<PlanInput>) =>
-    planSlots({ task: every15, now: d("2026-11-17T10:07:00Z"), recorded: new Set(), ticks: [], settings: settings("latest"), ...overrides });
+    planSlots({ task: every15, now: d("2026-11-17T10:07:00Z"), recorded: new Set(), ticks: [], settings: settings("latest"), finished: false, ...overrides });
 
   test("runner offline for an hour: old slots missed (runner_offline), latest launched, in-margin ones superseded", () => {
     const recorded = new Set(["20261117T090000Z"]);
@@ -166,10 +166,16 @@ describe("planSlots", () => {
 
   test("lookback is capped at 30 days", () => {
     const daily = makeTask({ schedule: { type: "cron", cron: "0 9 * * *", timezone: "UTC" }, created_at: "2026-01-01T00:00:00Z" });
-    const p = planSlots({ task: daily, now: d("2026-11-17T09:05:00Z"), recorded: new Set(), ticks: [], settings: settings("latest") });
+    const p = planSlots({ task: daily, now: d("2026-11-17T09:05:00Z"), recorded: new Set(), ticks: [], settings: settings("latest"), finished: false });
     expect(p.missed).toHaveLength(29);
     expect(p.missed[0]!.at.toISOString()).toBe("2026-10-19T09:00:00.000Z");
     expect(iso(p.candidates)).toEqual(["2026-11-17T09:00:00.000Z"]);
+  });
+
+  test("since: slots of a schedule changed after creation are not reported", () => {
+    const p = plan({ task: { ...every15, created_at: "2026-11-17T09:00:00Z" }, since: d("2026-11-17T09:50:00Z") });
+    expect(p.missed).toEqual([]);
+    expect(iso(p.candidates)).toEqual(["2026-11-17T10:00:00.000Z"]);
   });
 
   test("starts_at and until", () => {
@@ -177,19 +183,23 @@ describe("planSlots", () => {
       schedule: { type: "cron", cron: "0 * * * *", timezone: "UTC", starts_at: "2026-11-17T08:00:00Z", until: "2026-11-17T09:00:00Z" },
       created_at: "2026-11-16T00:00:00Z",
     });
-    const before = planSlots({ task, now: d("2026-11-17T07:30:00Z"), recorded: new Set(), ticks: [], settings: settings("all", "2h") });
+    const before = planSlots({ task, now: d("2026-11-17T07:30:00Z"), recorded: new Set(), ticks: [], settings: settings("all", "2h"), finished: false });
     expect(before.candidates).toEqual([]);
-    const after = planSlots({ task, now: d("2026-11-17T10:30:00Z"), recorded: new Set(), ticks: [], settings: settings("all", "2h") });
+    const after = planSlots({ task, now: d("2026-11-17T10:30:00Z"), recorded: new Set(), ticks: [], settings: settings("all", "2h"), finished: false });
     expect(iso(after.candidates)).toEqual(["2026-11-17T09:00:00.000Z"]);
     expect(iso(after.missed)).toEqual(["2026-11-17T08:00:00.000Z"]);
   });
 
   test("once: launched when due, missed when late, nothing more after a final state", () => {
     const task = makeTask({ schedule: { type: "once", at: "2026-11-20T09:00:00+01:00" }, created_at: "2026-11-17T00:00:00Z" });
-    const base = { task, recorded: new Set<string>(), ticks: [], settings: settings("latest") };
+    const base = { task, recorded: new Set<string>(), ticks: [], settings: settings("latest"), finished: false };
     expect(planSlots({ ...base, now: d("2026-11-20T07:59:00Z") }).candidates).toEqual([]);
     expect(iso(planSlots({ ...base, now: d("2026-11-20T08:05:00Z") }).candidates)).toEqual(["2026-11-20T08:00:00.000Z"]);
     expect(iso(planSlots({ ...base, now: d("2026-11-20T09:00:00Z") }).missed)).toEqual(["2026-11-20T08:00:00.000Z"]);
+
+    // An `at` slightly before the task was created is still launched, not dropped.
+    const late = { ...task, created_at: "2026-11-20T08:01:00Z" };
+    expect(iso(planSlots({ ...base, task: late, now: d("2026-11-20T08:01:00Z") }).candidates)).toEqual(["2026-11-20T08:00:00.000Z"]);
 
     expect(isTaskFinished(task, [{ trigger: "schedule", status: "running" }])).toBe(false);
     expect(isTaskFinished(task, [{ trigger: "manual", status: "succeeded" }])).toBe(false);

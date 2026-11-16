@@ -61,6 +61,9 @@ describe("exit codes", () => {
     const r = await runCli(["frobnicate"], home);
     expect(r.code).toBe(2);
     expect(r.stderr).toContain('unknown command "frobnicate"');
+    const h = await runCli(["help", "frobnicate"], home);
+    expect(h.code).toBe(2);
+    expect(h.stderr).toContain('Run "agent-tasks help" for usage.');
   });
 
   test("group without subcommand → 2, with --help → 0", async () => {
@@ -112,7 +115,7 @@ describe("config resolve", () => {
     const out = r.json();
     expect(out.profile).toBe("~/Projects/work/**");
     expect(out.values.agent).toEqual({ command: "clc", args: [], shell: true });
-    expect(out.sources).toMatchObject({ agent: "profile ~/Projects/work/**", launcher: "config", timeout: "task", skill: "default" });
+    expect(out.sources).toMatchObject({ agent: { layer: "profile", detail: "~/Projects/work/**" }, launcher: { layer: "config" }, timeout: { layer: "task" }, skill: { layer: "default" } });
 
     const text = await runCli(["config", "resolve", "weekly-report"], home);
     expect(text.stdout).toContain("Profile: ~/Projects/work/**");

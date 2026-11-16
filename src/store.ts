@@ -1,54 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { CorruptFileError, NotFoundError, UsageError } from "./errors.ts";
 import type { DataPaths } from "./paths.ts";
 import { type Run, runErrors, type Task, TASK_ID_RE, taskErrors, type Tick } from "./schema.ts";
-
-// ---------------------------------------------------------------------------
-// Slot ids and run refs
-// ---------------------------------------------------------------------------
-
-const SLOT_ID_RE = /^(manual-)?(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/;
-
-/** File-safe slot id in UTC: `20261117T080000Z`. Sub-second precision is dropped. */
-export function slotId(date: Date): string {
-  return date.toISOString().replace(/\.\d{3}Z$/, "Z").replace(/[-:]/g, "");
-}
-
-/** Slot id of a manual run: `manual-20261117T080000Z`. */
-export function manualSlotId(date: Date): string {
-  return `manual-${slotId(date)}`;
-}
-
-export function isSlotId(id: string): boolean {
-  return SLOT_ID_RE.test(id);
-}
-
-export function isManualSlotId(id: string): boolean {
-  return id.startsWith("manual-") && isSlotId(id);
-}
-
-/** The instant a slot id stands for. */
-export function slotIdToDate(id: string): Date {
-  const m = SLOT_ID_RE.exec(id);
-  if (!m) throw new UsageError(`invalid slot "${id}" (expected e.g. 20261117T080000Z or manual-20261117T080000Z)`);
-  const [, , y, mo, d, h, mi, s] = m;
-  return new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`);
-}
-
-/** `<task-id>/<slot-id>`, the handle subagents and commands use for one occurrence. */
-export function runRef(taskId: string, slot: string): string {
-  return `${taskId}/${slot}`;
-}
-
-export function parseRunRef(ref: string): { taskId: string; slot: string } {
-  const parts = ref.split("/");
-  if (parts.length !== 2 || !TASK_ID_RE.test(parts[0]!) || !isSlotId(parts[1]!)) {
-    throw new UsageError(`invalid run ref "${ref}" (expected <task-id>/<slot>, e.g. weekly-report/20261117T080000Z)`);
-  }
-  return { taskId: parts[0]!, slot: parts[1]! };
-}
+import { isManualSlotId, isSlotId, parseRunRef, runRef, runSlotId, slotIdToDate } from "./slot.ts";
 
 // ---------------------------------------------------------------------------
 // Files
@@ -70,7 +26,7 @@ export function writeJsonAtomic(path: string, data: unknown): void {
     writeFileSync(tmp, serialize(data), { flag: "wx" });
     renameSync(tmp, path);
   } catch (err) {
-    if (existsSync(tmp)) unlinkSync(tmp);
+    rmSync(tmp, { force: true });
     throw err;
   }
 }
@@ -84,15 +40,15 @@ export function writeJsonAtomic(path: string, data: unknown): void {
 export function createJsonExclusive(path: string, data: unknown): boolean {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = tempPathFor(path);
-  writeFileSync(tmp, serialize(data), { flag: "wx" });
   try {
+    writeFileSync(tmp, serialize(data), { flag: "wx" });
     linkSync(tmp, path);
     return true;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
     throw err;
   } finally {
-    unlinkSync(tmp);
+    rmSync(tmp, { force: true });
   }
 }
 
@@ -145,6 +101,7 @@ function jsonFilesIn(dir: string): string[] {
 // ---------------------------------------------------------------------------
 
 export function taskPath(paths: DataPaths, id: string): string {
+  if (!TASK_ID_RE.test(id)) throw new UsageError(`invalid task id "${id}" (lowercase letters, digits and dashes)`);
   return join(paths.tasksDir, `${id}.json`);
 }
 
@@ -159,6 +116,19 @@ export function readTask(paths: DataPaths, id: string): Task {
   const task = readTaskFile(path);
   if (task.id !== id) throw new CorruptFileError(path, `id "${task.id}" does not match the file name`);
   return task;
+}
+
+/**
+ * Loads a task from a command argument: a path (anything with a `/` or ending
+ * in `.json`, relative to `cwd`) or the id of a saved task.
+ */
+export function loadTaskArg(paths: DataPaths, arg: string, resolveArgPath: (p: string) => string): { task: Task; file: string } {
+  if (arg.includes("/") || arg.endsWith(".json")) {
+    const file = resolveArgPath(arg);
+    if (!existsSync(file)) throw new NotFoundError(`task file not found: ${file}`);
+    return { task: readTaskFile(file), file };
+  }
+  return { task: readTask(paths, arg), file: taskPath(paths, arg) };
 }
 
 export function taskExists(paths: DataPaths, id: string): boolean {
@@ -182,6 +152,7 @@ export function listTasks(paths: DataPaths): ReadResult<Task> {
 // ---------------------------------------------------------------------------
 
 export function runPath(paths: DataPaths, taskId: string, slot: string): string {
+  parseRunRef(runRef(taskId, slot)); // rejects ids that could escape the runs folder
   return join(paths.runsDir, taskId, `${slot}.json`);
 }
 
@@ -190,10 +161,18 @@ export function runLogRelativePath(taskId: string, slot: string): string {
   return `runs/${taskId}/${slot}.log`;
 }
 
+function readRunFile(path: string, taskId: string, slot: string): Run {
+  const run = readValidated<Run>(path, runErrors);
+  if (run.task_id !== taskId || runSlotId(run) !== slot) {
+    throw new CorruptFileError(path, `content (${runRef(run.task_id, runSlotId(run))}) does not match the file name`);
+  }
+  return run;
+}
+
 export function readRun(paths: DataPaths, taskId: string, slot: string): Run {
   const path = runPath(paths, taskId, slot);
   if (!existsSync(path)) throw new NotFoundError(`run "${runRef(taskId, slot)}" not found`);
-  return readValidated<Run>(path, runErrors);
+  return readRunFile(path, taskId, slot);
 }
 
 export function readRunByRef(paths: DataPaths, ref: string): Run {
@@ -202,16 +181,17 @@ export function readRunByRef(paths: DataPaths, ref: string): Run {
 }
 
 /**
- * Claims an occurrence by creating its file. Returns false if it already
- * exists (another tick or runner took it), so each slot runs at most once.
+ * Claims an occurrence by creating its file (named after `runSlotId(run)`).
+ * Returns false if it already exists (another tick or runner took it), so
+ * each slot runs at most once.
  */
-export function claimRun(paths: DataPaths, slot: string, run: Run): boolean {
-  return createJsonExclusive(runPath(paths, run.task_id, slot), run);
+export function claimRun(paths: DataPaths, run: Run): boolean {
+  return createJsonExclusive(runPath(paths, run.task_id, runSlotId(run)), run);
 }
 
 /** Replaces an existing run file atomically. */
-export function writeRun(paths: DataPaths, slot: string, run: Run): void {
-  writeJsonAtomic(runPath(paths, run.task_id, slot), run);
+export function writeRun(paths: DataPaths, run: Run): void {
+  writeJsonAtomic(runPath(paths, run.task_id, runSlotId(run)), run);
 }
 
 export interface StoredRun {
@@ -226,7 +206,7 @@ export function listRuns(paths: DataPaths, taskId: string): ReadResult<StoredRun
   const files = jsonFilesIn(join(paths.runsDir, taskId)).filter((f) => isSlotId(basename(f, ".json")));
   const result = collect(files, (path) => {
     const slot = basename(path, ".json");
-    return { slot, ref: runRef(taskId, slot), run: readValidated<Run>(path, runErrors) };
+    return { slot, ref: runRef(taskId, slot), run: readRunFile(path, taskId, slot) };
   });
   result.items.sort((a, b) => slotIdToDate(a.slot).getTime() - slotIdToDate(b.slot).getTime() || a.slot.localeCompare(b.slot));
   return result;
@@ -238,7 +218,11 @@ export function latestRuns(paths: DataPaths, taskId: string, limit: number): Rea
   return { items: all.items.reverse().slice(0, limit), errors: all.errors };
 }
 
-/** Slot ids that already have a file, including unreadable ones (they are recorded, just broken). */
+/**
+ * Slot ids that already have a file, including unreadable ones (they are
+ * recorded, just broken). Run files are never moved or pruned: archiving a
+ * task keeps its history in `runs/`, so a slot recorded once stays recorded.
+ */
 export function recordedSlots(paths: DataPaths, taskId: string): Set<string> {
   const dir = join(paths.runsDir, taskId);
   if (!existsSync(dir)) return new Set();

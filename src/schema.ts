@@ -141,10 +141,6 @@ export class Checker {
   fail(message: string): void {
     this.errors.push(this.prefix ? `${this.prefix}: ${message}` : message);
   }
-
-  get ok(): boolean {
-    return this.errors.length === 0;
-  }
 }
 
 export function isObject(value: unknown): value is Obj {
@@ -218,10 +214,12 @@ function checkSchedule(c: Checker, value: unknown): void {
       c.at("cron").fail("must be a non-empty cron expression");
     } else {
       const parts = value.cron.trim().split(/\s+/).length;
-      if (parts !== 5) c.at("cron").fail(`must have 5 fields (minute hour day month weekday), got ${parts}`);
+      if (value.cron.trim().startsWith("@")) c.at("cron").fail("nicknames such as @daily are not supported; use 5 fields, e.g. 0 9 * * *");
+      else if (parts !== 5) c.at("cron").fail(`must have 5 fields (minute hour day month weekday), got ${parts}`);
       else {
         try {
-          new Cron(value.cron, { paused: true });
+          // Checks the expression can ever fire (e.g. rejects "0 0 31 2 *").
+          if (!new Cron(value.cron, { paused: true }).nextRun(new Date(0))) c.at("cron").fail("never fires");
         } catch (err) {
           c.at("cron").fail((err as Error).message);
         }

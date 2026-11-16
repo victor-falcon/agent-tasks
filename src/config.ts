@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { defaultMaxDelay } from "./schedule.ts";
 import { ConfigError } from "./errors.ts";
 import { type Env, expandHome, resolvePath } from "./paths.ts";
 import {
@@ -19,7 +18,7 @@ import {
   type KeepOpen,
   type Task,
 } from "./schema.ts";
-import { formatDuration, parseDuration } from "./duration.ts";
+import { defaultMaxDelay, formatDuration, parseDuration } from "./duration.ts";
 import { systemTimezone } from "./time.ts";
 
 // ---------------------------------------------------------------------------
@@ -75,16 +74,25 @@ export interface LoadedConfig {
 }
 
 /** The project's own defaults, used when neither the task nor the config sets a value. */
-export const BUILTIN_DEFAULTS = {
-  agent: { command: "claude", args: [] as string[], shell: false },
-  launcher: { preset: "process" } as LauncherConfig,
+export const BUILTIN_DEFAULTS: Readonly<{
+  agent: ResolvedAgent;
+  launcher: LauncherConfig;
+  skill: string;
+  runner_every: string;
+  catch_up: CatchUp;
+  timeout: string;
+  keep_open: KeepOpen;
+  retries: number;
+}> = {
+  agent: { command: "claude", args: [], shell: false },
+  launcher: { preset: "process" },
   skill: "run-agent-task",
   runner_every: "5m",
-  catch_up: "latest" as CatchUp,
+  catch_up: "latest",
   timeout: "45m",
-  keep_open: "on_failure" as KeepOpen,
+  keep_open: "on_failure",
   retries: 0,
-} as const;
+};
 
 // ---------------------------------------------------------------------------
 // Loading and validation
@@ -253,8 +261,21 @@ export interface Resolved {
 
 export type ResolvedKey = Exclude<keyof Resolved, "profile">;
 
-/** Where each value came from, e.g. `task`, `profile ~/Projects/**`, `config`, `default`. */
-export type Sources = Record<ResolvedKey, string>;
+export type SourceLayer = "task" | "profile" | "config" | "default";
+
+/** Where a value came from: the layer, plus a detail such as the profile's `match`. */
+export interface Source {
+  layer: SourceLayer;
+  detail?: string;
+}
+
+export type Sources = Record<ResolvedKey, Source>;
+
+/** `task`, `profile ~/Projects/**`, `config defaults`, `default (…)`. */
+export function formatSource(source: Source): string {
+  if (!source.detail) return source.layer;
+  return source.layer === "default" ? `default (${source.detail})` : `${source.layer} ${source.detail}`;
+}
 
 export interface Resolution extends Resolved {
   sources: Sources;
@@ -262,7 +283,7 @@ export interface Resolution extends Resolved {
 
 function normalizeAgent(agent: AgentSpec | string): ResolvedAgent {
   if (typeof agent === "string") return { command: agent, args: [], shell: false };
-  return { command: agent.command, args: agent.args ?? [], shell: agent.shell ?? false };
+  return { command: agent.command, args: [...(agent.args ?? [])], shell: agent.shell ?? false };
 }
 
 function stripTrailingSlash(path: string): string {
@@ -281,14 +302,15 @@ export function findProfile(config: UserConfig, cwd: string, env: Env): Profile 
   return config.profiles?.find((p) => profileMatches(p.match, cwd, env)) ?? null;
 }
 
-type Layer = { source: string; value: unknown };
-
-/** Picks the first layer with a value (not undefined/null). */
-function pick<T>(layers: Layer[]): { value: T; source: string } {
-  for (const layer of layers) {
-    if (layer.value !== undefined && layer.value !== null) return { value: layer.value as T, source: layer.source };
-  }
-  throw new Error("no layer provided a value");
+/** The candidate values of one setting, strongest first. Missing layers are skipped. */
+interface Layers<T> {
+  task?: T | null;
+  profile?: T | null;
+  config?: T | null;
+  /** Detail for the config layer, e.g. `defaults` for `config.defaults.*`. */
+  configDetail?: string;
+  builtin: T;
+  builtinDetail?: string;
 }
 
 /** The fields `resolveFor` needs; a full Task works, and so does a partial one. */
@@ -298,47 +320,62 @@ export type ResolvableTask = Pick<Task, "cwd"> & Partial<Pick<Task, "agent" | "c
 export function resolveFor(task: ResolvableTask, loaded: LoadedConfig): Resolution {
   const { config, env } = loaded;
   const profile = findProfile(config, task.cwd, env);
-  const profileSource = profile ? `profile ${profile.match}` : "profile";
-  const layers = (taskValue: unknown, profileValue: unknown, rootValue: unknown, rootSource: string, builtin: unknown): Layer[] => [
-    { source: "task", value: taskValue },
-    { source: profileSource, value: profileValue },
-    { source: rootSource, value: rootValue },
-    { source: "default", value: builtin },
-  ];
+  const profileSource: Source = profile ? { layer: "profile", detail: profile.match } : { layer: "profile" };
   const sources = {} as Sources;
-  const take = <T>(key: ResolvedKey, l: Layer[]): T => {
-    const { value, source } = pick<T>(l);
-    sources[key] = source;
-    return value;
+  const take = <T>(key: ResolvedKey, l: Layers<T>): T => {
+    const candidates: [T | null | undefined, Source][] = [
+      [l.task, { layer: "task" }],
+      [l.profile, profileSource],
+      [l.config, l.configDetail ? { layer: "config", detail: l.configDetail } : { layer: "config" }],
+    ];
+    for (const [value, source] of candidates) {
+      if (value !== undefined && value !== null) {
+        sources[key] = source;
+        return value;
+      }
+    }
+    sources[key] = l.builtinDetail ? { layer: "default", detail: l.builtinDetail } : { layer: "default" };
+    return l.builtin;
   };
+  const builtin = structuredClone(BUILTIN_DEFAULTS);
+  const defaults = config.defaults;
 
-  const agent = normalizeAgent(take("agent", layers(task.agent, profile?.agent, config.agent, "config", BUILTIN_DEFAULTS.agent)));
-  const launcher = take<LauncherConfig>("launcher", layers(undefined, profile?.launcher, config.launcher, "config", BUILTIN_DEFAULTS.launcher));
-  const skill = take<string>("skill", layers(undefined, profile?.skill, config.skill, "config", BUILTIN_DEFAULTS.skill));
-  const catch_up = take<CatchUp>("catch_up", layers(task.catch_up, profile?.catch_up, config.defaults?.catch_up, "config defaults", BUILTIN_DEFAULTS.catch_up));
-  const timeout = take<string>("timeout", layers(task.timeout, profile?.timeout, config.defaults?.timeout, "config defaults", BUILTIN_DEFAULTS.timeout));
-  const keep_open = take<KeepOpen>("keep_open", layers(task.keep_open, profile?.keep_open, config.defaults?.keep_open, "config defaults", BUILTIN_DEFAULTS.keep_open));
-  const retries = take<number>("retries", layers(task.retries, undefined, undefined, "config", BUILTIN_DEFAULTS.retries));
-  const runner_every = take<string>("runner_every", layers(undefined, undefined, config.runner?.every, "config", BUILTIN_DEFAULTS.runner_every));
-  const scheduleTz = task.schedule?.type === "cron" ? task.schedule.timezone : undefined;
-  const timezone = take<string>("timezone", layers(scheduleTz, undefined, config.timezone, "config", systemTimezone()));
-
-  const max_delay = take<string>(
-    "max_delay",
-    layers(task.max_delay, profile?.max_delay, config.defaults?.max_delay, "config defaults", formatDuration(defaultMaxDelay(parseDuration(runner_every)))),
-  );
-  if (sources.max_delay === "default") sources.max_delay = "default (3 × runner.every, at least 15m)";
+  const agent = normalizeAgent(take<AgentSpec | string>("agent", { task: task.agent, profile: profile?.agent, config: config.agent, builtin: builtin.agent }));
+  const launcher = structuredClone(take("launcher", { profile: profile?.launcher, config: config.launcher, builtin: builtin.launcher }));
+  const skill = take("skill", { profile: profile?.skill, config: config.skill, builtin: builtin.skill });
+  const catch_up = take("catch_up", { task: task.catch_up, profile: profile?.catch_up, config: defaults?.catch_up, configDetail: "defaults", builtin: builtin.catch_up });
+  const timeout = take("timeout", { task: task.timeout, profile: profile?.timeout, config: defaults?.timeout, configDetail: "defaults", builtin: builtin.timeout });
+  const keep_open = take("keep_open", { task: task.keep_open, profile: profile?.keep_open, config: defaults?.keep_open, configDetail: "defaults", builtin: builtin.keep_open });
+  const retries = take("retries", { task: task.retries, builtin: builtin.retries });
+  const runner_every = take("runner_every", { config: config.runner?.every, builtin: builtin.runner_every });
+  const timezone = take("timezone", {
+    task: task.schedule?.type === "cron" ? task.schedule.timezone : undefined,
+    config: config.timezone,
+    builtin: systemTimezone(),
+    builtinDetail: "system",
+  });
+  const max_delay = take("max_delay", {
+    task: task.max_delay,
+    profile: profile?.max_delay,
+    config: defaults?.max_delay,
+    configDetail: "defaults",
+    builtin: formatDuration(defaultMaxDelay(parseDuration(runner_every))),
+    builtinDetail: "3 × runner.every, at least 15m",
+  });
 
   // Environment and instructions add up instead of replacing each other.
   const envVars = { ...(profile?.env ?? {}) };
-  sources.env = profile?.env ? profileSource : "default";
+  sources.env = profile?.env ? profileSource : { layer: "default" };
 
   const instructionsDir = join(loaded.dir, "instructions");
   const rootInstructions = config.instructions?.subagent ?? [];
   const profileInstructions = profile?.instructions ?? [];
   const instructions = [...rootInstructions, ...profileInstructions].map((f) => resolvePath(f, env, instructionsDir));
-  const instructionSources = [rootInstructions.length > 0 ? "config" : null, profileInstructions.length > 0 ? profileSource : null].filter(Boolean);
-  sources.instructions = instructionSources.length > 0 ? instructionSources.join(" + ") : "default";
+  if (profileInstructions.length > 0) {
+    sources.instructions = rootInstructions.length > 0 ? { ...profileSource, detail: `${profileSource.detail} (after config)` } : profileSource;
+  } else {
+    sources.instructions = rootInstructions.length > 0 ? { layer: "config" } : { layer: "default" };
+  }
 
   return {
     agent,

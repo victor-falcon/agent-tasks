@@ -66,6 +66,22 @@ describe("task validation", () => {
     expect(taskErrors(makeTask({ schedule: { type: "weekly" } as never }))).toEqual(['schedule.type: must be "once" or "cron"']);
   });
 
+  test("impossible dates are rejected instead of rolling over", () => {
+    for (const at of ["2026-02-31T09:00:00Z", "2026-11-17T24:00:00Z", "2026-13-01T09:00:00Z", "2026-11-17T09:60:00+01:00"]) {
+      expect(taskErrors(makeTask({ schedule: { type: "once", at } }))).toEqual([`schedule.at: must be an ISO 8601 timestamp with offset (got "${at}")`]);
+    }
+    expect(taskErrors(makeTask({ schedule: { type: "once", at: "2028-02-29T09:00:00.250+01:00" } }))).toEqual([]);
+  });
+
+  test("cron nicknames and expressions that never fire are rejected", () => {
+    expect(taskErrors(makeTask({ schedule: { type: "cron", cron: "@daily" } }))).toEqual(["schedule.cron: nicknames such as @daily are not supported; use 5 fields, e.g. 0 9 * * *"]);
+    expect(taskErrors(makeTask({ schedule: { type: "cron", cron: "0 0 31 2 *" } }))).toEqual(["schedule.cron: never fires"]);
+  });
+
+  test("durations are capped", () => {
+    expect(taskErrors(makeTask({ timeout: "99999999d" }))).toEqual(['timeout: must be a duration such as 15m, 2h or 1d (got "99999999d")']);
+  });
+
   test("validateTask throws a ValidationError", () => {
     expect(() => validateTask({})).toThrow(ValidationError);
   });

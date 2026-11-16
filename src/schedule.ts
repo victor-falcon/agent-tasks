@@ -1,9 +1,7 @@
 import { Cron } from "croner";
 import { parseDuration } from "./duration.ts";
-import { type CatchUp, isFinalStatus, type Run, type Schedule, type Task } from "./schema.ts";
-import { slotId } from "./store.ts";
-
-export { formatDuration, parseDuration } from "./duration.ts";
+import { type CatchUp, type CronSchedule, isFinalStatus, type Run, type Schedule, type Task } from "./schema.ts";
+import { slotId } from "./slot.ts";
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
@@ -14,38 +12,36 @@ export const LOOKBACK_MS = 30 * DAY;
 /** Safety cap for very frequent cron expressions over a long window. */
 const MAX_SLOTS = 100_000;
 
-/** Default `max_delay`: 3 × the runner interval, never less than 15 minutes. */
-export function defaultMaxDelay(runnerEveryMs: number): number {
-  return Math.max(3 * runnerEveryMs, 15 * MINUTE);
+/**
+ * Cron instants in `[start, end]` (both inclusive, epoch ms), oldest first, at
+ * most `limit`. `starts_at` and `until` (both inclusive) narrow the range.
+ */
+function cronSlots(schedule: CronSchedule, start: number, end: number, timezone: string, limit: number): Date[] {
+  if (schedule.starts_at) start = Math.max(start, Date.parse(schedule.starts_at));
+  if (schedule.until) end = Math.min(end, Date.parse(schedule.until));
+  const slots: Date[] = [];
+  if (start > end) return slots;
+  const cron = new Cron(schedule.cron, { timezone, paused: true });
+  // nextRun() returns the first run strictly after its argument.
+  let cursor: Date | null = new Date(start - 1);
+  while (slots.length < limit) {
+    cursor = cron.nextRun(cursor);
+    if (!cursor || cursor.getTime() > end) break;
+    slots.push(cursor);
+  }
+  return slots;
 }
 
 /**
  * Scheduled instants of a schedule in `[from, to]` (both inclusive), oldest
- * first. Cron expressions are read in `timezone`; `starts_at` (inclusive) and
- * `until` (inclusive) narrow the window.
+ * first. Cron expressions are read in `timezone`.
  */
 export function slotsInWindow(schedule: Schedule, from: Date, to: Date, timezone: string): Date[] {
   if (schedule.type === "once") {
     const at = new Date(schedule.at);
     return at >= from && at <= to ? [at] : [];
   }
-
-  let start = from.getTime();
-  let end = to.getTime();
-  if (schedule.starts_at) start = Math.max(start, Date.parse(schedule.starts_at));
-  if (schedule.until) end = Math.min(end, Date.parse(schedule.until));
-  if (start > end) return [];
-
-  const cron = new Cron(schedule.cron, { timezone, paused: true });
-  const slots: Date[] = [];
-  // nextRun() returns the first run strictly after its argument.
-  let cursor: Date | null = new Date(start - 1);
-  while (slots.length < MAX_SLOTS) {
-    cursor = cron.nextRun(cursor);
-    if (!cursor || cursor.getTime() > end) break;
-    slots.push(cursor);
-  }
-  return slots;
+  return cronSlots(schedule, from.getTime(), to.getTime(), timezone, MAX_SLOTS);
 }
 
 /** The next `count` scheduled instants strictly after `now` (for display). */
@@ -56,17 +52,7 @@ export function nextRunTimes(task: Pick<Task, "schedule">, now: Date, count: num
     const at = new Date(schedule.at);
     return at > now ? [at] : [];
   }
-  const start = schedule.starts_at ? Math.max(now.getTime() + 1, Date.parse(schedule.starts_at)) : now.getTime() + 1;
-  const until = schedule.until ? Date.parse(schedule.until) : Number.POSITIVE_INFINITY;
-  const cron = new Cron(schedule.cron, { timezone, paused: true });
-  const out: Date[] = [];
-  let cursor: Date | null = new Date(start - 1);
-  while (out.length < count) {
-    cursor = cron.nextRun(cursor);
-    if (!cursor || cursor.getTime() > until) break;
-    out.push(cursor);
-  }
-  return out;
+  return cronSlots(schedule, now.getTime() + 1, Number.POSITIVE_INFINITY, timezone, count);
 }
 
 /** A `once` task is finished when its scheduled occurrence reached a final state. */
@@ -110,8 +96,13 @@ export interface PlanInput {
   ticks: readonly Date[];
   /** Resolved settings for the task (see `resolveFor`). */
   settings: { catch_up: CatchUp; max_delay: string; runner_every: string; timezone: string };
-  /** For `once` tasks: true once the occurrence reached a final state (see `isTaskFinished`). */
-  finished?: boolean;
+  /** True for a `once` task whose occurrence reached a final state (see `isTaskFinished`). */
+  finished: boolean;
+  /**
+   * Optional extra lower bound for cron slots, e.g. when the schedule was last
+   * changed or the task resumed, so slots of an old schedule are not reported.
+   */
+  since?: Date;
 }
 
 function toRef(at: Date): SlotRef {
@@ -129,7 +120,9 @@ function missedReason(slot: Date, deadline: number, ticks: readonly Date[]): Mis
  * launch it, or record it as missed, superseded or cancelled. Pure: the clock
  * and the ticks are passed in.
  *
- * - Window: from `max(created_at, now - 30d)` to `now`.
+ * - Window: from `max(created_at, since, now - 30d)` to `now`. A `once` slot
+ *   ignores `created_at`/`since`, so an `at` slightly in the past when the
+ *   task was created is still launched or reported, never dropped.
  * - Paused task: every unrecorded slot is `cancelled` (`reason: paused`).
  * - A slot older than `max_delay` is `missed`.
  * - The rest are candidates, filtered by `catch_up`:
@@ -143,7 +136,8 @@ export function planSlots(input: PlanInput): SlotPlan {
   if (input.finished) return plan;
 
   const { task, now, settings } = input;
-  const from = new Date(Math.max(Date.parse(task.created_at), now.getTime() - LOOKBACK_MS));
+  const lookback = now.getTime() - LOOKBACK_MS;
+  const from = new Date(task.schedule.type === "once" ? lookback : Math.max(Date.parse(task.created_at), input.since?.getTime() ?? lookback, lookback));
   const slots = slotsInWindow(task.schedule, from, now, settings.timezone).filter((s) => !input.recorded.has(slotId(s)));
 
   if (!task.enabled) {
@@ -152,7 +146,7 @@ export function planSlots(input: PlanInput): SlotPlan {
   }
 
   const maxDelay = parseDuration(settings.max_delay);
-  const graceNone = parseDuration(settings.runner_every);
+  const dueWindow = parseDuration(settings.runner_every);
   const missed = (s: Date): MissedSlot => ({ ...toRef(s), reason: missedReason(s, Math.min(s.getTime() + maxDelay, now.getTime()), input.ticks) });
 
   const inTime: Date[] = [];
@@ -174,7 +168,7 @@ export function planSlots(input: PlanInput): SlotPlan {
     case "none": {
       for (const [i, s] of inTime.entries()) {
         const isNewest = i === inTime.length - 1;
-        if (isNewest && now.getTime() - s.getTime() <= graceNone) plan.candidates.push(toRef(s));
+        if (isNewest && now.getTime() - s.getTime() <= dueWindow) plan.candidates.push(toRef(s));
         else plan.missed.push(missed(s));
       }
       plan.missed.sort((a, b) => a.at.getTime() - b.at.getTime());

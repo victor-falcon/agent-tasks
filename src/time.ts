@@ -13,11 +13,23 @@ export function isValidTimezone(tz: string): boolean {
 }
 
 // Requires a date, a time and an explicit offset, so the instant is never ambiguous.
-const ISO_WITH_OFFSET_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+const ISO_WITH_OFFSET_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-](\d{2}):(\d{2}))$/;
 
-/** True for an ISO 8601 timestamp with an explicit offset (`Z` or `+01:00`). */
+/**
+ * True for an ISO 8601 timestamp with an explicit offset (`Z` or `+01:00`).
+ * Impossible dates (`2026-02-31`, hour 24) are rejected instead of rolling over.
+ */
 export function isIsoTimestamp(input: unknown): input is string {
-  return typeof input === "string" && ISO_WITH_OFFSET_RE.test(input) && !Number.isNaN(Date.parse(input));
+  if (typeof input !== "string") return false;
+  const m = ISO_WITH_OFFSET_RE.exec(input);
+  if (!m) return false;
+  const [year, month, day, hour, minute, second = 0, offH = 0, offM = 0] = m.slice(1).map((v) => (v === undefined ? undefined : Number(v)));
+  const daysInMonth = new Date(Date.UTC(year!, month!, 0)).getUTCDate();
+  return (
+    month! >= 1 && month! <= 12 && day! >= 1 && day! <= daysInMonth &&
+    hour! <= 23 && minute! <= 59 && second! <= 59 && offH! <= 23 && offM! <= 59 &&
+    !Number.isNaN(Date.parse(input))
+  );
 }
 
 export function parseIsoTimestamp(input: string): Date {

@@ -1,58 +1,25 @@
-import { existsSync } from "node:fs";
 import { parseCommandArgs } from "../args.ts";
-import type { Resolution, ResolvedKey } from "../config.ts";
+import { formatSource, type Resolution, type ResolvedKey } from "../config.ts";
 import { type Context, output } from "../context.ts";
-import { NotFoundError } from "../errors.ts";
 import { resolvePath, tildify } from "../paths.ts";
-import type { Task } from "../schema.ts";
-import { readTask, readTaskFile, taskPath } from "../store.ts";
+import { loadTaskArg } from "../store.ts";
 import type { Command } from "./types.ts";
 
-function looksLikePath(arg: string): boolean {
-  return arg.includes("/") || arg.endsWith(".json");
-}
-
-function loadTask(ctx: Context, arg: string): { task: Task; file: string } {
-  if (looksLikePath(arg)) {
-    const file = resolvePath(arg, ctx.env, ctx.cwd);
-    if (!existsSync(file)) throw new NotFoundError(`task file not found: ${file}`);
-    return { task: readTaskFile(file), file };
-  }
-  const task = readTask(ctx.paths, arg);
-  return { task, file: taskPath(ctx.paths, arg) };
-}
-
-function formatValue(key: ResolvedKey, r: Resolution, ctx: Context): string {
-  switch (key) {
-    case "agent":
-      return [r.agent.command, ...r.agent.args].join(" ") + (r.agent.shell ? " (shell)" : "");
-    case "launcher":
-      return JSON.stringify(r.launcher);
-    case "env": {
-      const entries = Object.entries(r.env);
-      return entries.length > 0 ? entries.map(([k, v]) => `${k}=${v}`).join(" ") : "(none)";
-    }
-    case "instructions":
-      return r.instructions.length > 0 ? r.instructions.map((f) => tildify(f, ctx.env)).join(", ") : "(none)";
-    default:
-      return String(r[key]);
-  }
-}
-
-const KEYS: ResolvedKey[] = [
-  "agent",
-  "launcher",
-  "skill",
-  "env",
-  "instructions",
-  "timeout",
-  "keep_open",
-  "retries",
-  "catch_up",
-  "max_delay",
-  "timezone",
-  "runner_every",
-];
+/** How each resolved value is shown, in display order. Typed so a new key cannot be forgotten. */
+const FORMATTERS: Record<ResolvedKey, (r: Resolution, ctx: Context) => string> = {
+  agent: (r) => [r.agent.command, ...r.agent.args].join(" ") + (r.agent.shell ? " (shell)" : ""),
+  launcher: (r) => JSON.stringify(r.launcher),
+  skill: (r) => r.skill,
+  env: (r) => Object.entries(r.env).map(([k, v]) => `${k}=${v}`).join(" ") || "(none)",
+  instructions: (r, ctx) => r.instructions.map((f) => tildify(f, ctx.env)).join(", ") || "(none)",
+  timeout: (r) => r.timeout,
+  keep_open: (r) => r.keep_open,
+  retries: (r) => String(r.retries),
+  catch_up: (r) => r.catch_up,
+  max_delay: (r) => r.max_delay,
+  timezone: (r) => r.timezone,
+  runner_every: (r) => r.runner_every,
+};
 
 const configResolve: Command = {
   name: "config resolve",
@@ -64,13 +31,14 @@ schedule settings for a task, applying the precedence
 task > first matching profile > config.json > built-in defaults.
 
 Arguments:
-  <task-id|path>  The id of a saved task, or the path of a task JSON file`,
+  <task-id|path>  The id of a saved task, or the path of a task JSON file
+                  (anything containing "/" or ending in .json)`,
   run(ctx, args) {
     const { positionals } = parseCommandArgs(args, {}, { minPositionals: 1, maxPositionals: 1 });
-    const { task, file } = loadTask(ctx, positionals[0]!);
+    const { task, file } = loadTaskArg(ctx.paths, positionals[0]!, (p) => resolvePath(p, ctx.env, ctx.cwd));
     const resolution = ctx.resolveFor(task);
     const { config } = ctx;
-    const { sources, ...values } = resolution;
+    const { sources, profile, ...values } = resolution;
     output(
       ctx,
       {
@@ -79,22 +47,25 @@ Arguments:
         cwd: task.cwd,
         config_file: config.file,
         config_exists: config.exists,
-        profile: resolution.profile,
+        profile,
         values,
         sources,
       },
       () => {
-        const width = Math.max(...KEYS.map((k) => k.length));
-        const rows = KEYS.map((k) => ({ key: k, value: formatValue(k, resolution, ctx), source: sources[k] }));
+        const rows = (Object.keys(FORMATTERS) as ResolvedKey[]).map((key) => ({
+          key,
+          value: FORMATTERS[key](resolution, ctx),
+          source: formatSource(sources[key]),
+        }));
+        const keyWidth = Math.max(...rows.map((r) => r.key.length));
         const valueWidth = Math.min(48, Math.max(...rows.map((r) => r.value.length)));
-        const lines = [
+        return [
           `Task:    ${task.id} (${task.cwd})`,
           `Config:  ${tildify(config.file, ctx.env)}${config.exists ? "" : " (not found, using defaults)"}`,
           `Profile: ${resolution.profile ?? "(none matched)"}`,
           "",
-          ...rows.map((r) => `${r.key.padEnd(width)}  ${r.value.padEnd(valueWidth)}  ${r.source}`),
-        ];
-        return lines.join("\n");
+          ...rows.map((r) => `${r.key.padEnd(keyWidth)}  ${r.value.padEnd(valueWidth)}  ${r.source}`),
+        ].join("\n");
       },
     );
   },
