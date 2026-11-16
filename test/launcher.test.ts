@@ -41,6 +41,13 @@ describe("templates and quoting", () => {
     expect(() => render("{{nope}}", vars)).toThrow(TemplateError);
   });
 
+  test("{{env.NAME}} reads the runner's environment and says when it is not set", () => {
+    const env = { PATH: "/usr/bin:/bin", REX_SESSION: "my session" };
+    expect(renderCommand(["rex", "-s", "{{env.REX_SESSION}}"], input({ env }), "t")).toEqual(["rex", "-s", "my session"]);
+    expect(renderCommand("rex -s {{env.REX_SESSION_quoted}}", input({ env }), "t")).toEqual(["/bin/sh", "-c", "rex -s 'my session'"]);
+    expect(() => renderCommand(["{{env.REX_SESSION}}"], input(), "launcher.launch")).toThrow("variable {{env.REX_SESSION}} in launcher.launch is not available: $REX_SESSION is not set");
+  });
+
   test("a variable that is not available says why", () => {
     const argv = () => renderCommand(["x", "{{runner_terminal}}"], input(), "launcher.launch");
     expect(argv).toThrow("$HC_TERMINAL_ID is not set");
@@ -62,6 +69,8 @@ describe("commands", () => {
   test("handles come from JSON, a regex or the first line", () => {
     expect(extractHandle("json:.address", '{"address":"t17g"}')).toBe("t17g");
     expect(extractHandle("json:.a.b", '{"a":{"b":42}}')).toBe("42");
+    expect(extractHandle("json:.block_ids.0", '{"block_ids":["b7","b8"]}')).toBe("b7");
+    expect(() => extractHandle("json:.block_ids.2", '{"block_ids":["b7"]}')).toThrow(LauncherError);
     expect(extractHandle("regex:window (@\\d+)", "created window @12\n")).toBe("@12");
     expect(extractHandle(null, "  abc\nmore\n")).toBe("abc");
     expect(() => extractHandle("json:.address", "not json")).toThrow(LauncherError);
@@ -91,8 +100,9 @@ describe("commands", () => {
 });
 
 describe("presets", () => {
-  test("the repo ships process and herdr", () => {
-    expect(listPresets()).toEqual(expect.arrayContaining(["herdr", "process"]));
+  test("the repo ships herdr, process, rex and tmux, all valid", () => {
+    expect(listPresets()).toEqual(["herdr", "process", "rex", "tmux"]);
+    for (const preset of listPresets()) expect(resolveLauncher({ preset }).name).toBe(preset);
     expect(resolveLauncher({ preset: "process" })).toMatchObject({ name: "process", background: true, launch: ["{{agent_argv}}"] });
   });
 
@@ -109,7 +119,7 @@ describe("presets", () => {
   });
 
   test("invalid launchers list every problem", () => {
-    expect(() => resolveLauncher({ preset: "nope" })).toThrow('unknown launcher preset "nope" (available: herdr, process');
+    expect(() => resolveLauncher({ preset: "nope" })).toThrow('unknown launcher preset "nope" (available: herdr, process, rex, tmux)');
     let error: LauncherError | undefined;
     try {
       resolveLauncher({ lanch: ["x"], close: [], status_map: "tmux", handle: "address" });

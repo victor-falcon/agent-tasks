@@ -1,0 +1,29 @@
+{
+  "description": "UNTESTED against a real Rex (written from the rex CLI calls of a working helper script). Each run in its own Rex window in the runner's session ($REX_SESSION), named after the session. Starts an interactive shell and types the agent command into it, so shell aliases work; the shell exits with the agent. The agent state comes from the block's program_status. Needs rex and jq on PATH, and every command (including finish, run by the agent) to run inside the same Rex session.",
+  "launch": [
+    "rex", "window", "new", "-s", "{{env.REX_SESSION}}", "{{session_name}}", "-c", "{{cwd}}", "--focus=false", "--json",
+    "--", "/usr/bin/env", "PATH={{path}}", "{{env_argv}}", "{{shell}}", "-i"
+  ],
+  "handle": "json:.block_ids.0",
+  "then": [
+    ["rex", "send", "-s", "{{env.REX_SESSION}}", "-b", "{{handle}}", " {{agent}} {{prompt_quoted}}; exit"],
+    ["rex", "send-key", "-s", "{{env.REX_SESSION}}", "-b", "{{handle}}", "enter"]
+  ],
+  "close": [
+    "/bin/sh", "-c",
+    "w=$(rex block inspect -s \"$1\" \"$2\" --json | jq -r '.block.window_id // empty') && [ -n \"$w\" ] && rex window close -s \"$1\" \"$w\"",
+    "agent-tasks-rex", "{{env.REX_SESSION}}", "{{handle}}"
+  ],
+  "status": [
+    "/bin/sh", "-c",
+    "rex block inspect -s \"$1\" \"$2\" --json >/dev/null || exit 1; rex block call -s \"$1\" -b \"$2\" program_status 2>/dev/null | jq -r '.records[0].state // empty'",
+    "agent-tasks-rex", "{{env.REX_SESSION}}", "{{handle}}"
+  ],
+  "status_map": { "working": "working", "idle": "idle", "done": "idle", "error": "idle", "blocked": "blocked" },
+  "read": ["rex", "capture", "-s", "{{env.REX_SESSION}}", "-b", "{{handle}}", "--trim", "--unwrap"],
+  "attach": [
+    "/bin/sh", "-c",
+    "w=$(rex block inspect -s \"$1\" \"$2\" --json | jq -r '.block.window_id // empty') && [ -n \"$w\" ] && rex focus -s \"$1\" \"$w\"",
+    "agent-tasks-rex", "{{env.REX_SESSION}}", "{{handle}}"
+  ]
+}

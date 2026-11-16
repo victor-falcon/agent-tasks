@@ -21,23 +21,37 @@ export interface ExecHome extends TempHome {
   cli(...args: string[]): ReturnType<typeof runCli>;
   run(ref: string): Run;
   hcCalls(): string[][];
+  /** State folder of a fake multiplexer CLI in test/fixtures/bin (`hc`, `tmux`, `rex`). */
+  fakeDir(tool: FakeTool): string;
+  /** Every call that fake received, as argv. */
+  fakeCalls(tool: FakeTool): string[][];
 }
 
+export type FakeTool = "hc" | "tmux" | "rex";
+
 /**
- * A temp home where `agent-tasks` (the repo's bin) and the fake `hc` are on
+ * A temp home where `agent-tasks` (the repo's bin) and the fake `hc`, `tmux` and `rex` are on
  * PATH, the shell is /bin/sh and tasks run in a temp project folder.
  */
 export function makeExecHome(): ExecHome {
   const home = makeTempHome();
   const project = join(home.root, "project");
-  const hcDir = join(home.root, "hc");
+  const fakeDir = (tool: FakeTool) => join(home.root, tool);
+  const hcDir = fakeDir("hc");
   mkdirSync(project, { recursive: true });
-  mkdirSync(hcDir, { recursive: true });
+  for (const tool of ["hc", "tmux", "rex"] as const) mkdirSync(fakeDir(tool), { recursive: true });
   Object.assign(home.env, {
     PATH: [join(REPO, "bin"), FAKE_BIN, dirname(process.execPath), process.env.PATH].join(":"),
     SHELL: "/bin/sh",
     FAKE_HC_DIR: hcDir,
+    FAKE_TMUX_DIR: fakeDir("tmux"),
+    FAKE_REX_DIR: fakeDir("rex"),
   });
+  const fakeCalls = (tool: FakeTool) => {
+    const file = join(fakeDir(tool), "calls.jsonl");
+    if (!existsSync(file)) return [];
+    return readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  };
   const cli = (...args: string[]) => runCli(args, home, project);
   return {
     ...home,
@@ -53,11 +67,9 @@ export function makeExecHome(): ExecHome {
       const { taskId, slot } = parseRunRef(ref);
       return JSON.parse(readFileSync(join(home.paths.runsDir, taskId, `${slot}.json`), "utf8"));
     },
-    hcCalls() {
-      const file = join(hcDir, "calls.jsonl");
-      if (!existsSync(file)) return [];
-      return readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-    },
+    hcCalls: () => fakeCalls("hc"),
+    fakeDir,
+    fakeCalls,
   };
 }
 
