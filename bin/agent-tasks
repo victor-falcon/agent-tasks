@@ -1,0 +1,9 @@
+#!/usr/bin/env bun
+// Entry point. Follows symlinks (e.g. ~/.local/bin/agent-tasks) to find the
+// real checkout, then runs src/cli.ts from it.
+import { realpathSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+const root = dirname(dirname(realpathSync(import.meta.path)));
+const { main } = await import(join(root, "src", "cli.ts"));
+process.exit(await main(process.argv.slice(2)));
