@@ -164,6 +164,10 @@ describe("init", () => {
     const r = await cli("init", "--launcher", "process", "--json");
     expect(r.json().launcher).toEqual({ preset: "process", reason: "--launcher" });
     expect(JSON.parse(readFileSync(home.configFile, "utf8")).launcher).toEqual({ preset: "process" });
+    // With the config already there, the flag changes nothing and says so.
+    const again = await cli("init", "--launcher", "tmux");
+    expect(again.stdout).toContain("--launcher tmux ignored");
+    expect(JSON.parse(readFileSync(home.configFile, "utf8")).launcher).toEqual({ preset: "process" });
     const bad = await cli("init", "--launcher", "screen");
     expect(bad.code).toBe(2);
     expect(bad.stderr).toContain("--launcher must be one of herdr, rex, tmux, process");

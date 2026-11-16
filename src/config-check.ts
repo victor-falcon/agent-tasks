@@ -46,9 +46,15 @@ export function launcherCommands(spec: LauncherSpec): CommandSpec[] {
   return [spec.launch, ...spec.then, spec.close, spec.status, spec.read, spec.attach].filter((c): c is CommandSpec => c !== null);
 }
 
+/** Whether any of the launcher's commands uses `{{name}}` (or `{{name_quoted}}`). */
+function launcherUses(spec: LauncherSpec, name: string): boolean {
+  const re = new RegExp(`\\{\\{\\s*${name}(_quoted)?\\s*\\}\\}`);
+  return launcherCommands(spec).some((c) => re.test(JSON.stringify(c)));
+}
+
 /** Whether a launcher needs to run inside a Herdr terminal (`$HC_TERMINAL_ID`). */
 export function launcherNeedsTerminal(spec: LauncherSpec): boolean {
-  return launcherCommands(spec).some((c) => /\{\{\s*runner_(terminal|space)(_quoted)?\s*\}\}/.test(JSON.stringify(c)));
+  return launcherUses(spec, "runner_terminal") || launcherUses(spec, "runner_space");
 }
 
 /**
@@ -58,8 +64,7 @@ export function launcherNeedsTerminal(spec: LauncherSpec): boolean {
  * work, even ones loaded lazily at the first prompt.
  */
 export function launcherTypesAgent(spec: LauncherSpec): boolean {
-  const uses = (name: string) => launcherCommands(spec).some((c) => new RegExp(`\\{\\{\\s*${name}(_quoted)?\\s*\\}\\}`).test(JSON.stringify(c)));
-  return uses("agent") && !uses("agent_argv");
+  return launcherUses(spec, "agent") && !launcherUses(spec, "agent_argv");
 }
 
 /** The launchers a config can use: the root one, then each profile's own. */

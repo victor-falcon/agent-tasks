@@ -120,11 +120,18 @@ Options:
     }
 
     const show = (p: string) => tildify(p, ctx.env);
+    const where: Record<Exclude<InitPreset, "process">, { unit: string; place: string }> = {
+      herdr: { unit: "tab", place: "Herdr" },
+      rex: { unit: "window", place: "Rex session" },
+      tmux: { unit: "window", place: "tmux server" },
+    };
     const launcherNote = !createdConfig
-      ? null
+      ? asked
+        ? `--launcher ${asked} ignored: ${show(configFile)} already exists and was kept. Set "launcher" in it by hand.`
+        : null
       : launcher.preset === "process"
-        ? `Launcher: process (${launcher.reason}). Each run is a child process with no terminal, so the agent is claude in print mode, allowed to edit files and run agent-tasks only. Inside Herdr, Rex or tmux, run init there instead (or pass --launcher).`
-        : `Launcher: ${launcher.preset} (${launcher.reason}). Each run gets its own ${launcher.preset === "herdr" ? "tab" : "window"} with an interactive shell, so the agent command can be a shell alias. Start the runner in this ${launcher.preset === "herdr" ? "Herdr" : launcher.preset === "rex" ? "Rex session" : "tmux server"}.`;
+        ? `Launcher: process (${launcher.reason}). Each run is a child process with no terminal, so the agent is claude in print mode, allowed to edit files and run agent-tasks only: add what your tasks need to --allowedTools (e.g. "Bash(git:*)"). Inside Herdr, Rex or tmux, run init there instead (or pass --launcher).`
+        : `Launcher: ${launcher.preset} (${launcher.reason}). Each run gets its own ${where[launcher.preset].unit} with an interactive shell, so the agent command can be a shell alias. The agent asks for permissions there as usual, unless you add flags to agent.args. Start the runner in this ${where[launcher.preset].place}.`;
     const next = [
       `Edit ${show(configFile)}: the agent command, the launcher and the profiles.`,
       `Write your own rules for subagents in ${show(join(instructionsDir, "subagent.md"))}.`,

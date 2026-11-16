@@ -83,7 +83,10 @@ Then edit `~/.config/agent-tasks/config.json`:
 2. `agent`: the command that starts your agent, e.g.
    `{ "command": "claude" }`. With `process` there is no terminal, so `init`
    writes `claude` in print mode (`--print`, allowed to edit files and run
-   `agent-tasks` only). Different commands per folder go in `profiles`.
+   `agent-tasks` only; add what your tasks need to `--allowedTools`). With
+   the other presets the agent asks for permissions in its tab as usual,
+   unless you add flags to `args`. Different commands per folder go in
+   `profiles`.
 3. `instructions/subagent.md`: what every sub-agent must know about your
    machine.
 
@@ -155,7 +158,7 @@ the launcher commands and variables in
 | `herdr` | Its own Herdr tab, nested under the runner | Agent state (working, idle, blocked) from Herdr. Run the runner inside Herdr. |
 | `rex` | Its own Rex window in the runner's session | **Untested against a real Rex.** Needs `rex` and `jq`. |
 | `tmux` | Its own tmux window | tmux has no agent status: blocked agents are only caught by the timeout. tmux 3.0+. |
-| `process` | A child process of the runner, output in the run's log | No terminal and no agent state, so the agent must run non-interactively (`claude --print`). The default; for tests and machines without a multiplexer. |
+| `process` | A child process of the runner, output in the run's log | No terminal and no agent state, so the agent must run non-interactively (`claude --print`). What `init` picks outside a multiplexer; for tests and machines without one. |
 
 The interactive presets (`herdr`, `rex`, `tmux`) start a shell and type the
 agent command at its prompt, so shell aliases and functions work. For
