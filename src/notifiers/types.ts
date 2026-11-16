@@ -15,6 +15,11 @@ export interface NotifyItem {
   message?: string;
 }
 
+/** A tick event of a kind notifiers can subscribe to. */
+export function isNotifyItem<T extends { type: string }>(e: T): e is T & NotifyItem {
+  return (NOTIFY_EVENTS as readonly string[]).includes(e.type);
+}
+
 /** One notification: every event of the same kind in a tick, grouped. */
 export interface Notification {
   event: NotifyEventType;

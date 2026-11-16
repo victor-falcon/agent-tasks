@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { commands } from "../src/commands/index.ts";
+import { configErrors } from "../src/config.ts";
 import { createContext } from "../src/context.ts";
 import { newRun } from "../src/execution.ts";
 import { commandNotifyArgv } from "../src/notifiers/command.ts";
@@ -61,6 +62,7 @@ describe("system notifier", () => {
 
   test("escapes AppleScript strings", () => {
     expect(appleScriptString('a "b" \\ c')).toBe('"a \\"b\\" \\\\ c"');
+    expect(appleScriptString("line one\nline two")).toBe('"line one line two"');
   });
 
   test("osascript on macOS, notify-send on Linux, nothing elsewhere or when missing", () => {
@@ -126,10 +128,9 @@ describe("dispatch", () => {
     expect(calls[0]![0]).toEndWith("osascript");
   });
 
-  test("an invalid notifiers section is a warning, not a crash", () => {
-    const { ctx, calls, deps } = setup({ notifiers: [{ type: "pager", events: ["failed"] }] });
-    expect(dispatchNotifications(ctx, [item], deps).warnings[0]).toContain('notifiers[0].type: must be "system" or "command"');
-    expect(calls).toEqual([]);
+  test("an invalid notifiers section is rejected when the config loads", () => {
+    expect(configErrors({ notifiers: [{ type: "pager", events: ["failed"] }] })).toEqual(['notifiers[0].type: must be "system" or "command"']);
+    expect(configErrors({ notifiers: [{ type: "system", events: ["failed"] }] })).toEqual([]);
   });
 
   test("a notifier that throws is a warning, the others still run, and the event is marked", () => {

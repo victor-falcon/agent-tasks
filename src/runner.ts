@@ -5,7 +5,7 @@ import type { Context, Writer } from "./context.ts";
 import { formatDuration, parseDuration } from "./duration.ts";
 import { AgentTasksError } from "./errors.ts";
 import type { ExecEvent } from "./execution.ts";
-import { defaultNotifierDeps, dispatchNotifications, type NotifierDeps, type NotifyItem } from "./notifiers/index.ts";
+import { defaultNotifierDeps, dispatchNotifications, isNotifyItem, type NotifierDeps, type NotifyItem } from "./notifiers/index.ts";
 import { tildify } from "./paths.ts";
 import { acquireRunnerLock, pidAlive, releaseRunnerLock, runnerLogPath, type RunnerLock, updateRunnerLock } from "./runner-lock.ts";
 import {
@@ -33,23 +33,25 @@ import { formatInZone, systemTimezone } from "./time.ts";
 // interval. A tick that throws is shown as ⚠ and the loop goes on.
 
 export interface RunnerOptions {
-  /** Interval as written (`5m`). */
+  /** Interval as written (`5m`). Fixed for the runner's life; a change in the config needs a restart. */
   every: string;
   once: boolean;
   quiet: boolean;
 }
+
+/** Where the screen output goes. `isTTY` turns on colors, the status line and the Herdr escapes. */
+export type RunnerStdout = Writer & { isTTY?: boolean; columns?: number };
 
 export interface RunnerDeps {
   /** The clock (the real time, shifted by `--now`). */
   now(): Date;
   /** Waits `ms`, returning early when `signal` aborts. */
   sleep(ms: number, signal: AbortSignal): Promise<void>;
-  /** A fresh context for one tick at `now` (config re-read, so edits apply on the next tick). */
+  /** A fresh context for one tick at `now` (config re-read, so notifier and task edits apply on the next tick). */
   context(now: Date): Context;
-  /** Aborted on SIGINT/SIGTERM: the runner stops after the current tick. */
+  /** Aborted on SIGINT/SIGTERM/SIGHUP: the runner stops after the current tick. */
   signal: AbortSignal;
-  /** Where the screen output goes. `isTTY` turns on colors, the status line and the Herdr escapes. */
-  stdout: Writer & { isTTY?: boolean };
+  stdout: RunnerStdout;
   pid: number;
   /** The tick function (replaceable in tests). */
   tick?(ctx: Context): TickResult;
@@ -89,28 +91,29 @@ export function countRunning(ctx: Context): number {
   return running;
 }
 
-const NOTIFIABLE = new Set(["launched", "succeeded", "failed", "timed_out", "missed", "blocked", "anomaly"]);
-
 function errorText(err: unknown): string {
   return err instanceof AgentTasksError ? err.message : String((err as Error)?.stack ?? err);
 }
 
-/** The screen, `runner.log` and the Herdr escapes. */
+// ---------------------------------------------------------------------------
+// Output: the screen, runner.log and the Herdr escapes
+// ---------------------------------------------------------------------------
+
 class RunnerOutput {
   readonly tty: boolean;
   readonly style: Style;
   private statusShown = false;
   private agentState: AgentState | null = null;
+  private readonly plainStyle: Style = { color: false };
 
   constructor(
-    private readonly stdout: Writer & { isTTY?: boolean },
+    private readonly stdout: RunnerStdout,
     private readonly logFile: string,
     private readonly timezone: string,
     env: Record<string, string | undefined>,
-    private readonly json: boolean,
-    private readonly quiet: boolean,
+    private readonly mode: { json: boolean; quiet: boolean },
   ) {
-    this.tty = stdout.isTTY === true && !json;
+    this.tty = stdout.isTTY === true && !mode.json;
     this.style = { color: useColor(this.tty, env) };
   }
 
@@ -131,42 +134,45 @@ class RunnerOutput {
     }
   }
 
-  /** A line on the screen (unless JSON) and in runner.log. */
-  line(screen: string, plain: string, json?: unknown): void {
-    if (this.json) {
-      if (json !== undefined) this.stdout.write(`${JSON.stringify(json)}\n`);
-    } else this.write(`${screen}\n`);
-    this.log(plain);
-  }
-
-  runnerLine(line: RunnerLine, json: unknown): void {
-    if (this.quiet && line.kind === "tick") {
-      this.log(formatLine(line, this.timezone, { color: false }));
-      return;
-    }
-    this.line(formatLine(line, this.timezone, this.style), formatLine(line, this.timezone, { color: false }), json);
+  private writeJson(json: unknown): void {
+    this.stdout.write(`${JSON.stringify(json)}\n`);
   }
 
   header(text: (style: Style) => string, json: unknown): void {
-    this.line(text(this.style), text({ color: false }), json);
+    this.log(text(this.plainStyle));
+    if (this.mode.json) this.writeJson(json);
+    else this.write(`${text(this.style)}\n`);
+  }
+
+  /** A line in runner.log and on the screen; with --json, `json` (if any) instead of the text. */
+  emit(line: RunnerLine, json?: unknown): void {
+    this.log(formatLine(line, this.timezone, this.plainStyle));
+    if (this.mode.json) {
+      if (json !== undefined) this.writeJson(json);
+      return;
+    }
+    if (this.mode.quiet && line.kind === "tick") return;
+    this.write(`${formatLine(line, this.timezone, this.style)}\n`);
+  }
+
+  private get width(): number | undefined {
+    return this.stdout.columns && this.stdout.columns > 0 ? this.stdout.columns : undefined;
   }
 
   /** The status line, redrawn in place on a terminal only. */
   status(info: StatusInfo): void {
-    if (!this.tty || this.quiet) return;
-    this.write(formatStatusBlock(info, this.timezone, this.style));
+    if (!this.tty || this.mode.quiet) return;
+    this.write(formatStatusBlock(info, this.timezone, this.style, this.width));
     this.statusShown = true;
   }
 
-  /** The final status line, on the screen and in the log. */
+  /** The last status line, on the screen and in the log. */
   final(info: StatusInfo, json: unknown): void {
-    const plain = formatStatus(info, this.timezone, { color: false });
-    if (this.json) this.stdout.write(`${JSON.stringify(json)}\n`);
-    else if (this.quiet) {
-      // Events only.
-    } else if (this.tty) this.write(`${formatStatusBlock(info, this.timezone, this.style)}\n`);
-    else this.stdout.write(`${plain}\n`);
+    const plain = formatStatus(info, this.timezone, this.plainStyle);
     this.log(plain);
+    if (this.mode.json) return this.writeJson(json);
+    if (this.mode.quiet) return;
+    this.write(this.tty ? `${formatStatusBlock(info, this.timezone, this.style, this.width)}\n` : `${plain}\n`);
   }
 
   /** OSC 2 title and OSC 7501 agent state, only on a terminal and only when the state changes. */
@@ -179,115 +185,24 @@ class RunnerOutput {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The loop
+// ---------------------------------------------------------------------------
+
 /** Local `YYYY-MM-DD`, to reset the "today" counters at midnight. */
 function dayOf(at: Date, timezone: string): string {
   return formatInZone(at, timezone).slice(0, 10);
 }
 
-/**
- * Runs the loop until `deps.signal` aborts (or once with `--once`). Returns
- * the exit code: 0, or 1 when the single `--once` tick failed.
- */
-export async function runRunner(base: Context, opts: RunnerOptions, deps: RunnerDeps): Promise<number> {
-  const everyMs = parseDuration(opts.every);
-  const tickFn = deps.tick ?? ((ctx: Context) => tick(ctx, { mode: "runner" }));
-  const timezone = base.config.config.timezone ?? systemTimezone();
-  const paths = base.paths;
-  const startedAt = deps.now();
-  const lock: RunnerLock = {
-    pid: deps.pid,
-    terminal: base.env.HC_TERMINAL_ID || null,
-    started_at: formatInZone(startedAt, timezone),
-    every: opts.every,
-    last_tick_at: null,
-    next_tick_at: null,
-  };
-  // Read before the first tick appends its heartbeat.
-  const previousTick = readTicks(paths).items.at(-1);
-  const { stale } = acquireRunnerLock(paths, lock, deps.pidAlive ?? pidAlive);
+function emptyCounts(): TodayCounts {
+  return { succeeded: 0, failed: 0, missed: 0, blocked: 0 };
+}
 
-  const out = new RunnerOutput(deps.stdout, runnerLogPath(paths), timezone, base.env, base.json, opts.quiet);
-  const setup = describeSetup(base);
-  const header = { every: opts.every, launcher: setup.launcher, agent: setup.agent, dataDir: tildify(paths.dataDir, base.env) };
-  const notifierDeps = deps.notifierDeps ?? defaultNotifierDeps(base.env);
-
-  let today: TodayCounts = { succeeded: 0, failed: 0, missed: 0, blocked: 0 };
-  let day = dayOf(startedAt, timezone);
-  const status: StatusInfo = { health: "healthy", last_tick: null, next_tick: null, running: 0, today };
-  let exitCode = 0;
-  let ticks = 0;
-
-  const warn = (at: Date, message: string) => out.runnerLine({ kind: "warning", at, message }, { type: "warning", at: at.toISOString(), message });
-  const notify = (ctx: Context, items: NotifyItem[]) => {
-    if (items.length === 0) return;
-    try {
-      for (const w of dispatchNotifications(ctx, items, notifierDeps).warnings) warn(ctx.now, w);
-    } catch (err) {
-      warn(ctx.now, `notifiers failed: ${errorText(err)}`);
-    }
-  };
-
-  try {
-    out.header((style) => formatHeader(header, style), { type: "runner_started", pid: deps.pid, terminal: lock.terminal, started_at: lock.started_at, every: opts.every, ...setup, data_dir: paths.dataDir });
-    out.agent("idle", true);
-    if (stale) warn(startedAt, `took over a stale lock from pid ${stale.pid} (started ${stale.started_at})`);
-
-    // The heartbeat came back after a gap: say how long nothing ticked.
-    if (previousTick) {
-      const last = new Date(previousTick.at);
-      const gap = startedAt.getTime() - last.getTime();
-      if (gap > 2 * everyMs) {
-        out.runnerLine({ kind: "recovered", at: startedAt, last_tick: last, gap_ms: gap }, { type: "runner_recovered", at: startedAt.toISOString(), last_tick: previousTick.at, gap_ms: gap });
-        const ctx = deps.context(startedAt);
-        notify(ctx, [{ type: "runner_recovered", run_ref: null, task_id: null, message: `no ticks for ${formatDuration(gap)} (last tick ${previousTick.at})` }]);
-      }
-    }
-
-    while (!deps.signal.aborted) {
-      const at = deps.now();
-      if (dayOf(at, timezone) !== day) {
-        day = dayOf(at, timezone);
-        today = { succeeded: 0, failed: 0, missed: 0, blocked: 0 };
-        status.today = today;
-      }
-      ticks++;
-      let ctx: Context | null = null;
-      try {
-        ctx = deps.context(at);
-        const result = tickFn(ctx);
-        const events = result.events.map((e) => withDuration(ctx!, e));
-        status.running = countRunning(ctx);
-        const due = result.events.filter((e) => e.type === "launched" || (e.type === "failed" && e.reason === "launch_failed")).length;
-        out.runnerLine({ kind: "tick", at, due, running: status.running }, { type: "tick", at: result.at, mode: result.mode, events, errors: result.errors, running: status.running });
-        for (const event of events) {
-          out.runnerLine({ kind: "event", at, event }, undefined);
-          count(today, event);
-        }
-        notify(ctx, events.filter((e) => NOTIFIABLE.has(e.type)) as NotifyItem[]);
-        status.health = result.errors.length > 0 ? "degraded" : "healthy";
-      } catch (err) {
-        status.health = "tick_failed";
-        warn(at, `tick failed: ${errorText(err)}`);
-        if (opts.once) exitCode = 1;
-      }
-      status.last_tick = at;
-      status.next_tick = opts.once ? null : new Date(at.getTime() + everyMs);
-      out.agent(status.running > 0 ? "working" : "idle");
-      try {
-        updateRunnerLock(paths, { ...lock, last_tick_at: formatInZone(at, timezone), next_tick_at: status.next_tick ? formatInZone(status.next_tick, timezone) : null });
-      } catch (err) {
-        warn(at, `could not update ${paths.stateDir}/runner.lock: ${errorText(err)}`);
-      }
-      if (opts.once) break;
-      out.status(status);
-      await deps.sleep(Math.max(0, status.next_tick!.getTime() - deps.now().getTime()), deps.signal);
-    }
-  } finally {
-    releaseRunnerLock(paths, deps.pid);
-    const final: StatusInfo = { ...status, health: opts.once ? status.health : "stopped", next_tick: null };
-    out.final(final, { type: "runner_stopped", at: deps.now().toISOString(), ticks, last_tick: status.last_tick?.toISOString() ?? null, running: status.running, today });
-  }
-  return exitCode;
+function tallyToday(today: TodayCounts, e: ExecEvent): void {
+  if (e.type === "succeeded") today.succeeded++;
+  else if (e.type === "failed" || e.type === "timed_out") today.failed++;
+  else if (e.type === "missed") today.missed++;
+  else if (e.type === "blocked") today.blocked++;
 }
 
 /** Adds how long the attempt took to a finished event. */
@@ -303,9 +218,146 @@ function withDuration(ctx: Context, e: ExecEvent): RunnerEvent {
   }
 }
 
-function count(today: TodayCounts, e: ExecEvent): void {
-  if (e.type === "succeeded") today.succeeded++;
-  else if (e.type === "failed" || e.type === "timed_out") today.failed++;
-  else if (e.type === "missed") today.missed++;
-  else if (e.type === "blocked") today.blocked++;
+class Runner {
+  private readonly everyMs: number;
+  private readonly timezone: string;
+  private readonly lock: RunnerLock;
+  private readonly startedAt: Date;
+  private readonly status: StatusInfo = { health: "healthy", last_tick: null, next_tick: null, running: 0, today: emptyCounts() };
+  private day: string;
+  private ticks = 0;
+  /** Anomalies notified on the previous tick: one that keeps happening is notified once, not every tick. */
+  private recentAnomalies = new Set<string>();
+  private out!: RunnerOutput;
+  private notifierDeps!: NotifierDeps;
+
+  constructor(
+    private readonly base: Context,
+    private readonly opts: RunnerOptions,
+    private readonly deps: RunnerDeps,
+  ) {
+    this.everyMs = parseDuration(opts.every);
+    this.timezone = base.config.config.timezone ?? systemTimezone();
+    const startedAt = (this.startedAt = deps.now());
+    this.day = dayOf(startedAt, this.timezone);
+    this.lock = { pid: deps.pid, terminal: base.env.HC_TERMINAL_ID || null, started_at: formatInZone(startedAt, this.timezone), every: opts.every, last_tick_at: null, next_tick_at: null };
+  }
+
+  private get paths() {
+    return this.base.paths;
+  }
+
+  private warn(at: Date, message: string): void {
+    this.out.emit({ kind: "warning", at, message }, { type: "warning", at: at.toISOString(), message });
+  }
+
+  private notify(ctx: Context, items: NotifyItem[]): void {
+    if (items.length === 0) return;
+    try {
+      for (const w of dispatchNotifications(ctx, items, this.notifierDeps).warnings) this.warn(ctx.now, w);
+    } catch (err) {
+      this.warn(ctx.now, `notifiers failed: ${errorText(err)}`);
+    }
+  }
+
+  /** Drops anomalies already notified on the previous tick (anomalies have no run event to mark). */
+  private freshAnomalies(items: NotifyItem[]): NotifyItem[] {
+    const key = (i: NotifyItem) => `${i.task_id ?? ""}|${i.run_ref ?? ""}|${i.message ?? ""}`;
+    const seen = this.recentAnomalies;
+    this.recentAnomalies = new Set(items.filter((i) => i.type === "anomaly").map(key));
+    return items.filter((i) => i.type !== "anomaly" || !seen.has(key(i)));
+  }
+
+  async run(): Promise<number> {
+    const { startedAt } = this;
+    // Read before the first tick appends its heartbeat.
+    const previousTick = readTicks(this.paths).items.at(-1);
+    this.out = new RunnerOutput(this.deps.stdout, runnerLogPath(this.paths), this.timezone, this.base.env, { json: this.base.json, quiet: this.opts.quiet });
+    this.notifierDeps = this.deps.notifierDeps ?? defaultNotifierDeps(this.base.env);
+    const setup = describeSetup(this.base);
+    const { stale } = acquireRunnerLock(this.paths, this.lock, this.deps.pidAlive ?? pidAlive);
+
+    let exitCode = 0;
+    try {
+      const header = { every: this.opts.every, ...setup, dataDir: tildify(this.paths.dataDir, this.base.env) };
+      this.out.header((style) => formatHeader(header, style), { type: "runner_started", pid: this.lock.pid, terminal: this.lock.terminal, started_at: this.lock.started_at, every: this.opts.every, ...setup, data_dir: this.paths.dataDir });
+      this.out.agent("idle", true);
+      if (stale) this.warn(startedAt, `took over a stale lock from pid ${stale.pid} (started ${stale.started_at})`);
+      // `--once` is for testing and for schedulers that call it at their own pace: no gap to report.
+      if (previousTick && !this.opts.once) this.reportGap(startedAt, previousTick.at);
+
+      while (!this.deps.signal.aborted) {
+        const at = this.deps.now();
+        if (!this.tickOnce(at) && this.opts.once) exitCode = 1;
+        if (this.opts.once) break;
+        this.out.status(this.status);
+        await this.deps.sleep(Math.max(0, this.status.next_tick!.getTime() - this.deps.now().getTime()), this.deps.signal);
+      }
+    } finally {
+      releaseRunnerLock(this.paths, this.lock.pid);
+      const final: StatusInfo = { ...this.status, health: this.opts.once ? this.status.health : "stopped", next_tick: null };
+      this.out.final(final, { type: "runner_stopped", at: this.deps.now().toISOString(), ticks: this.ticks, last_tick: this.status.last_tick?.toISOString() ?? null, running: this.status.running, today: this.status.today });
+    }
+    return exitCode;
+  }
+
+  /** The heartbeat came back after a gap: say how long nothing ticked. */
+  private reportGap(startedAt: Date, lastTickAt: string): void {
+    const last = new Date(lastTickAt);
+    const gap = startedAt.getTime() - last.getTime();
+    if (gap <= 2 * this.everyMs) return;
+    this.out.emit({ kind: "recovered", at: startedAt, last_tick: last, gap_ms: gap }, { type: "runner_recovered", at: startedAt.toISOString(), last_tick: lastTickAt, gap_ms: gap });
+    try {
+      this.notify(this.deps.context(startedAt), [{ type: "runner_recovered", run_ref: null, task_id: null, message: `no ticks for ${formatDuration(gap)} (last tick ${lastTickAt})` }]);
+    } catch (err) {
+      this.warn(startedAt, `notifiers failed: ${errorText(err)}`);
+    }
+  }
+
+  /** One tick: run it, show and notify its events, update the lock. Returns false when the tick threw. */
+  private tickOnce(at: Date): boolean {
+    const { status } = this;
+    if (dayOf(at, this.timezone) !== this.day) {
+      this.day = dayOf(at, this.timezone);
+      status.today = emptyCounts();
+    }
+    this.ticks++;
+    let ok = true;
+    try {
+      const ctx = this.deps.context(at);
+      const result = (this.deps.tick ?? ((c: Context) => tick(c, { mode: "runner" })))(ctx);
+      const events = result.events.map((e) => withDuration(ctx, e));
+      status.running = countRunning(ctx);
+      const due = events.filter((e) => e.type === "launched" || (e.type === "failed" && e.reason === "launch_failed")).length;
+      this.out.emit({ kind: "tick", at, due, running: status.running }, { type: "tick", at: result.at, mode: result.mode, events, errors: result.errors, running: status.running });
+      for (const event of events) {
+        this.out.emit({ kind: "event", at, event });
+        tallyToday(status.today, event);
+      }
+      this.notify(ctx, this.freshAnomalies(events.filter(isNotifyItem)));
+      status.health = result.errors.length > 0 ? "degraded" : "healthy";
+    } catch (err) {
+      ok = false;
+      status.health = "tick_failed";
+      this.warn(at, `tick failed: ${errorText(err)}`);
+    }
+    status.last_tick = at;
+    status.next_tick = this.opts.once ? null : new Date(at.getTime() + this.everyMs);
+    this.out.agent(status.running > 0 ? "working" : "idle");
+    try {
+      updateRunnerLock(this.paths, { ...this.lock, last_tick_at: formatInZone(at, this.timezone), next_tick_at: status.next_tick ? formatInZone(status.next_tick, this.timezone) : null });
+    } catch (err) {
+      this.warn(at, `could not update the runner lock: ${errorText(err)}`);
+    }
+    return ok;
+  }
+}
+
+/**
+ * Runs the loop until `deps.signal` aborts (or once with `--once`). Returns
+ * the exit code: 0, or 1 when the single `--once` tick failed. Throws
+ * `RunnerLockedError` when another runner is alive.
+ */
+export function runRunner(base: Context, opts: RunnerOptions, deps: RunnerDeps): Promise<number> {
+  return new Runner(base, opts, deps).run();
 }

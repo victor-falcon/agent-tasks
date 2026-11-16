@@ -145,7 +145,7 @@ export function formatStatus(info: StatusInfo, timezone: string, style: Style): 
   const parts = [
     `${paint(style, health.color, "●")} ${health.text}`,
     `last tick ${info.last_tick ? clockTime(info.last_tick, timezone) : "never"}`,
-    ...(info.next_tick ? [`next ${clockTime(info.next_tick, timezone).slice(0, 5)}`] : []),
+    ...(info.next_tick ? [`next ${clockTime(info.next_tick, timezone)}`] : []),
     `running ${info.running}`,
     `today ${paint(style, "green", `✓${t.succeeded}`)} ${paint(style, "red", `✕${t.failed}`)} ${paint(style, "magenta", `□${t.missed}`)} ${paint(style, "yellow", `!${t.blocked}`)}`,
   ];
@@ -157,9 +157,14 @@ export const RULE = "─".repeat(77);
 /** Clears the status block (rule + status line) so it can be redrawn below the next lines. */
 export const CLEAR_STATUS = "\r\x1b[2K\x1b[1A\r\x1b[2K";
 
-/** The status block: a rule and the status line, without a trailing newline (it is redrawn in place). */
-export function formatStatusBlock(info: StatusInfo, timezone: string, style: Style): string {
-  return `${paint(style, "dim", RULE)}\n${formatStatus(info, timezone, style)}`;
+/**
+ * The status block: a rule and the status line, without a trailing newline
+ * (it is redrawn in place). The rule never exceeds the terminal's width, so
+ * it does not wrap and break the redraw.
+ */
+export function formatStatusBlock(info: StatusInfo, timezone: string, style: Style, width?: number): string {
+  const rule = width ? RULE.slice(0, Math.max(1, width - 1)) : RULE;
+  return `${paint(style, "dim", rule)}\n${formatStatus(info, timezone, style)}`;
 }
 
 // ---------------------------------------------------------------------------

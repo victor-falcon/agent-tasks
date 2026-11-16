@@ -18,6 +18,8 @@ import {
   type KeepOpen,
   type Task,
 } from "./schema.ts";
+import { notifierErrors } from "./notifiers/config.ts";
+import type { NotifierConfig } from "./notifiers/types.ts";
 import { defaultMaxDelay, formatDuration, parseDuration } from "./duration.ts";
 import { systemTimezone } from "./time.ts";
 
@@ -58,7 +60,7 @@ export interface UserConfig {
   skill?: string;
   profiles?: Profile[];
   instructions?: { subagent?: string[]; supervisor?: string[] };
-  notifiers?: Record<string, unknown>[];
+  notifiers?: NotifierConfig[];
   supervisor?: Record<string, unknown>;
   defaults?: { catch_up?: CatchUp; max_delay?: string; timeout?: string; keep_open?: KeepOpen };
 }
@@ -202,9 +204,7 @@ export function configErrors(value: unknown): string[] {
     checkStringArray(c.at("instructions").at("supervisor"), value.instructions.supervisor);
   }
 
-  if (value.notifiers !== undefined && !(Array.isArray(value.notifiers) && value.notifiers.every(isObject))) {
-    c.at("notifiers").fail("must be an array of objects");
-  }
+  c.errors.push(...notifierErrors(value.notifiers));
   if (value.supervisor !== undefined && !isObject(value.supervisor)) c.at("supervisor").fail("must be an object");
 
   if (checkSection(c.at("defaults"), value.defaults, ["catch_up", "max_delay", "timeout", "keep_open"])) {

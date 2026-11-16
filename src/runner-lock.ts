@@ -1,7 +1,8 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { AgentTasksError } from "./errors.ts";
 import type { DataPaths } from "./paths.ts";
+import { createJsonExclusive, writeJsonAtomic } from "./store.ts";
 
 // Only one runner at a time: `state/runner.lock` holds the live runner's pid,
 // terminal and interval, and its last and next tick (rewritten every tick).
@@ -36,13 +37,17 @@ export function pidAlive(pid: number): boolean {
   }
 }
 
-/** The lock's content, or null when there is none or it cannot be read. */
+const str = (v: unknown): v is string => typeof v === "string";
+const optStr = (v: unknown) => v === undefined || v === null || str(v);
+
+/** The lock's content, or null when there is none or it is not a valid lock. */
 export function readRunnerLock(paths: DataPaths): RunnerLock | null {
   const file = runnerLockPath(paths);
   if (!existsSync(file)) return null;
   try {
-    const lock = JSON.parse(readFileSync(file, "utf8")) as RunnerLock;
-    return typeof lock?.pid === "number" ? lock : null;
+    const lock = JSON.parse(readFileSync(file, "utf8"));
+    const valid = Number.isInteger(lock?.pid) && optStr(lock.terminal) && str(lock.started_at) && str(lock.every) && optStr(lock.last_tick_at) && optStr(lock.next_tick_at);
+    return valid ? { terminal: null, ...lock } : null;
   } catch {
     return null;
   }
@@ -55,35 +60,26 @@ export class RunnerLockedError extends AgentTasksError {
   }
 }
 
-function createExclusive(file: string, lock: RunnerLock): boolean {
-  let fd: number;
-  try {
-    fd = openSync(file, "wx");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
-    throw err;
-  }
-  try {
-    writeSync(fd, `${JSON.stringify(lock, null, 2)}\n`);
-  } finally {
-    closeSync(fd);
-  }
-  return true;
+function sameLock(a: RunnerLock | null, b: RunnerLock | null): boolean {
+  return a?.pid === b?.pid && a?.started_at === b?.started_at;
 }
 
 /**
  * Takes the runner lock. Throws `RunnerLockedError` if a live process holds
- * it; a stale one (dead pid, or unreadable) is removed and taken over.
- * Returns the previous stale holder, if any.
+ * it; a stale one (dead pid, or not a valid lock) is removed and taken over.
+ * The lock file is created complete (temp file + link), so another runner
+ * never reads it half-written. Returns the previous stale holder, if any.
  */
 export function acquireRunnerLock(paths: DataPaths, lock: RunnerLock, alive: (pid: number) => boolean = pidAlive): { stale: RunnerLock | null } {
   mkdirSync(paths.stateDir, { recursive: true });
   const file = runnerLockPath(paths);
   let stale: RunnerLock | null = null;
-  for (let i = 0; i < 3; i++) {
-    if (createExclusive(file, lock)) return { stale };
+  for (let i = 0; i < 5; i++) {
+    if (createJsonExclusive(file, lock)) return { stale };
     const holder = readRunnerLock(paths);
     if (holder && holder.pid !== lock.pid && alive(holder.pid)) throw new RunnerLockedError(holder);
+    // Remove it only if it is still the stale lock we looked at: another runner may have just taken it over.
+    if (!sameLock(readRunnerLock(paths), holder)) continue;
     stale = holder;
     rmSync(file, { force: true });
   }
@@ -93,15 +89,7 @@ export function acquireRunnerLock(paths: DataPaths, lock: RunnerLock, alive: (pi
 /** Rewrites the lock (last/next tick) if this process still holds it. */
 export function updateRunnerLock(paths: DataPaths, lock: RunnerLock): void {
   if (readRunnerLock(paths)?.pid !== lock.pid) return;
-  const file = runnerLockPath(paths);
-  const tmp = `${file}.${lock.pid}.tmp`;
-  const fd = openSync(tmp, "w");
-  try {
-    writeSync(fd, `${JSON.stringify(lock, null, 2)}\n`);
-  } finally {
-    closeSync(fd);
-  }
-  renameSync(tmp, file);
+  writeJsonAtomic(runnerLockPath(paths), lock);
 }
 
 /** Removes the lock if this process still holds it. */

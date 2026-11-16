@@ -5,9 +5,9 @@ import type { Notification, NotifierDeps } from "./types.ts";
 // `notify-send` on Linux. Elsewhere, or when the program is missing, it does
 // nothing.
 
-/** A string literal for AppleScript. */
+/** A one-line string literal for AppleScript (line breaks become spaces). */
 export function appleScriptString(text: string): string {
-  return `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  return `"${text.replace(/\s*[\r\n]+\s*/g, " ").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 /** The argv that shows `n`, or null when this platform has no notification command. */

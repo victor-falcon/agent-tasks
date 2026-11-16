@@ -71,7 +71,7 @@ describe("header and status line", () => {
   });
 
   test("status line in every health", () => {
-    expect(formatStatus(STATUS, TZ, plain)).toBe("● healthy · last tick 10:25:01 · next 10:30 · running 1 · today ✓4 ✕1 □1 !1");
+    expect(formatStatus(STATUS, TZ, plain)).toBe("● healthy · last tick 10:25:01 · next 10:30:01 · running 1 · today ✓4 ✕1 □1 !1");
     expect(formatStatus({ ...STATUS, health: "degraded" }, TZ, plain)).toStartWith("● degraded");
     expect(formatStatus({ ...STATUS, health: "tick_failed" }, TZ, plain)).toStartWith("● last tick failed");
     expect(formatStatus({ ...STATUS, health: "stopped", next_tick: null }, TZ, plain)).toBe("● stopped · last tick 10:25:01 · running 1 · today ✓4 ✕1 □1 !1");

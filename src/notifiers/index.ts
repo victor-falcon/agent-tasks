@@ -2,61 +2,20 @@ import type { Context } from "../context.ts";
 import { AgentTasksError } from "../errors.ts";
 import { findTask, readRunRef, updateRun } from "../execution.ts";
 import { exec } from "../launcher.ts";
-import { Checker, checkUnknownKeys, isObject, type Run, type RunEvent } from "../schema.ts";
+import type { Run, RunEvent } from "../schema.ts";
 import { sendCommand } from "./command.ts";
+import { notifiersOf } from "./config.ts";
 import { sendSystem } from "./system.ts";
-import { NOTIFY_EVENTS, type NotifierConfig, type NotifierDeps, type Notification, type NotifyEventType, type NotifyItem } from "./types.ts";
+import { type NotifierConfig, type NotifierDeps, type Notification, type NotifyEventType, type NotifyItem } from "./types.ts";
 
+export * from "./config.ts";
 export * from "./types.ts";
 
 // Notifiers: alerts outside the runner's screen. Events of one tick are
 // grouped (one notification per notifier and kind of event), and each run
 // event that was notified is marked (`notified` on the run's event), so it is
-// never notified twice.
-
-/** Used when the config has no `notifiers`. */
-export const DEFAULT_NOTIFIERS: readonly NotifierConfig[] = [{ type: "system", events: ["failed", "timed_out", "blocked"] }];
-
-function checkNotifier(c: Checker, value: unknown): void {
-  if (!isObject(value)) {
-    c.fail('must be an object such as { "type": "system", "events": ["failed"] }');
-    return;
-  }
-  if (value.type !== "system" && value.type !== "command") {
-    c.at("type").fail('must be "system" or "command"');
-    return;
-  }
-  checkUnknownKeys(c, value, value.type === "system" ? ["type", "events"] : ["type", "events", "run"]);
-  const events = value.events;
-  if (!Array.isArray(events) || events.length === 0 || !events.every((e) => (NOTIFY_EVENTS as readonly unknown[]).includes(e))) {
-    c.at("events").fail(`must be a non-empty array of: ${NOTIFY_EVENTS.join(", ")}`);
-  }
-  if (value.type === "command") {
-    const run = value.run;
-    const ok = (typeof run === "string" && run.trim() !== "") || (Array.isArray(run) && run.length > 0 && run.every((a) => typeof a === "string"));
-    if (!ok) c.at("run").fail('must be an argv array such as ["notify", "{{title}}", "{{message}}"] or a shell string');
-  }
-}
-
-/** Problems with the `notifiers` section, prefixed with their path. */
-export function notifierErrors(value: unknown): string[] {
-  const c = new Checker("notifiers");
-  if (value === undefined) return [];
-  if (!Array.isArray(value)) {
-    c.fail("must be an array");
-    return c.errors;
-  }
-  value.forEach((n, i) => checkNotifier(new Checker(`notifiers[${i}]`, c.errors), n));
-  return c.errors;
-}
-
-/** The notifiers of a config: the default when unset. Throws on an invalid section. */
-export function loadNotifiers(value: unknown): readonly NotifierConfig[] {
-  if (value === undefined) return DEFAULT_NOTIFIERS;
-  const errors = notifierErrors(value);
-  if (errors.length > 0) throw new AgentTasksError("config", `invalid notifiers in the config:\n  ${errors.join("\n  ")}`);
-  return value as NotifierConfig[];
-}
+// never notified twice. Only the runner notifies (one at a time, through its
+// lock), so the check and the mark need no lock of their own.
 
 // ---------------------------------------------------------------------------
 // Grouping
@@ -134,13 +93,8 @@ function send(config: NotifierConfig, n: Notification, deps: NotifierDeps): void
  */
 export function dispatchNotifications(ctx: Context, items: NotifyItem[], deps: NotifierDeps = defaultNotifierDeps(ctx.env)): DispatchResult {
   const result: DispatchResult = { notifications: [], warnings: [] };
-  let notifiers: readonly NotifierConfig[];
-  try {
-    notifiers = loadNotifiers(ctx.config.config.notifiers);
-  } catch (err) {
-    result.warnings.push((err as Error).message);
-    return result;
-  }
+  // Validated when the config is loaded.
+  const notifiers = notifiersOf(ctx.config.config);
   const wanted = new Set(notifiers.flatMap((n) => n.events));
 
   // Drop what was already notified (a run event carries `notified` once sent).

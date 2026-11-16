@@ -217,15 +217,20 @@ describe("the loop", () => {
     expect(seen).toEqual({ pid: process.pid, terminal: "t17g", started_at: "2026-11-17T09:00:00Z", every: "10m", last_tick_at: "2026-11-17T09:00:00Z", next_tick_at: "2026-11-17T09:10:00Z" });
   });
 
-  test("on start, a gap since the last tick shows runner_recovered", async () => {
+  test("on start, a gap since the last tick shows runner_recovered (not with --once)", async () => {
     appendTick(home.paths, { at: "2026-11-17T07:00:00Z", mode: "runner" });
+    const once = harness(home);
+    await once.run({ once: true });
+    expect(once.output()).not.toContain("recovered");
+
+    writeFileSync(home.paths.ticksFile, `${JSON.stringify({ at: "2026-11-17T07:00:00Z", mode: "runner" })}\n`);
     const h = harness(home);
-    await h.run({ once: true });
+    await h.run();
     expect(h.output()).toContain("09:00:00  ↻ runner recovered after 2h without ticks (last tick 07:00:00)");
 
     // A recent tick is not a gap.
     const again = harness(home);
-    await again.run({ once: true });
+    await again.run();
     expect(again.output()).not.toContain("recovered");
   });
 });
@@ -293,7 +298,15 @@ describe("terminal output", () => {
     const out = h.output();
     expect(out).not.toMatch(/\x1b\[\d+m/);
     expect(out).toContain(oscAgentState("idle"));
-    expect(out).toContain("● healthy · last tick 09:00:00 · next 09:05");
+    expect(out).toContain("● healthy · last tick 09:00:00 · next 09:05:00");
+  });
+
+  test("the rule under the events never wraps a narrow terminal", async () => {
+    const h = harness(home, { tty: true, env: { NO_COLOR: "1" }, stopAfter: 1 });
+    (h.deps.stdout as { columns?: number }).columns = 40;
+    await h.run();
+    expect(h.output()).toContain(`\n${"─".repeat(39)}\n●`);
+    expect(h.output()).not.toContain("─".repeat(40));
   });
 
   test("not a TTY: no escapes at all, no status line until the final one", async () => {
@@ -363,7 +376,7 @@ describe("notifiers in the runner", () => {
     expect(h.calls[0]![2]).toBe('display notification "Demo task" with title "agent-tasks" subtitle "2 runs failed"');
   });
 
-  test("a failing notifier is a ⚠ line and the runner carries on", async () => {
+  test("a failing notifier is a ⚠ line and the runner carries on; the same anomaly is notified once", async () => {
     home.writeConfig({ timezone: "UTC", notifiers: [{ type: "command", events: ["anomaly"], run: ["notify", "{{title}}"] }] });
     const h = harness(home, {
       stopAfter: 2,
@@ -371,7 +384,7 @@ describe("notifiers in the runner", () => {
       exec: (argv) => ({ argv, code: 1, stdout: "", stderr: "no route" }),
     });
     expect(await h.run()).toBe(0);
-    expect(h.output().match(/⚠ notifier 1 \(command\) failed for anomaly: notify anomaly exited with 1: no route/g)).toHaveLength(2);
+    expect(h.output().match(/⚠ notifier 1 \(command\) failed for anomaly: notify anomaly exited with 1: no route/g)).toHaveLength(1);
     expect(h.output().match(/tick {2}0 due/g)).toHaveLength(2);
   });
 
@@ -379,7 +392,7 @@ describe("notifiers in the runner", () => {
     home.writeConfig({ timezone: "UTC", notifiers: [{ type: "command", events: ["runner_recovered"], run: ["notify", "{{event}}", "{{message}}"] }] });
     appendTick(home.paths, { at: "2026-11-17T07:00:00Z", mode: "runner" });
     const h = harness(home);
-    await h.run({ once: true });
+    await h.run();
     expect(h.calls).toEqual([["notify", "runner_recovered", "no ticks for 2h (last tick 2026-11-17T07:00:00Z)"]]);
   });
 });
@@ -429,6 +442,11 @@ describe("runner command", () => {
     const r = await runCli(["runner", "--every", "soon", "--once"], home);
     expect(r.code).toBe(2);
     expect(r.stderr).toContain('--every: invalid duration "soon"');
+  });
+
+  test("--json --quiet still prints every tick with its events", async () => {
+    const r = await runCli(["runner", "--once", "--json", "--quiet", "--now", START], home);
+    expect(r.stdout.trim().split("\n").map((l) => JSON.parse(l).type)).toEqual(["runner_started", "tick", "runner_stopped"]);
   });
 
   test("--json prints one object per line", async () => {
