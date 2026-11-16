@@ -108,7 +108,7 @@ export function writeFixture(paths: DataPaths, { ticks = true } = {}): void {
   for (let d = 11; d <= 16; d++) writeRun(paths, scheduledRun("worktree-cleanup", day(d, "08:00"), d === 13 ? "failed" : "succeeded", { summary: d === 13 ? "git worktree prune failed" : "removed 2 worktrees" }));
   writeRun(paths, scheduledRun("worktree-cleanup", day(17, "08:00"), "running", { delayMin: 118, minutes: null }));
 
-  // Hourly task: missed overnight (runner stopped), failed at 09:00 after two attempts.
+  // Hourly task: missed overnight (runner stopped) but ok again at 08:00, failed at 09:00 after two attempts.
   writeTask(paths, task("sentry-summary", "Sentry summary", cron("0 * * * *"), { retries: 1 }));
   writeRun(paths, scheduledRun("sentry-summary", day(17, "00:00"), "succeeded", { summary: "no new issues" }));
   writeRun(paths, scheduledRun("sentry-summary", day(17, "01:00"), "succeeded", { summary: "1 new issue in notes/sentry.md" }));
@@ -119,6 +119,11 @@ export function writeFixture(paths: DataPaths, { ticks = true } = {}): void {
   writeRun(paths, failed);
   writeLog(paths, failed, "$ sentry-cli issues list\nerror: Auth token is required for this request.\n");
   writeRun(paths, scheduledRun("sentry-summary", day(17, "10:00"), "running", { minutes: null }));
+
+  // Daily task whose only slot today fell in the runner's gap: still missed (nothing ran since).
+  writeTask(paths, task("inbox-triage", "Inbox triage", cron("0 6 * * *")));
+  for (let d = 14; d <= 16; d++) writeRun(paths, scheduledRun("inbox-triage", day(d, "06:00"), "succeeded", { summary: "inbox at zero" }));
+  writeRun(paths, scheduledRun("inbox-triage", day(17, "06:00"), "missed", { reason: "runner_offline" }));
 
   // Waiting for a person.
   writeTask(paths, task("review-pr-123", "Review PR 123", { type: "once", at: "2026-11-17T09:30:00+01:00" }));

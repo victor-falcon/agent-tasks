@@ -109,8 +109,13 @@ describe("with every status", () => {
   test("list, list --all and filters", async () => {
     expect((await cli(["list"])).stdout).toMatchSnapshot("list");
     expect((await cli(["list", "--status", "paused"])).stdout).toMatchSnapshot("paused");
-    const ids = (await cli(["list", "--json", "--cwd", "~/Projects/bar"])).json().tasks.map((t: { id: string }) => t.id);
-    expect(ids).toEqual(["worktree-cleanup"]);
+    const ids = async (...args: string[]) => (await cli(["list", "--json", ...args])).json().tasks.map((t: { id: string }) => t.id);
+    expect(await ids("--cwd", "~/Projects/bar")).toEqual(["worktree-cleanup"]);
+    // Result filters: failed is about the latest result, even while a retry runs.
+    expect(await ids("--status", "failed")).toEqual(["sentry-summary"]);
+    expect(await ids("--status", "running,blocked")).toEqual(["review-pr-123", "sentry-summary", "worktree-cleanup"]);
+    expect(await ids("--status", "paused,failed")).toEqual([]);
+    expect((await cli(["list", "--status", "bogus"])).code).toBe(2);
   });
 
   test("runs, of every task and of one", async () => {
@@ -157,6 +162,8 @@ describe("with every status", () => {
     // A task id shows its latest occurrence.
     expect((await cli(["log", "sentry-summary"])).stdout).toContain("sentry-summary/20261117T090000Z");
     expect((await cli(["log", "sentry-summary/20261117T080000Z", "--attempt", "3"])).code).toBe(1);
+    // Both attempts write the default per-slot log, and the view says so.
+    expect((await cli(["log", "sentry-summary/20261117T080000Z", "--attempt", "1"])).stdout).toContain("Log (shared by attempts 1, 2):");
   });
 
   test("log --raw prints only the log, or fails when there is none", async () => {
@@ -217,20 +224,20 @@ describe("--json", () => {
     const r = await cli(["status", "--json"]);
     expect(r.code).toBe(1);
     const s = r.json();
-    expect(Object.keys(s)).toEqual(["schema", "ok", "runner", "tasks", "last_24h", "attention", "next", "errors"]);
+    expect(Object.keys(s)).toEqual(["schema", "ok", "runner", "tasks", "last_24h", "now", "attention", "next", "errors"]);
     expect(s.runner).toEqual({ state: "healthy", every: "5m", last_tick: "2026-11-17T09:00:00.000Z", next_tick: "2026-11-17T10:05:00+01:00" });
     expect(s.last_24h).toEqual({
       ok: 3,
       failed: 1,
-      missed: 3,
-      running: 2,
-      blocked: 1,
+      missed: 4,
       offline_gaps: [{ from: "2026-11-17T01:10:00+01:00", to: "2026-11-17T08:30:00+01:00" }],
     });
+    expect(s.now).toEqual({ running: 2, blocked: 1 });
+    // sentry-summary's overnight misses are gone from Attention: it succeeded at 08:00.
     expect(s.attention.map((a: { kind: string; task_id: string }) => `${a.kind} ${a.task_id}`)).toEqual([
       "failed sentry-summary",
       "blocked review-pr-123",
-      "missed sentry-summary",
+      "missed inbox-triage",
     ]);
     expect(s.next[0]).toEqual({ task_id: "sentry-summary", at: "2026-11-17T11:00:00+01:00", schedule: "every hour" });
   });
@@ -286,6 +293,27 @@ describe("status exit code and the runner banner", () => {
     }
     appendTick(home.paths, { at: "2026-11-17T10:00:00+01:00" });
     for (const args of [["list"], ["runs"], ["show", "daily"], ["log", "daily"]]) expect((await cli(args)).stderr).toBe("");
+  });
+
+  test("a paused task's failure is not under Attention; a later success clears misses", async () => {
+    home.writeTask(makeTask({ id: "daily", enabled: false, schedule: { type: "cron", cron: "0 8 * * *", timezone: FIXTURE_TZ } }));
+    writeRun(home.paths, scheduledRun("daily", "2026-11-17T07:00:00+01:00", "missed", { reason: "runner_offline" }));
+    writeRun(home.paths, scheduledRun("daily", "2026-11-17T08:00:00+01:00", "failed", { summary: "boom" }));
+    appendTick(home.paths, { at: "2026-11-17T10:00:00+01:00" });
+    const s = (await cli(["status", "--json"])).json();
+    expect(s.attention.map((a: { kind: string }) => a.kind)).toEqual(["missed"]); // still missed: no success after it
+    writeRun(home.paths, scheduledRun("daily", "2026-11-17T09:00:00+01:00", "succeeded"));
+    expect((await cli(["status"])).code).toBe(0);
+  });
+
+  test("an unreadable run file makes status exit 1", async () => {
+    healthyTask();
+    appendTick(home.paths, { at: "2026-11-17T10:00:00+01:00" });
+    writeFileSync(join(home.paths.runsDir, "daily", "20261117T080000Z.json"), "{ broken");
+    const r = await cli(["status"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("warning:");
+    expect(r.stdout).toContain("1 file could not be read");
   });
 
   test("the heartbeat is read from the end of ticks.jsonl; a broken last line is skipped", () => {

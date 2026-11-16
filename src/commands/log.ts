@@ -14,7 +14,7 @@ import { tildify } from "../paths.ts";
 import { type Attempt, type Run, type RunEvent, TASK_ID_RE } from "../schema.ts";
 import { parseRunRef, runRef, runSlotId } from "../slot.ts";
 import { isArchived, listRuns, readRun, runLogRelativePath, taskExists } from "../store.ts";
-import { displayTimezone } from "../task-info.ts";
+import { displayTimezone, warnCorrupt } from "../task-info.ts";
 import type { Command } from "./types.ts";
 
 /** A run ref, or a task id for its latest occurrence. */
@@ -24,7 +24,10 @@ function findRun(ctx: Context, arg: string): Run {
     return readRun(ctx.paths, taskId, slot);
   }
   if (!TASK_ID_RE.test(arg)) throw new UsageError(`invalid run ref or task id "${arg}" (expected <task-id> or <task-id>/<slot>)`);
-  const latest = listRuns(ctx.paths, arg).items.at(-1);
+  const { items, errors } = listRuns(ctx.paths, arg);
+  // An unreadable file could be the latest run: say so rather than pass an older one off as the latest.
+  warnCorrupt(ctx, errors);
+  const latest = items.at(-1);
   if (latest) return latest.run;
   if (taskExists(ctx.paths, arg) || isArchived(ctx.paths, arg)) throw new NotFoundError(`task "${arg}" has no runs yet`);
   throw new NotFoundError(`task "${arg}" not found (run "agent-tasks list --all" to see every task)`);
@@ -32,18 +35,25 @@ function findRun(ctx: Context, arg: string): Run {
 
 interface CapturedLog {
   attempt: number;
+  /** Attempts that write to the same file (the default log is one per slot). */
+  shared_with: number[];
   path: string;
   exists: boolean;
   content: string | null;
 }
 
+function logPath(ctx: Context, run: Run, attempt: Attempt): string {
+  const relative = attempt.log ?? runLogRelativePath(run.task_id, runSlotId(run));
+  return isAbsolute(relative) ? relative : join(ctx.paths.dataDir, relative);
+}
+
 /** The attempt's captured output; runs without a recorded path use the default `runs/<task>/<slot>.log`. */
 function capturedLog(ctx: Context, run: Run, attempt: Attempt | undefined): CapturedLog | null {
   if (!attempt) return null;
-  const relative = attempt.log ?? runLogRelativePath(run.task_id, runSlotId(run));
-  const path = isAbsolute(relative) ? relative : join(ctx.paths.dataDir, relative);
+  const path = logPath(ctx, run, attempt);
   const exists = existsSync(path);
-  return { attempt: attempt.n, path, exists, content: exists ? readFileSync(path, "utf8") : null };
+  const shared_with = run.attempts.filter((a) => a.n !== attempt.n && logPath(ctx, run, a) === path).map((a) => a.n);
+  return { attempt: attempt.n, shared_with, path, exists, content: exists ? readFileSync(path, "utf8") : null };
 }
 
 /** `key=value` pairs of an object, skipping empty values. */
@@ -99,8 +109,9 @@ function renderLog(ctx: Context, run: Run, log: CapturedLog | null): string {
   if (!log) return neverStarted(run.status) ? "Log: none (it never started)" : "Log: none (no attempt yet)";
   const where = tildify(log.path, ctx.env);
   if (log.content === null) return isInProgress(run.status) ? `Log: not captured yet (still in progress): ${where}` : `Log: none captured (${where})`;
-  if (log.content === "") return `Log (attempt ${log.attempt}): empty (${where})`;
-  return `Log (attempt ${log.attempt}): ${where}\n\n${log.content.trimEnd()}`;
+  const label = log.shared_with.length === 0 ? `attempt ${log.attempt}` : `shared by attempts ${[log.attempt, ...log.shared_with].sort((a, b) => a - b).join(", ")}`;
+  if (log.content === "") return `Log (${label}): empty (${where})`;
+  return `Log (${label}): ${where}\n\n${log.content.trimEnd()}`;
 }
 
 export function renderRunLog(ctx: Context, style: Style, run: Run, attempts: readonly Attempt[], log: CapturedLog | null): string {

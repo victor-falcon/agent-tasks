@@ -39,10 +39,13 @@ function last24hLine(style: Style, report: StatusReport, tz: string, now: Date):
     style.paint(c.ok > 0 ? "green" : undefined, `${c.ok} ok`),
     style.paint(c.failed > 0 ? "red" : undefined, `${c.failed} failed`),
     style.paint(c.missed > 0 ? "yellow" : undefined, `${c.missed} missed`) + (gaps ? ` (${gaps})` : ""),
-    style.paint(c.running > 0 ? "cyan" : undefined, `${c.running} running`),
-    ...(c.blocked > 0 ? [style.paint("magenta", `${c.blocked} blocked`)] : []),
   ];
   return parts.join(" · ");
+}
+
+function nowLine(style: Style, report: StatusReport): string {
+  const { running, blocked } = report.now;
+  return [style.paint(running > 0 ? "cyan" : undefined, `${running} running`), style.paint(blocked > 0 ? "magenta" : undefined, `${blocked} blocked`)].join(" · ");
 }
 
 function attentionRows(style: Style, items: readonly AttentionItem[], tz: string, now: Date): string[][] {
@@ -65,6 +68,7 @@ export function renderStatus(style: Style, report: StatusReport, tz: string, now
       [
         [heading("Runner"), runnerLine(style, report.runner, now)],
         [heading("Last 24h"), last24hLine(style, report, tz, now)],
+        [heading("Now"), nowLine(style, report)],
       ],
       { header: false },
     ),
@@ -72,6 +76,7 @@ export function renderStatus(style: Style, report: StatusReport, tz: string, now
   if (report.attention.length > 0) {
     lines.push(heading("Attention"), renderTable(attentionRows(style, report.attention, tz, now), { header: false, indent: "  " }));
   }
+  if (report.errors.length > 0) lines.push(style.paint("yellow", `${report.errors.length} file${report.errors.length === 1 ? "" : "s"} could not be read (see the warnings above)`));
   if (report.tasks === 0) lines.push("No tasks yet. Create one with: agent-tasks add --title … --cron … --instructions …");
   else if (report.next.length === 0) lines.push(`${heading("Upcoming")}  none`);
   else {
@@ -92,13 +97,17 @@ const status: Command = {
   usage: `Usage: agent-tasks status
 
 One screen: whether the runner is alive (from its heartbeat), what happened
-in the last 24 hours, what needs attention (failed or timed out tasks whose
-latest result is a failure, blocked runs waiting for a person, missed
-occurrences in the last 24 hours) and the next run of up to ${NEXT_COUNT}
-tasks, soonest first.
+in the last 24 hours, what is running now, what needs attention and the next
+run of up to ${NEXT_COUNT} tasks, soonest first.
 
-Exit code: 0 when the runner is alive and nothing needs attention, ${EXIT_ATTENTION}
-otherwise, so it can be used in scripts or a status bar (--json works too).`,
+Under "Attention":
+  ✕  a task (not paused) whose latest result failed or timed out, for up to 7 days
+  !  a run that is blocked, waiting for a person
+  □  occurrences missed in the last 24 hours, until the task succeeds again
+
+Exit code: 0 when the runner is alive, nothing needs attention and every file
+could be read; ${'${EXIT_ATTENTION}'} otherwise. So it works in scripts and status bars
+(--json too).`,
   run(ctx, args) {
     parseCommandArgs(args, {}, { maxPositionals: 0 });
     const health = runnerBanner(ctx);

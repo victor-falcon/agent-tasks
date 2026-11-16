@@ -8,7 +8,7 @@ import { scheduleText } from "../output/schedule-text.ts";
 import { stdoutStyle, type Style } from "../output/style.ts";
 import { paintMark, TASK_MARKS, taskMarkKind } from "../output/symbols.ts";
 import { renderTable } from "../output/table.ts";
-import { absoluteTime, whenTime } from "../output/time.ts";
+import { absoluteTime, relativeTime } from "../output/time.ts";
 import { tildify } from "../paths.ts";
 import type { StoredRun } from "../store.ts";
 import { describeSchedule, displayTimezone, findTask, runView, type TaskOverview, taskOverview, warnCorrupt } from "../task-info.ts";
@@ -103,7 +103,7 @@ export function renderTask(ctx: Context, style: Style, { overview, recent, perso
     next.length === 0
       ? `Next runs: none (${state})`
       : `Next runs\n${renderTable(
-          next.map((iso) => [absoluteTime(new Date(iso), tz, now), style.paint("dim", whenTime(new Date(iso), tz, now))]),
+          next.map((iso) => [absoluteTime(new Date(iso), tz, now), style.paint("dim", relativeTime(new Date(iso), now))]),
           { header: false, indent: "  " },
         )}`;
   const recentText =

@@ -10,12 +10,16 @@ import { stdoutStyle, type Style } from "../output/style.ts";
 import { paintMark, PENDING_MARK, RUN_MARKS, TASK_MARKS, type TaskMarkKind, taskMarkKind } from "../output/symbols.ts";
 import { renderTable } from "../output/table.ts";
 import { DAY, formatSpan, whenTime } from "../output/time.ts";
-import { isInProgress } from "../run-info.ts";
+import { isDecisive, isFailure, isInProgress } from "../run-info.ts";
 import { describeSchedule, displayTimezone, TASK_STATES, type TaskState, taskOverview, warnCorrupt } from "../task-info.ts";
 import type { Command } from "./types.ts";
 
 const WEEK_MS = 7 * DAY;
 const DEFAULT_STATES: readonly TaskState[] = ["active", "paused"];
+/** `--status` values about results rather than the task state. */
+const RESULT_FILTERS = ["failed", "running", "blocked"] as const;
+type ResultFilter = (typeof RESULT_FILTERS)[number];
+const STATUS_FILTERS = [...TASK_STATES, ...RESULT_FILTERS] as const;
 
 const HISTORY = 10;
 
@@ -33,8 +37,11 @@ export interface TaskRow {
   last_slot: string | null;
   /** Statuses of the last ${HISTORY} occurrences, oldest first. */
   history: RunStatus[];
-  /** Start of the attempt in progress (running or blocked), if any. */
+  /** Status and start of the latest attempt in progress (running or blocked), if any. */
+  in_progress: RunStatus | null;
   active_since: string | null;
+  /** Whether the latest decisive result (ok, failed, timed out) is a failure. */
+  failing: boolean;
   /** `failed` + `timed_out` occurrences whose slot is in the last 7 days. */
   failed_7d: number;
   missed_7d: number;
@@ -49,6 +56,7 @@ function taskRow(ctx: Context, task: Task, archived: boolean): { row: TaskRow; e
   const last = runs.at(-1);
   const statuses = runs.map((r) => r.status);
   const inProgress = runs.filter((r) => isInProgress(r.status)).at(-1);
+  const decisive = runs.filter((r) => isDecisive(r.status)).at(-1);
   return {
     row: {
       id: task.id,
@@ -61,7 +69,9 @@ function taskRow(ctx: Context, task: Task, archived: boolean): { row: TaskRow; e
       last_status: last?.status ?? null,
       last_slot: last?.slot ?? null,
       history: statuses.slice(-HISTORY),
+      in_progress: inProgress?.status ?? null,
       active_since: inProgress?.attempts.at(-1)?.started_at ?? null,
+      failing: decisive !== undefined && isFailure(decisive.status),
       failed_7d: count("failed", "timed_out"),
       missed_7d: count("missed"),
     },
@@ -116,7 +126,7 @@ function isInside(path: string, folder: string): boolean {
 const list: Command = {
   name: "list",
   summary: "List tasks with their next run and recent results",
-  usage: `Usage: agent-tasks list [--status <state,…>] [--cwd <dir>] [--all]
+  usage: `Usage: agent-tasks list [--status <filter,…>] [--cwd <dir>] [--all]
 
 Shows each task with its schedule, its next run and its last ${HISTORY}
 occurrences, oldest first: ■ ok, ✕ failed or timed out, □ missed,
@@ -127,12 +137,19 @@ By default only active and paused tasks are listed. --json adds the 7-day
 failed and missed counts.
 
 Options:
-  --status <states>  Only these states, comma-separated: ${TASK_STATES.join(", ")}
-  --cwd <dir>        Only tasks whose working directory is <dir> or inside it
-  --all              Include finished and archived tasks`,
+  --status <filters>  Comma-separated. Task states: ${TASK_STATES.join(", ")}.
+                     Results: failed (latest result failed or timed out),
+                     running, blocked. Values of one kind add up; the two
+                     kinds combine (paused,failed: paused tasks that fail)
+  --cwd <dir>         Only tasks whose working directory is <dir> or inside it
+  --all               Include finished and archived tasks`,
   run(ctx, args) {
     const { values } = parseCommandArgs(args, { status: { type: "string" }, cwd: { type: "string" }, all: { type: "boolean" } }, { maxPositionals: 0 });
-    const states = values.status !== undefined ? parseEnumList("--status", values.status, TASK_STATES) : values.all ? TASK_STATES : DEFAULT_STATES;
+    const filters = values.status === undefined ? [] : parseEnumList("--status", values.status, STATUS_FILTERS);
+    const results = filters.filter((f): f is ResultFilter => (RESULT_FILTERS as readonly string[]).includes(f));
+    const chosenStates = filters.filter((f): f is TaskState => (TASK_STATES as readonly string[]).includes(f));
+    const states = chosenStates.length > 0 ? chosenStates : values.all ? TASK_STATES : DEFAULT_STATES;
+    const resultMatches = (row: TaskRow) => results.length === 0 || results.some((f) => (f === "failed" ? row.failing : row.in_progress === f));
     const cwdFilter = values.cwd === undefined ? undefined : resolvePath(values.cwd, ctx.env, ctx.cwd);
 
     const tasks = listTasks(ctx.paths);
@@ -143,7 +160,7 @@ Options:
       if (cwdFilter !== undefined && !isInside(resolvePath(task.cwd, ctx.env, ctx.cwd), cwdFilter)) return;
       const { row, errors: runErrors } = taskRow(ctx, task, isArchived);
       errors.push(...runErrors);
-      if (states.includes(row.state)) items.push({ row, task });
+      if (states.includes(row.state) && resultMatches(row)) items.push({ row, task });
     };
     for (const task of tasks.items) add(task, false);
     for (const task of archived.items) add(task, true);

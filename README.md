@@ -31,13 +31,15 @@ the config, else the system's).
 ```
 $ agent-tasks status
 Runner    ● alive · every 5m · last tick 2m ago · next in 3m
-Last 24h  3 ok · 1 failed · 3 missed (runner stopped 01:10–08:30) · 2 running · 1 blocked
+Last 24h  3 ok · 1 failed · 4 missed (runner stopped 01:10–08:30)
+Now       2 running · 1 blocked
 Attention
   ✕  sentry-summary/20261117T080000Z  failed    "sentry-cli has no auth"     52m ago
   !  review-pr-123/20261117T083000Z   blocked   "asks to confirm the merge"  11m ago
-  □  sentry-summary                   3 missed  (02:00, 03:00, 04:00)        runner_offline
+  □  inbox-triage                     1 missed  (06:00)                      runner_offline
 Upcoming
   11:00      sentry-summary      every hour
+  Wed 06:00  inbox-triage        every day 06:00
   Wed 08:00  worktree-cleanup    every day 08:00
   Fri 09:00  release-notes       Nov 20 09:00
   Mon 09:00  weekly-deps-report  Mon 09:00
@@ -45,7 +47,7 @@ Upcoming
 
 It exits with 1 when the runner is not running or something is under
 "Attention" (a task whose latest result failed, a run waiting for a person,
-occurrences missed in the last 24 hours), so `agent-tasks status >/dev/null
+occurrences missed in the last 24 hours that nothing has made up for yet), so `agent-tasks status >/dev/null
 || notify …` works in a script or a status bar.
 
 **Which task is failing?**
@@ -54,6 +56,7 @@ occurrences missed in the last 24 hours), so `agent-tasks status >/dev/null
 $ agent-tasks list
    ID                  SCHEDULE         NEXT         LAST 10     FOLDER
 ⏸  backup-notes        every day 23:00  paused       ■■■■        ~/notes
+●  inbox-triage        every day 06:00  in 20h       ■■■□        ~/Projects/foo
 ○  release-notes       Nov 20 09:00     in 3d        ·           ~/Projects/foo
 !  review-pr-123       Nov 17 09:30     blocked 12m  !           ~/Projects/foo
 ◐  sentry-summary      every hour       running 1m   ■□□□---■✕◐  ~/Projects/foo
@@ -63,8 +66,9 @@ $ agent-tasks list
 
 `LAST 10` reads oldest to newest: `■` ok, `✕` failed or timed out, `□`
 missed, `◐` running, `!` blocked, `-` superseded or cancelled, `·` still to
-come. Filter with `--status paused`, `--cwd ~/Projects/foo` or `--all`
-(finished and archived tasks too).
+come. Filter with `--status failed` (latest result failed, even while a
+retry runs), `--status paused`, `--cwd ~/Projects/foo` or `--all` (finished
+and archived tasks too).
 
 **What ran, and why did it fail?**
 
@@ -94,7 +98,7 @@ Attempt 2 · ✕ failed · started 09:07 · 3m
   summary   sentry-cli has no auth
   log       ~/.local/share/agent-tasks/runs/sentry-summary/20261117T080000Z.log
 
-Log (attempt 2): ~/.local/share/agent-tasks/runs/sentry-summary/20261117T080000Z.log
+Log (shared by attempts 1, 2): ~/.local/share/agent-tasks/runs/sentry-summary/20261117T080000Z.log
 
 $ sentry-cli issues list
 error: Auth token is required for this request.
