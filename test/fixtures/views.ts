@@ -44,7 +44,7 @@ function attempt(n: number, start: Date, minutes: number | null, status: RunStat
     n,
     started_at: start.toISOString(),
     finished_at: minutes === null ? null : new Date(start.getTime() + minutes * MIN).toISOString(),
-    session: { launcher: "process", handle: `p${n}${start.getUTCHours()}` },
+    session: { launcher: "process", handle: `p${n}${start.getUTCHours()}`, name: `task-${n}`, pid: null, closed_at: null },
     agent: { command: "claude", shell: false, from: "default" },
     status,
     summary,

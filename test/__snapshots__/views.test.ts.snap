@@ -128,21 +128,19 @@ Instructions as the agent gets them: agent-tasks show sentry-summary --instructi
 `;
 
 exports[`with every status show --instructions prints the task's and the personal ones, in order 1`] = `
-"# Task: Sentry summary (sentry-summary)
+"Task "Sentry summary" (sentry-summary), slot <slot>, attempt 1
+Working directory: $HOME/Projects/foo
 
 Do sentry summary.
 
-# Personal instructions (config): ~/config/instructions/general.md
+User instructions (they take priority over the defaults above):
 
 Write in English.
 
-# Personal instructions (profile ~/Projects/**): ~/config/instructions/foo.md
-
 Use pnpm in foo.
 
-# Personal instructions (profile ~/Projects/**): ~/config/instructions/missing.md
-
-(file not found)
+When you are done, or if it fails, run:
+  agent-tasks finish sentry-summary/<slot> --status succeeded|failed --summary "<what you did, where the result is>" [--output-file <file>]
 "
 `;
 
@@ -155,12 +153,12 @@ Events
 
 Attempt 1 · ✕ failed · started 09:02 · 2m
   agent     claude  ← default
-  launcher  process · handle=p18
+  launcher  process · handle=p18 name=task-1
   summary   first try failed
 
 Attempt 2 · ✕ failed · started 09:07 · 3m
   agent     claude  ← default
-  launcher  process · handle=p28
+  launcher  process · handle=p28 name=task-2
   summary   sentry-cli has no auth
   log       ~/data/runs/sentry-summary/20261117T080000Z.log
 
@@ -180,7 +178,7 @@ Events
 
 Attempt 1 · ✕ failed · started 09:02 · 2m
   agent     claude  ← default
-  launcher  process · handle=p18
+  launcher  process · handle=p18 name=task-1
   summary   first try failed
   log       ~/data/runs/sentry-summary/20261117T080000Z.log
 

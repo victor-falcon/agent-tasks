@@ -9,7 +9,8 @@ import { stdoutStyle, type Style } from "../output/style.ts";
 import { paintMark, TASK_MARKS, taskMarkKind } from "../output/symbols.ts";
 import { renderTable } from "../output/table.ts";
 import { absoluteTime, relativeTime } from "../output/time.ts";
-import { tildify } from "../paths.ts";
+import { renderTaskText } from "../task-context.ts";
+import type { Task } from "../schema.ts";
 import type { StoredRun } from "../store.ts";
 import { describeSchedule, displayTimezone, findTask, runView, type TaskOverview, taskOverview, warnCorrupt } from "../task-info.ts";
 import type { Command } from "./types.ts";
@@ -44,15 +45,13 @@ function personalInstructions(ctx: Context, resolution: Resolution): PersonalIns
   }));
 }
 
-/** The task's instructions followed by the personal ones, each under a heading that says where it comes from. */
-export function instructionsText(ctx: Context, overview: TaskOverview, personal: readonly PersonalInstructions[]): string {
-  const { task } = overview;
-  const sections = [`# Task: ${task.title} (${task.id})\n\n${task.instructions.trimEnd()}`];
-  for (const p of personal) {
-    const body = p.content === null ? "(file not found)" : p.content.trimEnd();
-    sections.push(`# Personal instructions (${p.source}): ${tildify(p.path, ctx.env)}\n\n${body}`);
-  }
-  return sections.join("\n\n");
+/** `show` has no run: the slot is a placeholder, the agent gets the real one. */
+const SLOT_PLACEHOLDER = "<slot>";
+
+/** The text the agent gets from `agent-tasks task <run_ref>`, for a first attempt at a placeholder slot. */
+export function instructionsText(ctx: Context, task: Task, personal: readonly PersonalInstructions[]): string {
+  const found = personal.flatMap((p) => (p.content === null ? [] : [{ file: p.path, content: p.content }]));
+  return renderTaskText(ctx, task, { ref: `${task.id}/${SLOT_PLACEHOLDER}`, slot: SLOT_PLACEHOLDER, attempt: 1 }, found);
 }
 
 interface ShowView {
@@ -143,9 +142,10 @@ built-in default), the next 3 runs and the last ${RECENT} occurrences.
 Archived tasks can be shown too.
 
 Options:
-  --instructions  Print only the instructions: the task's, then the personal
-                  files from the config (instructions.subagent) and from the
-                  matching profile, in the order the agent reads them`,
+  --instructions  Print the text the agent receives (agent-tasks task): the
+                  task template with the task's instructions and the personal
+                  files from the config (instructions.subagent) and the
+                  matching profile, in that order. The slot is shown as <slot>`,
   run(ctx, args) {
     const { values, positionals } = parseCommandArgs(args, { instructions: { type: "boolean" } }, { minPositionals: 1, maxPositionals: 1 });
     const { task, archived } = findTask(ctx, positionals[0]!);
@@ -156,7 +156,7 @@ Options:
       for (const p of personal.filter((p) => p.content === null)) {
         if (!ctx.json) ctx.stderr.write(`warning: instructions file not found: ${p.path}\n`);
       }
-      const text = instructionsText(ctx, overview, personal);
+      const text = instructionsText(ctx, task, personal);
       output(ctx, { task_id: task.id, instructions: task.instructions, personal, text }, text);
       return;
     }

@@ -120,9 +120,11 @@ Skill         run-agent-task                       ← default
 Instructions  task + 2 personal files              ← profile ~/Projects/** (after config)
 ```
 
-`agent-tasks show <id> --instructions` prints the task's instructions
-followed by your personal ones (`instructions.subagent` in the config, then
-the matching profile's), in the order the agent reads them.
+`agent-tasks show <id> --instructions` prints the text the agent will
+receive (what `agent-tasks task <run_ref>` gives it): your task template
+filled with the task's instructions and your personal ones
+(`instructions.subagent` in the config, then the matching profile's), with
+the slot shown as `<slot>`.
 
 When the runner has not ticked recently, `status`, `list`, `runs` and `show`
 start with a warning on stderr:

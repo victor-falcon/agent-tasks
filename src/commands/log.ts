@@ -11,7 +11,7 @@ import { renderTable } from "../output/table.ts";
 import { absoluteTimeWithSeconds, clockTimeWithSeconds, formatSpan, sameDay, timeNear } from "../output/time.ts";
 import { isInProgress, neverStarted } from "../run-info.ts";
 import { tildify } from "../paths.ts";
-import { type Attempt, type Run, type RunEvent, TASK_ID_RE } from "../schema.ts";
+import { type Attempt, type Run, type RunEvent, type SessionRecord, TASK_ID_RE } from "../schema.ts";
 import { parseRunRef, runRef, runSlotId } from "../slot.ts";
 import { isArchived, listRuns, readRun, runLogRelativePath, taskExists } from "../store.ts";
 import { displayTimezone, warnCorrupt } from "../task-info.ts";
@@ -84,10 +84,10 @@ function agentText(agent: Record<string, unknown> | null): string {
   return `${command || "?"}${shell}${rest ? ` ${rest}` : ""}${from}`;
 }
 
-function sessionText(session: Record<string, unknown> | null): string {
+function sessionText(session: SessionRecord | null): string {
   if (!session) return "—";
-  const launcher = typeof session.launcher === "string" ? session.launcher : "?";
-  const rest = pairs(session, ["launcher"]);
+  const rest = pairs({ ...session }, ["launcher"]);
+  const launcher = session.launcher || "?";
   return rest ? `${launcher} · ${rest}` : launcher;
 }
 
@@ -100,6 +100,8 @@ function renderAttempt(ctx: Context, style: Style, run: Run, attempt: Attempt, l
     ["agent", agentText(attempt.agent)],
     ["launcher", sessionText(attempt.session)],
     ["summary", attempt.summary ?? "—"],
+    ...(attempt.reason ? [["reason", attempt.reason]] : []),
+    ...(attempt.output ? [["output", tildify(isAbsolute(attempt.output) ? attempt.output : join(ctx.paths.dataDir, attempt.output), ctx.env)]] : []),
     ...(log ? [["log", `${tildify(log.path, ctx.env)}${log.exists ? "" : " (not captured)"}`]] : []),
   ];
   return `Attempt ${attempt.n} · ${statusLabel(style, attempt.status)} · ${when}\n${renderTable(rows, { header: false, indent: "  " })}`;

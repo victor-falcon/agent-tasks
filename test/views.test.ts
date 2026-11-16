@@ -146,7 +146,7 @@ describe("with every status", () => {
       profiles: [{ match: "~/Projects/**", instructions: ["foo.md", "missing.md"] }],
     });
     const r = await cli(["show", "sentry-summary", "--instructions"]);
-    expect(r.stdout).toMatchSnapshot();
+    expect(r.stdout.replaceAll(home.root, "$HOME")).toMatchSnapshot(); // the working directory is absolute
     expect(r.stderr).toContain("warning: instructions file not found:");
     expect(r.stderr).toContain("missing.md");
     const j = (await cli(["show", "sentry-summary", "--instructions", "--json"])).json();
