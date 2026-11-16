@@ -180,7 +180,7 @@ describe("list", () => {
     expect(tasks[0]).toMatchObject({ state: "active", next_run: "2026-11-23T09:00:00+01:00", last_status: "succeeded", failed_7d: 2, missed_7d: 1 });
     expect(tasks[1]).toMatchObject({ state: "paused", next_run: null });
     const human = await runCli(["list", NOW], home);
-    expect(human.stdout.split("\n")[0]).toMatch(/^ID\s+STATE\s+NEXT RUN/);
+    expect(human.stdout.split("\n")[0]).toMatch(/^\s+ID\s+SCHEDULE\s+NEXT\s+LAST 10\s+FOLDER$/);
     expect(human.stdout).toContain("active-one");
   });
 
@@ -198,7 +198,7 @@ describe("list", () => {
     const empty = makeTempHome();
     try {
       const r = await runCli(["list", NOW], empty);
-      expect(r.stdout).toBe("No tasks.\n");
+      expect(r.stdout).toStartWith("No tasks.");
     } finally {
       empty.cleanup();
     }
@@ -222,9 +222,9 @@ describe("show", () => {
     expect(out.runs[0].slot).toBe("2026-11-12T08:00:00Z");
 
     const human = await runCli(["show", "weekly-report", NOW], home);
-    expect(human.stdout).toContain("Weekly report (weekly-report) — active");
-    expect(human.stdout).toContain("profile ~/Projects/**");
-    expect(human.stdout).toContain("Last occurrences:");
+    expect(human.stdout).toContain("Weekly report (weekly-report) · active");
+    expect(human.stdout).toContain("← profile ~/Projects/**");
+    expect(human.stdout).toContain("Last 10 occurrences");
   });
 
   test("an unknown id is not found; an archived task is shown as archived", async () => {
@@ -396,7 +396,7 @@ describe("runs", () => {
 
   test("human output is a table", async () => {
     const r = await runCli(["runs", NOW], home);
-    expect(r.stdout.split("\n")[0]).toMatch(/^RUN\s+SLOT\s+TRIGGER\s+STATUS/);
+    expect(r.stdout.split("\n")[0]).toMatch(/^RUN\s+SLOT\s+STATUS\s+START\s+DURATION\s+ATT\.\s+SUMMARY$/);
     expect(r.stdout).toContain("runner_offline");
   });
 });

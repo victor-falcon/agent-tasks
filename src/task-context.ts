@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { Context } from "./context.ts";
 import { lastAttempt, readRunRef, requireTask } from "./execution.ts";
 import { resolvePath } from "./paths.ts";
+import type { Task } from "./schema.ts";
 import { render, TemplateError, variablesIn } from "./template.ts";
 
 // What `agent-tasks task <run_ref>` prints for the subagent
@@ -46,7 +47,7 @@ export function finishCommand(ref: string): string {
   return `agent-tasks finish ${ref} --status succeeded|failed --summary "<what you did, where the result is>" [--output-file <file>]`;
 }
 
-function personalSection(items: PersonalInstructions[]): string {
+function personalSection(items: readonly PersonalInstructions[]): string {
   if (items.length === 0) return "";
   return `User instructions (they take priority over the defaults above):\n\n${items.map((i) => i.content.trim()).join("\n\n")}`;
 }
@@ -61,40 +62,50 @@ export function loadTaskTemplate(ctx: Context): { template: string; source: stri
   return { template, source: file };
 }
 
-export function taskContext(ctx: Context, ref: string): TaskContext {
-  const run = readRunRef(ctx, ref);
-  const task = requireTask(ctx, run.task_id);
-  const resolution = ctx.resolveFor(task);
+/** The personal instruction files of a task, read now: the ones found and the missing paths. */
+export function readPersonalInstructions(ctx: Context, task: Task): { personal: PersonalInstructions[]; missing: string[] } {
   const personal: PersonalInstructions[] = [];
   const missing: string[] = [];
-  for (const file of resolution.instructions) {
+  for (const file of ctx.resolveFor(task).instructions) {
     if (existsSync(file)) personal.push({ file, content: readFileSync(file, "utf8") });
     else missing.push(file);
   }
+  return { personal, missing };
+}
+
+/** The text the subagent reads: the task template filled for one run (also used by `show --instructions`). */
+export function renderTaskText(ctx: Context, task: Task, run: { ref: string; slot: string; attempt: number }, personal: readonly PersonalInstructions[]): string {
   const values = {
     title: task.title,
     task_id: task.id,
-    run_ref: ref,
+    run_ref: run.ref,
     slot: run.slot,
-    attempt: String(lastAttempt(run)?.n ?? 1),
+    attempt: String(run.attempt),
     cwd: resolvePath(task.cwd, ctx.env),
     instructions: task.instructions.trim(),
-    finish_command: finishCommand(ref),
+    finish_command: finishCommand(run.ref),
     personal_instructions: personalSection(personal),
   };
   const { template, source } = loadTaskTemplate(ctx);
-  const text = `${render(template, { values }, source).replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
+  return `${render(template, { values }, source).replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
+}
+
+export function taskContext(ctx: Context, ref: string): TaskContext {
+  const run = readRunRef(ctx, ref);
+  const task = requireTask(ctx, run.task_id);
+  const { personal, missing } = readPersonalInstructions(ctx, task);
+  const attempt = lastAttempt(run)?.n ?? 1;
   return {
     run_ref: ref,
     task_id: task.id,
     title: task.title,
     slot: run.slot,
-    attempt: Number(values.attempt),
-    cwd: values.cwd,
+    attempt,
+    cwd: resolvePath(task.cwd, ctx.env),
     instructions: task.instructions,
     personal_instructions: personal,
     missing_instructions: missing,
-    finish_command: values.finish_command,
-    text,
+    finish_command: finishCommand(ref),
+    text: renderTaskText(ctx, task, { ref, slot: run.slot, attempt }, personal),
   };
 }

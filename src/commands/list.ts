@@ -4,22 +4,44 @@ import { parseEnumList } from "../input.ts";
 import { resolvePath } from "../paths.ts";
 import type { RunStatus, Task } from "../schema.ts";
 import { listArchivedTasks, listTasks } from "../store.ts";
-import { describeSchedule, TASK_STATES, type TaskState, table, taskOverview, warnCorrupt } from "../task-info.ts";
+import { runnerBanner } from "../output/banner.ts";
+import { scheduleText } from "../output/schedule-text.ts";
+import { stdoutStyle, type Style } from "../output/style.ts";
+import { paintMark, PENDING_MARK, RUN_MARKS, TASK_MARKS, type TaskMarkKind, taskMarkKind } from "../output/symbols.ts";
+import { renderTable } from "../output/table.ts";
+import { DAY, formatSpan, whenTime } from "../output/time.ts";
+import { isDecisive, isFailure, isInProgress } from "../run-info.ts";
+import { describeSchedule, displayTimezone, TASK_STATES, type TaskState, taskOverview, warnCorrupt } from "../task-info.ts";
 import type { Command } from "./types.ts";
 
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const WEEK_MS = 7 * DAY;
 const DEFAULT_STATES: readonly TaskState[] = ["active", "paused"];
+/** `--status` values about results rather than the task state. */
+const RESULT_FILTERS = ["failed", "running", "blocked"] as const;
+type ResultFilter = (typeof RESULT_FILTERS)[number];
+const STATUS_FILTERS = [...TASK_STATES, ...RESULT_FILTERS] as const;
+
+const HISTORY = 10;
 
 export interface TaskRow {
   id: string;
   title: string;
   cwd: string;
   state: TaskState;
+  /** The task at a glance: ok, running, blocked, failing, paused, once_pending, finished, archived. */
+  indicator: TaskMarkKind;
   schedule: string;
   /** In the task's time zone. */
   next_run: string | null;
   last_status: RunStatus | null;
   last_slot: string | null;
+  /** Statuses of the last ${HISTORY} occurrences, oldest first. */
+  history: RunStatus[];
+  /** Status and start of the latest attempt in progress (running or blocked), if any. */
+  in_progress: RunStatus | null;
+  active_since: string | null;
+  /** Whether the latest decisive result (ok, failed, timed out) is a failure. */
+  failing: boolean;
   /** `failed` + `timed_out` occurrences whose slot is in the last 7 days. */
   failed_7d: number;
   missed_7d: number;
@@ -32,16 +54,24 @@ function taskRow(ctx: Context, task: Task, archived: boolean): { row: TaskRow; e
   const recent = runs.filter((r) => Date.parse(r.slot) >= weekAgo && Date.parse(r.slot) <= ctx.now.getTime());
   const count = (...statuses: RunStatus[]) => recent.filter((r) => statuses.includes(r.status)).length;
   const last = runs.at(-1);
+  const statuses = runs.map((r) => r.status);
+  const inProgress = runs.filter((r) => isInProgress(r.status)).at(-1);
+  const decisive = runs.filter((r) => isDecisive(r.status)).at(-1);
   return {
     row: {
       id: task.id,
       title: task.title,
       cwd: task.cwd,
       state: overview.state,
+      indicator: taskMarkKind(overview.state, task.schedule.type === "once", statuses),
       schedule: describeSchedule(task),
       next_run: overview.next[0] ?? null,
       last_status: last?.status ?? null,
       last_slot: last?.slot ?? null,
+      history: statuses.slice(-HISTORY),
+      in_progress: inProgress?.status ?? null,
+      active_since: inProgress?.attempts.at(-1)?.started_at ?? null,
+      failing: decisive !== undefined && isFailure(decisive.status),
       failed_7d: count("failed", "timed_out"),
       missed_7d: count("missed"),
     },
@@ -49,13 +79,44 @@ function taskRow(ctx: Context, task: Task, archived: boolean): { row: TaskRow; e
   };
 }
 
-/** Plain aligned table. Kept apart so the phase-2 renderer can replace it. */
-export function renderTaskList(rows: readonly TaskRow[]): string {
-  if (rows.length === 0) return "No tasks.";
-  return table([
-    ["ID", "STATE", "NEXT RUN", "LAST", "FAILED 7D", "MISSED 7D", "SCHEDULE", "TITLE"],
-    ...rows.map((r) => [r.id, r.state, r.next_run ?? "-", r.last_status ?? "-", String(r.failed_7d), String(r.missed_7d), r.schedule, r.title]),
-  ]);
+interface ListItem {
+  row: TaskRow;
+  task: Task;
+}
+
+function nextCell(style: Style, { row }: ListItem, now: Date, timezone: string): string {
+  if (row.indicator === "running" || row.indicator === "blocked") {
+    const since = row.active_since ? ` ${formatSpan(now.getTime() - Date.parse(row.active_since))}` : "";
+    return style.paint(row.indicator === "running" ? "cyan" : "magenta", `${row.indicator}${since}`);
+  }
+  if (row.state === "paused") return style.paint("dim", "paused");
+  if (row.state === "finished") return style.paint("dim", "done");
+  if (row.state === "archived") return style.paint("dim", "archived");
+  return row.next_run ? whenTime(new Date(row.next_run), timezone, now) : "—";
+}
+
+function historyCell(style: Style, { row }: ListItem): string {
+  if (row.history.length === 0) return row.state === "active" ? paintMark(style, PENDING_MARK) : style.paint("dim", "—");
+  return row.history.map((s) => paintMark(style, RUN_MARKS[s])).join("");
+}
+
+/** The task table: mark, id, schedule, next, last ${HISTORY} occurrences, folder. */
+export function renderTaskList(items: readonly ListItem[], { style, now, timezone }: { style: Style; now: Date; timezone: string }): string {
+  if (items.length === 0) return "No tasks. Create one with: agent-tasks add --title … --cron … --instructions …";
+  return renderTable(
+    [
+      ["", "ID", "SCHEDULE", "NEXT", `LAST ${HISTORY}`, "FOLDER"],
+      ...items.map((item) => [
+        paintMark(style, TASK_MARKS[item.row.indicator]),
+        item.row.id,
+        scheduleText(item.task.schedule, timezone, now),
+        nextCell(style, item, now, timezone),
+        historyCell(style, item),
+        item.row.cwd,
+      ]),
+    ],
+    { style },
+  );
 }
 
 function isInside(path: string, folder: string): boolean {
@@ -65,37 +126,51 @@ function isInside(path: string, folder: string): boolean {
 const list: Command = {
   name: "list",
   summary: "List tasks with their next run and recent results",
-  usage: `Usage: agent-tasks list [--status <state,…>] [--cwd <dir>] [--all]
+  usage: `Usage: agent-tasks list [--status <filter,…>] [--cwd <dir>] [--all]
 
-Shows each task with its next run, the status of its latest occurrence and
-how many occurrences failed (failed or timed_out) or were missed in the
-last 7 days. By default only active and paused tasks are listed.
+Shows each task with its schedule, its next run and its last ${HISTORY}
+occurrences, oldest first: ■ ok, ✕ failed or timed out, □ missed,
+◐ running, ! blocked, - superseded or cancelled, · pending. The mark before
+the id sums the task up: ● fine, ✕ its latest result failed, ◐ running,
+! blocked (waiting for a person), ⏸ paused, ○ one-off still to run.
+By default only active and paused tasks are listed. --json adds the 7-day
+failed and missed counts.
 
 Options:
-  --status <states>  Only these states, comma-separated: ${TASK_STATES.join(", ")}
-  --cwd <dir>        Only tasks whose working directory is <dir> or inside it
-  --all              Include finished and archived tasks`,
+  --status <filters>  Comma-separated. Task states: ${TASK_STATES.join(", ")}.
+                     Results: failed (latest result failed or timed out),
+                     running, blocked. Values of one kind add up; the two
+                     kinds combine (paused,failed: paused tasks that fail)
+  --cwd <dir>         Only tasks whose working directory is <dir> or inside it
+  --all               Include finished and archived tasks`,
   run(ctx, args) {
     const { values } = parseCommandArgs(args, { status: { type: "string" }, cwd: { type: "string" }, all: { type: "boolean" } }, { maxPositionals: 0 });
-    const states = values.status !== undefined ? parseEnumList("--status", values.status, TASK_STATES) : values.all ? TASK_STATES : DEFAULT_STATES;
+    const filters = values.status === undefined ? [] : parseEnumList("--status", values.status, STATUS_FILTERS);
+    const results = filters.filter((f): f is ResultFilter => (RESULT_FILTERS as readonly string[]).includes(f));
+    const chosenStates = filters.filter((f): f is TaskState => (TASK_STATES as readonly string[]).includes(f));
+    const states = chosenStates.length > 0 ? chosenStates : values.all ? TASK_STATES : DEFAULT_STATES;
+    const resultMatches = (row: TaskRow) => results.length === 0 || results.some((f) => (f === "failed" ? row.failing : row.in_progress === f));
     const cwdFilter = values.cwd === undefined ? undefined : resolvePath(values.cwd, ctx.env, ctx.cwd);
 
     const tasks = listTasks(ctx.paths);
     const archived = states.includes("archived") ? listArchivedTasks(ctx.paths) : { items: [], errors: [] };
     const errors: Error[] = [...tasks.errors, ...archived.errors];
-    const rows: TaskRow[] = [];
+    const items: ListItem[] = [];
     const add = (task: Task, isArchived: boolean) => {
       if (cwdFilter !== undefined && !isInside(resolvePath(task.cwd, ctx.env, ctx.cwd), cwdFilter)) return;
       const { row, errors: runErrors } = taskRow(ctx, task, isArchived);
       errors.push(...runErrors);
-      if (states.includes(row.state)) rows.push(row);
+      if (states.includes(row.state) && resultMatches(row)) items.push({ row, task });
     };
     for (const task of tasks.items) add(task, false);
     for (const task of archived.items) add(task, true);
-    rows.sort((a, b) => a.id.localeCompare(b.id));
+    items.sort((a, b) => a.row.id.localeCompare(b.row.id));
 
+    runnerBanner(ctx);
     warnCorrupt(ctx, errors);
-    output(ctx, { tasks: rows, errors: errors.map((e) => e.message) }, () => renderTaskList(rows));
+    output(ctx, { tasks: items.map((i) => i.row), errors: errors.map((e) => e.message) }, () =>
+      renderTaskList(items, { style: stdoutStyle(ctx), now: ctx.now, timezone: displayTimezone(ctx) }),
+    );
   },
 };
 

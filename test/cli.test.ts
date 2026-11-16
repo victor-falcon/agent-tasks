@@ -85,7 +85,7 @@ describe("exit codes", () => {
   test("runtime error → 1, as JSON with --json", async () => {
     const r = await runCli(["config", "resolve", "nope", "--json"], home);
     expect(r.code).toBe(1);
-    expect(r.json()).toEqual({ error: { code: "not_found", message: expect.stringContaining('task "nope" not found'), details: [] } });
+    expect(r.json()).toEqual({ schema: 1, error: { code: "not_found", message: expect.stringContaining('task "nope" not found'), details: [] } });
   });
 
   test("invalid config → 1 with every problem listed", async () => {
@@ -102,7 +102,7 @@ describe("exit codes", () => {
 describe("version", () => {
   test("text and JSON", async () => {
     expect((await runCli(["version"], home)).stdout).toBe(`agent-tasks ${pkg.version}\n`);
-    expect((await runCli(["version", "--json"], home)).json()).toEqual({ name: "agent-tasks", version: pkg.version });
+    expect((await runCli(["version", "--json"], home)).json()).toEqual({ schema: 1, name: "agent-tasks", version: pkg.version });
   });
 });
 

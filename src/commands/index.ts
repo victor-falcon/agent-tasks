@@ -5,6 +5,7 @@ import edit from "./edit.ts";
 import finish from "./finish.ts";
 import help from "./help.ts";
 import list from "./list.ts";
+import log from "./log.ts";
 import pause from "./pause.ts";
 import resume from "./resume.ts";
 import retry from "./retry.ts";
@@ -15,6 +16,7 @@ import sessionClose from "./session-close.ts";
 import sessionRead from "./session-read.ts";
 import sessionStatus from "./session-status.ts";
 import show from "./show.ts";
+import status from "./status.ts";
 import task from "./task.ts";
 import tick from "./tick.ts";
 import type { Command } from "./types.ts";
@@ -34,6 +36,7 @@ export const commands: Command[] = [
   finish,
   help,
   list,
+  log,
   pause,
   resume,
   retry,
@@ -44,6 +47,7 @@ export const commands: Command[] = [
   sessionRead,
   sessionStatus,
   show,
+  status,
   task,
   tick,
   version,
