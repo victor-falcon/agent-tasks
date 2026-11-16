@@ -31,6 +31,9 @@ export interface ExecEvent {
 
 export const DEFAULT_PROMPT_TEMPLATE = "/{{skill}} {{run_ref}}";
 
+/** Variables `templates/prompt.md` can use (checked by `config check`). */
+export const PROMPT_TEMPLATE_VARIABLES = ["skill", "run_ref", "task_id", "title", "slot", "slot_id", "attempt", "cwd"] as const;
+
 /** After this many failed `close` commands, tick stops trying and leaves the session to the user. */
 export const MAX_CLOSE_ATTEMPTS = 3;
 
@@ -152,7 +155,7 @@ export function dataFile(ctx: Context, relative: string): string {
   return join(ctx.paths.dataDir, relative);
 }
 
-export function renderPrompt(ctx: Context, values: Record<string, string>): string {
+export function renderPrompt(ctx: Context, values: Record<(typeof PROMPT_TEMPLATE_VARIABLES)[number], string>): string {
   const file = join(ctx.paths.templatesDir, "prompt.md");
   const template = existsSync(file) ? readFileSync(file, "utf8") : DEFAULT_PROMPT_TEMPLATE;
   return render(template, { values }, existsSync(file) ? file : "the start prompt").trim();
@@ -163,7 +166,7 @@ export function sessionInput(ctx: Context, task: Task, resolution: Resolution, r
   const slotId = runSlotId(run);
   const ref = runRef(task.id, slotId);
   const cwd = resolvePath(task.cwd, ctx.env);
-  const promptValues = { skill: resolution.skill, run_ref: ref, task_id: task.id, title: task.title, slot: run.slot, slot_id: slotId, attempt: String(attempt.n), cwd };
+  const promptValues: Record<(typeof PROMPT_TEMPLATE_VARIABLES)[number], string> = { skill: resolution.skill, run_ref: ref, task_id: task.id, title: task.title, slot: run.slot, slot_id: slotId, attempt: String(attempt.n), cwd };
   return {
     runRef: ref,
     taskId: task.id,

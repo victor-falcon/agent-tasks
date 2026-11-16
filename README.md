@@ -16,7 +16,18 @@ Personal setup (launch commands, which agent command to use, per-folder
 profiles, notifications, extra instructions for agents) lives in
 `~/.config/agent-tasks/`, never in this repo.
 
-Status: planning. See [doc/roadmap](doc/roadmap/README.md).
+Status: early development. See [doc/roadmap](doc/roadmap/README.md).
+
+## Install
+
+Requires [Bun](https://bun.sh).
+
+```sh
+bun install
+bin/agent-tasks install   # links agent-tasks into ~/.local/bin and the skills into ~/.claude/skills
+agent-tasks init          # creates ~/.config/agent-tasks/ (never overwrites)
+agent-tasks doctor        # checks the whole setup
+```
 
 ## Daily use
 
