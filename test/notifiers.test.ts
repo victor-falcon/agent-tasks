@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { commands } from "../src/commands/index.ts";
 import { configErrors } from "../src/config.ts";
 import { createContext } from "../src/context.ts";
@@ -10,8 +12,16 @@ import { claimRun, readRun } from "../src/store.ts";
 import { makeTask, makeTempHome, type TempHome } from "./helpers.ts";
 
 let home: TempHome;
+/** A folder with fake `osascript` and `notify-send`, so tests never depend on (or call) the real ones. */
+let fakeBin: string;
 beforeEach(() => {
   home = makeTempHome();
+  fakeBin = join(home.root, "fake-bin");
+  mkdirSync(fakeBin);
+  for (const name of ["osascript", "notify-send"]) {
+    writeFileSync(join(fakeBin, name), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(fakeBin, name), 0o755);
+  }
 });
 afterEach(() => home.cleanup());
 
@@ -67,8 +77,9 @@ describe("system notifier", () => {
   });
 
   test("osascript on macOS, notify-send on Linux, nothing elsewhere or when missing", () => {
-    expect(systemNotifyArgv(n, { platform: "darwin", env: { PATH: "/usr/bin" } })?.slice(1)).toEqual(["-e", 'display notification "back\\\\slash" with title "agent-tasks" subtitle "Say \\"hi\\""']);
-    expect(systemNotifyArgv(n, { platform: "win32", env: { PATH: "/usr/bin" } })).toBeNull();
+    expect(systemNotifyArgv(n, { platform: "linux", env: { PATH: fakeBin } })).toEqual([join(fakeBin, "notify-send"), "--app-name=agent-tasks", 'agent-tasks: Say "hi"', "back\\slash"]);
+    expect(systemNotifyArgv(n, { platform: "darwin", env: { PATH: fakeBin } })?.slice(1)).toEqual(["-e", 'display notification "back\\\\slash" with title "agent-tasks" subtitle "Say \\"hi\\""']);
+    expect(systemNotifyArgv(n, { platform: "win32", env: { PATH: fakeBin } })).toBeNull();
     expect(systemNotifyArgv(n, { platform: "linux", env: { PATH: "/nonexistent" } })).toBeNull();
     expect(systemNotifyArgv(n, { platform: "darwin", env: { PATH: "/nonexistent" } })).toBeNull();
   });
@@ -99,7 +110,7 @@ describe("dispatch", () => {
     claimRun(home.paths, run);
     const calls: string[][] = [];
     const deps: NotifierDeps = {
-      env: { PATH: "/usr/bin" },
+      env: { PATH: fakeBin },
       platform: "darwin",
       exec: (argv) => {
         calls.push(argv);
