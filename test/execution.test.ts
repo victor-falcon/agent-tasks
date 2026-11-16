@@ -60,6 +60,9 @@ describe("process preset: launch → finish", () => {
     execTask(home, "succeed");
     await home.tick(1);
     await waitFor(finished(), "finish");
+    // The first finish closes the session after recording the result (claim `closed_at`, run close, then log
+    // the `closed` event): wait for the end of that too.
+    await waitFor(() => home.run(DEMO_REF).events.some((e) => e.event === "closed"), "close");
     const before = home.run(DEMO_REF);
     const again = await home.cli("finish", DEMO_REF, "--status", "failed", "--summary", "late", "--json");
     expect(again.code).toBe(0);
