@@ -43,8 +43,9 @@ the agents) lives in `~/.config/agent-tasks/`, never in this repo.
 
 ## Quick setup with your agent
 
-Paste this into your coding agent (Claude Code or similar), in the terminal
-where you want the runner to live. You don't need to clone anything first.
+Paste this into your coding agent (Claude Code or similar), in a terminal of
+the multiplexer you use (Herdr, tmux, Rex…); the runner will get its own tab.
+You don't need to clone anything first.
 
 ```text
 Set up agent-tasks (https://github.com/victor-falcon/agent-tasks) on this machine.
@@ -55,9 +56,10 @@ step by step: check bun and git, clone the repo and run its install, detect my
 terminal multiplexer and configure the launcher that opens one tab per task and
 closes it when the sub-agent finishes, ask me which command starts my agent,
 write my personal instructions for sub-agents, run agent-tasks config check and
-agent-tasks doctor, and do the smoke test. Ask me before installing anything
-outside the repo or changing my shell profile. At the end, report what you set
-up and what you could not verify.
+agent-tasks doctor, and do the smoke test. Linking agent-tasks into
+~/.local/bin and its skills into ~/.claude/skills is expected; ask me before
+installing anything else (such as bun) or changing my shell profile. At the
+end, report what you set up and what you could not verify.
 ```
 
 ## Manual setup
@@ -115,7 +117,9 @@ agent-tasks add --title "Release notes" --at 2026-12-01T09:00:00+01:00 --instruc
 | `agent-tasks run <id>` | Run a task now, outside its schedule. |
 | `agent-tasks edit`, `pause`, `resume`, `rm` | Change, pause, resume or archive a task. |
 
-Every command takes `--json`. `agent-tasks help <command>` explains each one.
+Every command takes `--json`. `agent-tasks help <command>` explains each one,
+with its filters (`agent-tasks list --status failed`, `agent-tasks runs --since 24h`,
+`agent-tasks log <run_ref> --raw`).
 
 ```
 $ agent-tasks status

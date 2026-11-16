@@ -40,13 +40,17 @@ git --version
   Check with `echo "$PATH" | tr ':' '\n' | grep -x "$HOME/.local/bin"`. If it
   is not there, tell the user which line to add to their shell profile
   (`export PATH="$HOME/.local/bin:$PATH"`); don't edit the profile without
-  asking.
+  asking. Until it is on `PATH`, write `~/.local/bin/agent-tasks` wherever
+  this recipe says `agent-tasks`. The runner and the sub-agents need it on
+  `PATH` too, so the setup is not finished until the user has fixed it.
 
 ## 2. Clone and install
 
 Ask the user where to keep the checkout if they have a preference; otherwise
 use `~/.local/share/agent-tasks-src`. The links point into this checkout, so
-it must stay where it is.
+it must stay where it is. If that folder already holds a clone of this repo,
+run `git -C <folder> pull` instead of `git clone`, then continue from
+`bun install`.
 
 ```sh
 git clone https://github.com/victor-falcon/agent-tasks.git ~/.local/share/agent-tasks-src
@@ -86,9 +90,9 @@ echo "HC_TERMINAL_ID=$HC_TERMINAL_ID REX_SESSION=$REX_SESSION TMUX=$TMUX"
 | Found | Launcher | Notes |
 |---|---|---|
 | `$HC_TERMINAL_ID` set | `{ "preset": "herdr" }` | Each run in its own Herdr tab, nested under the runner. Needs `hc` on `PATH`. |
-| `$REX_SESSION` set | `{ "preset": "rex" }` | Each run in its own Rex window. **Untested against a real Rex**: tell the user, and test every command by hand (see 3b). Needs `rex` and `jq` on `PATH`. |
+| `$REX_SESSION` set | `{ "preset": "rex" }` | Each run in its own Rex window. **Untested against a real Rex**: tell the user, and test each command of `presets/rex.json` by hand as described in 3a. Needs `rex` and `jq` on `PATH`. |
 | `$TMUX` set | `{ "preset": "tmux" }` | Each run in its own tmux window. tmux has no agent state, so a blocked agent is not detected (only the timeout catches it). Needs tmux 3.0+. |
-| none of them | ask the user | Ask which terminal or multiplexer they use. If they have none, or for a first try, use `{ "preset": "process" }`: the agent runs as a child process of the runner with its output in the run's log. It can't show an interactive agent, so the agent command must run without a terminal (step 4). |
+| none of them | ask the user | Ask which terminal or multiplexer they use. If they have none, or for a first try, use `{ "preset": "process" }`: the agent runs as a child process of the runner with its output in the run's log. It has no terminal, so the agent command must run without one: plain `claude` (the `init` default) will not work there; see step 4. |
 | something else (Orca, WezTerm, kitty, a custom tool) | a custom launcher | See 3a. |
 
 Your own environment may not be the user's: if you are not running in the
@@ -123,7 +127,7 @@ vector (no shell) or a string run with `/bin/sh -c`, with `{{…}}` variables:
 Useful variables: `{{cwd}}`, `{{session_name}}`, `{{agent}}` (the agent
 command with its args), `{{prompt}}` (`/run-agent-task <run_ref>`),
 `{{handle}}`, `{{shell}}` (`$SHELL`), `{{path}}` (the runner's `PATH`),
-`{{run_ref}}`, `{{env.NAME}}` (an environment variable; unset is an error).
+`{{run_ref}}`, `{{log}}` (the run's log file), `{{env.NAME}}` (an environment variable; unset is an error).
 Add `_quoted` to any variable for a shell-quoted value
 (`{{prompt_quoted}}`). The argv element `{{env_argv}}` expands to the
 `KEY=value` pairs the agent needs (`AGENT_TASKS_RUN`, `AGENT_TASKS_ATTEMPT`,
@@ -205,9 +209,14 @@ $SHELL -ic 'type <command>'
   when `"shell": true`. That loads the shell's rc files, but **not** aliases
   or functions that are loaded lazily at the first prompt (zsh plugins with
   deferred loading, `zsh-defer`, files sourced from a precmd hook): those are
-  not visible to `zsh -ic`. Check with `zsh -ic 'type <command>'` (or the
-  user's shell). If it says "not found", use the program the alias calls
-  instead, or use an interactive-shell preset.
+  not visible to `zsh -ic`. If `$SHELL -ic 'type <command>'` says "not
+  found", use the program the alias calls instead, or use an
+  interactive-shell preset.
+
+  With an interactive-shell preset, a "not found" from `$SHELL -ic 'type …'`
+  does not mean it won't work: a lazily loaded alias only exists at the
+  prompt, which is exactly where these presets type it. Don't replace the
+  user's command; keep it and let the smoke test (step 9) prove it.
 
 - **Agent flags**: put them in `args`, e.g.
   `"args": ["--model", "opus"]`. Don't put the prompt there; agent-tasks
@@ -215,9 +224,10 @@ $SHELL -ic 'type <command>'
 
 - **The `process` preset needs an agent that runs without a terminal.**
   Interactive TUIs can't run there. Use the agent's non-interactive mode if it
-  has one and the user agrees (for Claude Code:
-  `"args": ["-p", "--permission-mode", "acceptEdits"]` or whatever the user's
-  permissions allow), or an interactive-shell preset.
+  has one and the user agrees (for Claude Code, print mode: `"args":
+  ["-p"]` plus whatever permission flags the user accepts; this combination
+  is not tested by agent-tasks, so rely on the smoke test), or an
+  interactive-shell preset.
 
 **Different command per folder.** If the user uses different commands,
 accounts or flags per project, add `profiles`. The first profile whose `match`
@@ -239,14 +249,11 @@ A profile can also set its own `launcher` or `skill`. `env` is for
 non-secret variables only. Remove the example profile `init` wrote if it
 does not apply (`~/Projects/work/**` with `instructions: ["work.md"]`).
 
-Check what a folder resolves to:
-
-```sh
-agent-tasks config check
-```
-
-`agent-tasks show <task-id>` later shows, for a real task, which agent and
-launcher it uses and where each value comes from.
+`agent-tasks config check` validates every profile. Which profile a task
+actually picks can only be checked once a task exists:
+`agent-tasks config resolve <task-id>` (or `agent-tasks show <task-id>`)
+prints the agent, launcher and skill it resolves to and where each value
+comes from. Do it for the smoke-test task in step 9.
 
 ## 5. Sub-agents close themselves
 
@@ -272,8 +279,10 @@ next tick: a session still open is closed; one that died without finish
   (`agent-tasks add … --keep-open never`).
 - A session kept open is closed by hand with
   `agent-tasks session close <run_ref>`.
-- With the `tmux` preset (and any launcher whose shell ends with `; exit`)
-  the window closes when the agent quits, so `keep_open` can't keep it.
+- The interactive presets type ` <agent> …; exit`, so the shell exits when
+  the agent quits. With `tmux` that closes the window, so `keep_open` keeps a
+  failed session only until its agent quits. Other multiplexers may keep the
+  tab after the shell exits; check it in the smoke test.
 - Verify `close` in the smoke test (step 9): the run must end `succeeded`
   and its tab/window must be gone.
 
@@ -335,20 +344,32 @@ interactive-shell preset.
 
 Prove the whole cycle works: a task runs, succeeds, and its session closes.
 
-1. Create a scratch folder and a one-off task due in about two minutes:
+1. Create a scratch folder and a one-off task due in about two minutes.
+   Use a new id every time (an archived task keeps its id, so a fixed id
+   fails the second time you run this recipe). Note the id: the next steps
+   use it as `$ID`; if your shell does not keep variables between commands,
+   write the value instead.
 
    ```sh
+   ID=agent-tasks-smoke-$(date +%s)
    mkdir -p ~/agent-tasks-smoke-test
    cd ~/agent-tasks-smoke-test
-   agent-tasks add --id agent-tasks-smoke-test --title "agent-tasks smoke test" \
+   agent-tasks add --id "$ID" --title "agent-tasks smoke test" \
      --cwd ~/agent-tasks-smoke-test \
      --at "$(bun -e 'console.log(new Date(Date.now() + 2 * 60000).toISOString())')" \
-     --keep-open never \
+     --timeout 10m --keep-open never \
      --instructions 'Write the text "hello from agent-tasks" to hello.txt in the working directory. Do nothing else. Done when the file exists.'
+   agent-tasks config resolve "$ID"
    ```
 
-   (`--keep-open never` so the session closes even if the run fails; you
-   check the result in the run's record.)
+   `config resolve` must show the agent and launcher you configured.
+   `--keep-open never` closes the session even if the run fails (you read
+   the result in the run's record); `--timeout 10m` ends a stuck run quickly.
+
+   Tell the user before it starts: the agent may stop at a prompt the first
+   time (a "trust this folder" dialog for a new folder, a permission to write
+   a file). They should answer it in the sub-agent's tab; you can bring it to
+   the front with `agent-tasks attach <run_ref>` once it is launched.
 
 2. Start the runner in **a new tab or window of the user's multiplexer**,
    where it will keep running: `agent-tasks runner`. If you can open tabs
@@ -364,34 +385,33 @@ Prove the whole cycle works: a task runs, succeeds, and its session closes.
    ```sh
    agent-tasks runner status
    agent-tasks status
-   agent-tasks runs agent-tasks-smoke-test
+   agent-tasks runs "$ID"
    ```
 
-   When the run is no longer `running`:
+   `runs` shows the run ref (`<id>/<slot>`) in its first column. When the
+   run is no longer `running`:
 
    ```sh
-   agent-tasks log agent-tasks-smoke-test
+   agent-tasks log "$ID"
    cat ~/agent-tasks-smoke-test/hello.txt
    ```
 
    Success means: the run is `ok` (succeeded), `hello.txt` exists, and the
    sub-agent's tab/window is gone (ask the user to confirm, or check with the
    multiplexer's CLI). With a launcher that has `status`,
-   `agent-tasks session status agent-tasks-smoke-test/<slot>` must say the
-   session is gone.
+   `agent-tasks session status <run_ref>` must say the session is `gone`.
 
-4. If it failed: `agent-tasks log agent-tasks-smoke-test` shows the events,
-   the launcher command and the captured output. Common causes: the agent
-   command isn't found inside the new tab (`PATH`, alias, step 4), the agent
-   is waiting for a permission prompt (attach with
-   `agent-tasks attach <run_ref>`), the skill isn't installed (step 7), or
-   `close` doesn't work (step 3a). Fix it, then
+4. If it failed: `agent-tasks log "$ID"` shows the events, the launcher
+   command and the captured output. Common causes: the agent command isn't
+   found inside the new tab (`PATH`, alias, step 4), the agent is waiting at
+   a trust or permission prompt (`agent-tasks attach <run_ref>`), the skill
+   isn't installed (step 7), or `close` doesn't work (step 3a). Fix it, then
    `agent-tasks retry <run_ref>` and check again.
 
 5. Clean up:
 
    ```sh
-   agent-tasks rm agent-tasks-smoke-test
+   agent-tasks rm "$ID"
    rm -r ~/agent-tasks-smoke-test
    ```
 
