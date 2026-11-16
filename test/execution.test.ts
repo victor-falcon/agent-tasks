@@ -189,6 +189,17 @@ describe("reconcile", () => {
     expect(events.map((e) => [e.type, e.reason ?? null])).toEqual([["missed", "runner_skipped"], ["anomaly", null]]);
   });
 
+  test("slots before schedule_since are ignored (edit / resume)", async () => {
+    execTask(home, "succeed", {
+      schedule: { type: "cron", cron: "0 * * * *", timezone: "Europe/Madrid", starts_at: null, until: null },
+      created_at: "2026-11-01T00:00:00+01:00",
+      schedule_since: "2026-11-17T08:30:00+01:00",
+    });
+    const { events } = await home.tick(1);
+    expect(events.map((e) => [e.type, e.run_ref])).toEqual([["launched", DEMO_REF]]);
+    await waitFor(finished(), "finish");
+  });
+
   test("a paused task's slots are cancelled", async () => {
     execTask(home, "succeed", { enabled: false });
     const { events } = await home.tick(1);

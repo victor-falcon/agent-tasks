@@ -23,10 +23,10 @@ import {
   updateRun,
 } from "./execution.ts";
 import { sessionStatus } from "./launcher.ts";
-import { isTaskFinished, planSlots } from "./schedule.ts";
 import type { Run, RunStatus, Task } from "./schema.ts";
 import { runRef, runSlotId } from "./slot.ts";
-import { appendTick, claimRun, listRuns, listTasks, readTicks, recordedSlots } from "./store.ts";
+import { appendTick, claimRun, listRuns, listTasks, readTicks } from "./store.ts";
+import { planTask } from "./task-info.ts";
 import { systemTimezone } from "./time.ts";
 
 // One pass of the scheduler (doc/roadmap/phase-1-core.md, "`tick`, step by
@@ -237,18 +237,12 @@ class TickPass {
   // Reconcile and launch
   // -------------------------------------------------------------------------
 
-  reconcileTask(task: Task, pastTicks: Date[]): void {
+  reconcileTask(task: Task): void {
     const { ctx } = this;
     const resolution = ctx.resolveFor(task);
-    const runs = listRuns(ctx.paths, task.id);
-    const plan = planSlots({
-      task,
-      now: ctx.now,
-      recorded: recordedSlots(ctx.paths, task.id),
-      ticks: pastTicks,
-      settings: resolution,
-      finished: isTaskFinished(task, runs.items.map((r) => r.run)),
-    });
+    // Same plan as `due` (schedule_since, one-off tasks moved to a new `at`). Reads the
+    // ticks before this tick's heartbeat line is appended.
+    const plan = planTask(ctx.paths, task, resolution, ctx.now);
     const at = stamp(ctx, resolution.timezone);
     const record = (slot: Date, status: RunStatus, reason: string | null, extra: Record<string, unknown> = {}): string | null => {
       const run = newRun(task.id, slot, resolution.timezone, "schedule", status, reason, { event: status, by: "tick", ...(reason ? { reason } : {}), ...extra }, at);
@@ -292,7 +286,6 @@ export function tick(ctx: Context, opts: TickOptions = {}): TickResult {
 
   const ticks = readTicks(ctx.paths);
   for (const err of ticks.errors) pass.errors.push(err.message);
-  const pastTicks = ticks.items.map((t) => new Date(t.at));
 
   const tasks = listTasks(ctx.paths);
   for (const err of tasks.errors) pass.anomaly(err.message);
@@ -307,7 +300,7 @@ export function tick(ctx: Context, opts: TickOptions = {}): TickResult {
     });
   }
   // 2–3. Reconcile slots and launch candidates.
-  for (const task of tasks.items) pass.guard(`scheduling task ${task.id}`, task.id, () => pass.reconcileTask(task, pastTicks));
+  for (const task of tasks.items) pass.guard(`scheduling task ${task.id}`, task.id, () => pass.reconcileTask(task));
 
   const count = (...types: ExecEventType[]) => pass.events.filter((e) => types.includes(e.type)).length;
   appendTick(ctx.paths, {

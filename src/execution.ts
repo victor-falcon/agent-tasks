@@ -7,7 +7,7 @@ import { closeSession, launch, type LauncherSpec, readSession, resolveLauncher, 
 import { resolvePath } from "./paths.ts";
 import type { Attempt, KeepOpen, Run, RunStatus, SessionRecord, Task, Trigger } from "./schema.ts";
 import { parseRunRef, runRef, runSlotId } from "./slot.ts";
-import { readRun, readTask, readTaskFile, runLogRelativePath, writeRun } from "./store.ts";
+import { isArchived, readArchivedTask, readRun, readTask, runLogRelativePath, writeRun } from "./store.ts";
 import { render } from "./template.ts";
 import { formatInZone } from "./time.ts";
 
@@ -44,8 +44,7 @@ export function findTask(ctx: Context, id: string): { task: Task; archived: bool
   } catch (err) {
     if (!(err instanceof NotFoundError)) throw err;
   }
-  const archived = join(ctx.paths.archiveDir, `${id}.json`);
-  return existsSync(archived) ? { task: readTaskFile(archived), archived: true } : null;
+  return isArchived(ctx.paths, id) ? { task: readArchivedTask(ctx.paths, id), archived: true } : null;
 }
 
 export function requireTask(ctx: Context, id: string): Task {
