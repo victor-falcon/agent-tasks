@@ -79,14 +79,14 @@ describe("commands", () => {
   test("status_map translates herdr's JSON and custom outputs", () => {
     const herdr = resolveLauncher({ preset: "herdr" });
     const fake = (json: unknown) => ({ ...herdr, status: ["/bin/sh", "-c", `printf %s ${shellQuote(JSON.stringify(json))}`] });
-    expect(sessionStatus(fake({ state: "finished" }), input(), input().env)?.state).toBe("exited");
-    expect(sessionStatus(fake({ state: "live", status: { state: "blocked" } }), input(), input().env)?.state).toBe("blocked");
-    expect(sessionStatus(fake({ state: "live", status: { state: "done" } }), input(), input().env)?.state).toBe("idle");
-    expect(sessionStatus(fake({ state: "live", status: null }), input(), input().env)?.state).toBe("working");
+    expect(sessionStatus(fake({ state: "finished" }), input())?.state).toBe("exited");
+    expect(sessionStatus(fake({ state: "live", status: { state: "blocked" } }), input())?.state).toBe("blocked");
+    expect(sessionStatus(fake({ state: "live", status: { state: "done" } }), input())?.state).toBe("idle");
+    expect(sessionStatus(fake({ state: "live", status: null }), input())?.state).toBe("working");
     const custom = resolveLauncher({ launch: ["x"], status: "echo waiting", status_map: { waiting: "blocked" } });
-    expect(sessionStatus(custom, input(), input().env)?.state).toBe("blocked");
-    expect(sessionStatus(resolveLauncher({ launch: ["x"], status: ["false"] }), input(), input().env)?.state).toBe("gone");
-    expect(sessionStatus(resolveLauncher({ launch: ["x"] }), input(), input().env)).toBeNull();
+    expect(sessionStatus(custom, input())?.state).toBe("blocked");
+    expect(sessionStatus(resolveLauncher({ launch: ["x"], status: ["false"] }), input())?.state).toBe("gone");
+    expect(sessionStatus(resolveLauncher({ launch: ["x"] }), input())).toBeNull();
   });
 });
 

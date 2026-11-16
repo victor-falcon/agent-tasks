@@ -24,7 +24,7 @@ Arguments:
     const occurrence = newRun(task.id, ctx.now, resolution.timezone, "manual", "running", null, { event: "claimed", by: "run" }, stamp(ctx, resolution.timezone));
     const ref = runRef(task.id, runSlotId(occurrence));
     if (!claimRun(ctx.paths, occurrence)) throw new AgentTasksError("conflict", `${ref} already exists: a manual run of ${task.id} started this same second`);
-    const events = startAttempt(ctx, task, ref, "run");
+    const events = startAttempt(ctx, task, ref, { by: "run" });
     output(ctx, { run_ref: ref, events }, () => events.map(formatEvent).join("\n"));
     return events.some((e) => e.type === "failed") ? 1 : 0;
   },

@@ -1,5 +1,5 @@
 {
-  "description": "Each run in its own Herdr tab, in the runner's space and nested under it. Starts an interactive shell and types the agent command into it, so shell aliases loaded at the first prompt (such as clc) work.",
+  "description": "Each run in its own Herdr tab, in the runner's space and nested under it. Starts an interactive shell and types the agent command into it, so shell aliases loaded at the first prompt (such as clc) work. The shell exits with the agent, so a terminal whose agent quit without finish is detected.",
   "launch": [
     "hc", "run", "--bg", "--json", "--no-parent", "--no-notify", "--keep",
     "--name", "{{session_name}}", "--cwd", "{{cwd}}",
@@ -10,7 +10,7 @@
     "--", "/usr/bin/env", "PATH={{path}}", "{{env_argv}}", "{{shell}}", "-i"
   ],
   "handle": "json:.address",
-  "then": [["hc", "send", "{{handle}}", " {{agent}} {{prompt_quoted}}"]],
+  "then": [["hc", "send", "{{handle}}", " {{agent}} {{prompt_quoted}}; exit"]],
   "close": ["hc", "kill", "{{handle}}"],
   "status": ["hc", "get", "{{handle}}", "--json"],
   "status_map": "herdr",

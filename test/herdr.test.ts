@@ -47,10 +47,11 @@ describe("herdr preset", () => {
       `AGENT_TASKS_HOME=${home.dataDir}`,
       `AGENT_TASKS_CONFIG=${home.configFile}`,
       `AGENT_TASKS_RUN=${DEMO_REF}`,
+      "AGENT_TASKS_ATTEMPT=1",
       "/bin/sh",
       "-i",
     ]);
-    expect(calls("send")).toEqual([["send", "t2", ` clc '/run-agent-task ${DEMO_REF}'`]]);
+    expect(calls("send")).toEqual([["send", "t2", ` clc '/run-agent-task ${DEMO_REF}'; exit`]]);
     expect(home.run(DEMO_REF).attempts[0]!.session).toMatchObject({ launcher: "herdr", handle: "t2", closed_at: null });
   });
 
@@ -61,7 +62,7 @@ describe("herdr preset", () => {
     expect(result.json()).toMatchObject({ status: "succeeded", session: { closed_at: expect.any(String) } });
     expect(calls("read")).toEqual([["read", "--lines", "200", "t2"]]);
     expect(calls("kill")).toEqual([["kill", "t2"]]);
-    expect(readFileSync(join(home.dataDir, "runs/demo/20261117T080000Z.log"), "utf8")).toBe("screen of t2\n");
+    expect(readFileSync(join(home.dataDir, "runs/demo/20261117T080000Z.log"), "utf8")).toBe("--- session output (2026-11-17T09:10:00+01:00) ---\nscreen of t2\n");
   });
 
   test("keep_open: always leaves the tab open", async () => {
@@ -125,7 +126,30 @@ describe("herdr preset", () => {
     expect((await home.tick(40)).events).toEqual([expect.objectContaining({ type: "timed_out" })]);
     expect(calls("read")).toHaveLength(1);
     expect(calls("kill")).toEqual([["kill", "t2"]]); // timeouts close even with keep_open: always
-    expect(readFileSync(join(home.dataDir, "runs/demo/20261117T080000Z.log"), "utf8")).toBe("screen of t2\n");
+    expect(readFileSync(join(home.dataDir, "runs/demo/20261117T080000Z.log"), "utf8")).toContain("---\nscreen of t2\n");
+  });
+
+  test("a status command that cannot run is an anomaly, not a failure", async () => {
+    execTask(home, "succeed");
+    await home.tick(1);
+    home.writeConfig({ timezone: "Europe/Madrid", launcher: { preset: "herdr", status: ["/nonexistent/hc", "get", "{{handle}}"] }, agent: { command: "clc" } });
+    const { events } = await home.tick(2);
+    expect(events).toEqual([expect.objectContaining({ type: "anomaly", message: expect.stringContaining("state is unknown") })]);
+    expect(home.run(DEMO_REF).status).toBe("running");
+  });
+
+  test("a close that fails in tick is retried a few times and reported", async () => {
+    execTask(home, "succeed", { keep_open: "never" });
+    await home.tick(1);
+    writeFileSync(join(home.hcDir, "fail-kill"), "");
+    setTerminal("t2", { state: "finished" });
+    const first = await home.tick(2);
+    expect(first.events.map((e) => e.type)).toEqual(["failed", "anomaly"]);
+    await home.tick(4);
+    await home.tick(6);
+    await home.tick(8);
+    expect(calls("kill")).toHaveLength(3); // MAX_CLOSE_ATTEMPTS, then left to the user
+    expect(home.run(DEMO_REF).attempts[0]!.session).toMatchObject({ closed_at: null, close_attempts: 3 });
   });
 
   test("a prompt that could not be typed is failed / prompt_not_delivered", async () => {

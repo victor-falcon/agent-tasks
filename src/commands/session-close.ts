@@ -1,8 +1,7 @@
 import { parseCommandArgs } from "../args.ts";
 import { output } from "../context.ts";
-import { closeSession, LauncherError } from "../launcher.ts";
-import { commandEnv, loadSession, stamp, updateRun } from "../execution.ts";
-import type { SessionRecord } from "../execution.ts";
+import { LauncherError } from "../launcher.ts";
+import { loadSession, settleSession } from "../execution.ts";
 import type { Command } from "./types.ts";
 
 const sessionClose: Command = {
@@ -19,17 +18,9 @@ Arguments:
     const { positionals } = parseCommandArgs(args, {}, { minPositionals: 1, maxPositionals: 1 });
     const ref = positionals[0]!;
     const s = loadSession(ctx, ref);
-    const result = closeSession(s.spec, s.input, commandEnv(s.input));
-    if (!result) throw new LauncherError(`the ${s.spec.name} launcher has no close command`);
-    if (!result.ok) throw new LauncherError(result.error ?? "close failed");
-    const at = stamp(ctx, s.resolution.timezone);
-    updateRun(ctx, ref, (r) => {
-      const record = r.attempts[s.attempt.n - 1]!.session as unknown as SessionRecord;
-      record.closed_at = at;
-      record.kept_open = false;
-      record.close_error = null;
-      r.events.push({ at, event: "closed", attempt: s.attempt.n, by: "session close" });
-    });
+    if (!s.spec.close) throw new LauncherError(`the ${s.spec.name} launcher has no close command`);
+    const result = settleSession(ctx, s.task, ref, { force: true });
+    if (result.action === "close_failed") throw new LauncherError(result.error);
     output(ctx, { run_ref: ref, attempt: s.attempt.n, handle: s.record.handle, closed: true }, `Closed session ${s.record.handle} of ${ref}.`);
   },
 };

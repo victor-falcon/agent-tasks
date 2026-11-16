@@ -1,7 +1,7 @@
 import { parseCommandArgs } from "../args.ts";
 import { output } from "../context.ts";
 import { LauncherError, sessionStatus } from "../launcher.ts";
-import { commandEnv, loadSession } from "../execution.ts";
+import { loadSession } from "../execution.ts";
 import type { Command } from "./types.ts";
 
 const sessionStatusCommand: Command = {
@@ -18,7 +18,7 @@ Arguments:
     const { positionals } = parseCommandArgs(args, {}, { minPositionals: 1, maxPositionals: 1 });
     const ref = positionals[0]!;
     const s = loadSession(ctx, ref);
-    const status = sessionStatus(s.spec, s.input, commandEnv(s.input));
+    const status = sessionStatus(s.spec, s.input);
     if (!status) throw new LauncherError(`the ${s.spec.name} launcher has no status command`);
     output(
       ctx,

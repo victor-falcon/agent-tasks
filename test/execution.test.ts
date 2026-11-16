@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Run } from "../src/schema.ts";
 import { appendTick } from "../src/store.ts";
@@ -65,6 +65,42 @@ describe("process preset: launch → finish", () => {
     expect(again.code).toBe(0);
     expect(again.json()).toMatchObject({ already_finished: true, status: "succeeded" });
     expect(home.run(DEMO_REF)).toEqual(before);
+  });
+
+  test("a finish after tick ended the attempt keeps the late report without changing the status", async () => {
+    execTask(home, "hang", { timeout: "30m" });
+    await home.tick(1);
+    await home.tick(32);
+    const late = await home.cli("finish", DEMO_REF, "--status", "succeeded", "--summary", "done late", "--json");
+    expect(late.code).toBe(0);
+    expect(late.json()).toMatchObject({ late: true, status: "timed_out" });
+    expect(late.stderr).toContain("had already ended as timed_out");
+    expect(home.run(DEMO_REF).events.at(-1)).toMatchObject({ event: "late_finish", status: "succeeded", summary: "done late" });
+  });
+
+  test("an old attempt cannot finish a newer one", async () => {
+    execTask(home, "hang", { timeout: "30m", retries: 1 });
+    await home.tick(1);
+    await home.tick(32); // timed out → attempt 2 launched
+    expect(home.run(DEMO_REF).attempts).toHaveLength(2);
+    home.env.AGENT_TASKS_RUN = DEMO_REF;
+    home.env.AGENT_TASKS_ATTEMPT = "1";
+    const stale = await home.cli("finish", DEMO_REF, "--status", "succeeded", "--summary", "x");
+    expect(stale.code).toBe(1);
+    expect(stale.stderr).toContain("attempt 1 of demo/20261117T080000Z was replaced by attempt 2");
+    delete home.env.AGENT_TASKS_ATTEMPT;
+    await home.cli("session", "close", DEMO_REF);
+  });
+
+  test("an archived task's failed run is not retried", async () => {
+    execTask(home, "exit", { retries: 2 });
+    await home.tick(1);
+    const pid = pidOf(home.run(DEMO_REF));
+    await waitFor(() => !pidAlive(pid), "the agent to exit");
+    mkdirSync(home.paths.archiveDir, { recursive: true });
+    renameSync(join(home.paths.tasksDir, "demo.json"), join(home.paths.archiveDir, "demo.json"));
+    expect((await home.tick(2)).events.map((e) => e.type)).toEqual(["failed"]);
+    expect(home.run(DEMO_REF).attempts).toHaveLength(1);
   });
 
   test("an agent that exits without finish ends as failed / exited_without_report", async () => {

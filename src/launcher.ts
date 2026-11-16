@@ -231,6 +231,11 @@ export function sessionVars(input: SessionInput): Vars {
   };
 }
 
+/** Environment for launcher commands: the runner's, plus what the agent needs. */
+export function commandEnv(input: SessionInput): Env {
+  return { ...input.env, ...input.agentEnv };
+}
+
 /**
  * Renders a command into an argv. A string command runs through `/bin/sh -c`.
  * An argv element that is exactly `{{agent_argv}}` or `{{env_argv}}` expands
@@ -326,7 +331,8 @@ export interface LaunchResult {
 }
 
 /** Runs `launch` (and the `then` steps). Throws LauncherError when no session was started. */
-export function launch(spec: LauncherSpec, input: SessionInput, env: Env): LaunchResult {
+export function launch(spec: LauncherSpec, input: SessionInput): LaunchResult {
+  const env = commandEnv(input);
   const argv = renderCommand(spec.launch, input, "launcher.launch");
   let handle: string;
   let pid: number | null = null;
@@ -366,7 +372,7 @@ function herdrState(stdout: string): SessionState {
   try {
     info = JSON.parse(stdout);
   } catch {
-    return "working";
+    throw new LauncherError(`status did not print JSON: ${stdout.trim().slice(0, 200)}`);
   }
   if (info.state === "finished") return "exited";
   switch (info.status?.state) {
@@ -386,11 +392,16 @@ export interface StatusResult {
   raw: string;
 }
 
-/** The session's state, or null when the launcher has no `status` command. */
-export function sessionStatus(spec: LauncherSpec, input: SessionInput, env: Env): StatusResult | null {
+/**
+ * The session's state, or null when the launcher has no `status` command.
+ * A non-zero exit means the session is gone. A status command that could not
+ * run or timed out throws instead: the state is unknown, not gone.
+ */
+export function sessionStatus(spec: LauncherSpec, input: SessionInput): StatusResult | null {
   if (!spec.status) return null;
-  const result = exec(renderCommand(spec.status, input, "launcher.status"), { env });
+  const result = exec(renderCommand(spec.status, input, "launcher.status"), { env: commandEnv(input) });
   const raw = result.stdout.trim();
+  if (result.code === 127 || result.code === -1) throw new LauncherError(`the session's state is unknown: ${describeFailure("status", result)}`);
   if (result.code !== 0) return { state: "gone", raw: raw || result.stderr.trim() };
   if (spec.status_map === "herdr") return { state: herdrState(result.stdout), raw };
   if (isObject(spec.status_map)) return { state: spec.status_map[raw] ?? "working", raw };
@@ -398,16 +409,16 @@ export function sessionStatus(spec: LauncherSpec, input: SessionInput, env: Env)
 }
 
 /** Runs `close`. Returns null when the launcher has none. */
-export function closeSession(spec: LauncherSpec, input: SessionInput, env: Env): { ok: boolean; error: string | null } | null {
+export function closeSession(spec: LauncherSpec, input: SessionInput): { ok: boolean; error: string | null } | null {
   if (!spec.close) return null;
-  const result = exec(renderCommand(spec.close, input, "launcher.close"), { env });
+  const result = exec(renderCommand(spec.close, input, "launcher.close"), { env: commandEnv(input) });
   return result.code === 0 ? { ok: true, error: null } : { ok: false, error: describeFailure("close", result) };
 }
 
 /** Runs `read` and returns its output, or null when the launcher has none. Throws when it fails. */
-export function readSession(spec: LauncherSpec, input: SessionInput, env: Env): string | null {
+export function readSession(spec: LauncherSpec, input: SessionInput): string | null {
   if (!spec.read) return null;
-  const result = exec(renderCommand(spec.read, input, "launcher.read"), { env });
+  const result = exec(renderCommand(spec.read, input, "launcher.read"), { env: commandEnv(input) });
   if (result.code !== 0) throw new LauncherError(describeFailure("read", result));
   return result.stdout;
 }

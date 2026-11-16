@@ -1,7 +1,7 @@
 import { parseCommandArgs } from "../args.ts";
 import { output } from "../context.ts";
 import { LauncherError, readSession } from "../launcher.ts";
-import { commandEnv, loadSession } from "../execution.ts";
+import { loadSession } from "../execution.ts";
 import type { Command } from "./types.ts";
 
 const sessionRead: Command = {
@@ -17,7 +17,7 @@ Arguments:
     const { positionals } = parseCommandArgs(args, {}, { minPositionals: 1, maxPositionals: 1 });
     const ref = positionals[0]!;
     const s = loadSession(ctx, ref);
-    const text = readSession(s.spec, s.input, commandEnv(s.input));
+    const text = readSession(s.spec, s.input);
     if (text === null) throw new LauncherError(`the ${s.spec.name} launcher has no read command`);
     output(ctx, { run_ref: ref, attempt: s.attempt.n, handle: s.record.handle, output: text }, text);
   },

@@ -5,28 +5,28 @@ import type { Context } from "./context.ts";
 import { parseDuration } from "./duration.ts";
 import { AgentTasksError } from "./errors.ts";
 import {
-  captureLog,
-  commandEnv,
   endAttempt,
   type ExecEvent,
   type ExecEventType,
   findTask,
+  isReported,
   lastAttempt,
   markSessionGone,
+  MAX_CLOSE_ATTEMPTS,
   newRun,
   readRunRef,
-  sessionInput,
-  sessionOf,
+  sessionFor,
+  type SettleOptions,
   settleSession,
   stamp,
   startAttempt,
   updateRun,
 } from "./execution.ts";
-import { resolveLauncher, sessionStatus } from "./launcher.ts";
+import { sessionStatus } from "./launcher.ts";
 import { isTaskFinished, planSlots } from "./schedule.ts";
 import type { Run, RunStatus, Task } from "./schema.ts";
 import { runRef, runSlotId } from "./slot.ts";
-import { appendTick, claimRun, listRuns, listTasks, readTicks, recordedSlots, type StoredRun } from "./store.ts";
+import { appendTick, claimRun, listRuns, listTasks, readTicks, recordedSlots } from "./store.ts";
 import { systemTimezone } from "./time.ts";
 
 // One pass of the scheduler (doc/roadmap/phase-1-core.md, "`tick`, step by
@@ -51,6 +51,15 @@ const CLOSE_GRACE_MS = 60_000;
 /** An attempt with no session after this was interrupted while launching. */
 const LAUNCH_GRACE_MS = 5 * 60_000;
 const FINISHED_STATUSES: readonly RunStatus[] = ["succeeded", "failed", "timed_out"];
+
+/** One run being watched, with its task and resolved settings. */
+interface Watched {
+  task: Task;
+  resolution: Resolution;
+  ref: string;
+  /** The task was removed with `rm`: its runs are still watched, but not retried. */
+  archived: boolean;
+}
 
 class TickPass {
   readonly events: ExecEvent[] = [];
@@ -83,136 +92,145 @@ class TickPass {
   // Watch
   // -------------------------------------------------------------------------
 
-  watchTask(task: Task): void {
+  watchTask(task: Task, archived: boolean): void {
     const runs = listRuns(this.ctx.paths, task.id);
     for (const err of runs.errors) this.anomaly(err.message, null, task.id);
     const resolution = this.ctx.resolveFor(task);
     for (const stored of runs.items) {
-      this.guard(`watching ${stored.ref}`, task.id, () => this.watchRun(task, resolution, stored));
+      const w: Watched = { task, resolution, ref: stored.ref, archived };
+      this.guard(`watching ${stored.ref}`, task.id, () => this.watchRun(w, stored.run));
     }
   }
 
-  watchRun(task: Task, resolution: Resolution, { ref, run }: StoredRun): void {
+  at(w: Watched): string {
+    return stamp(this.ctx, w.resolution.timezone);
+  }
+
+  watchRun(w: Watched, run: Run): void {
     const attempt = lastAttempt(run);
     if (!attempt) {
       const claimedAt = Date.parse(run.events[0]?.at ?? "");
       if (run.status === "running" && this.nowMs - claimedAt > LAUNCH_GRACE_MS) {
-        updateRun(this.ctx, ref, (r) => {
+        let failed = false;
+        updateRun(this.ctx, w.ref, (r) => {
           if (r.attempts.length > 0 || r.status !== "running") return;
           r.status = "failed";
           r.reason = "launch_interrupted";
-          r.events.push({ at: stamp(this.ctx, resolution.timezone), event: "failed", reason: "launch_interrupted" });
+          r.events.push({ at: this.at(w), event: "failed", reason: "launch_interrupted" });
+          failed = true;
         });
-        this.events.push({ type: "failed", run_ref: ref, task_id: task.id, reason: "launch_interrupted" });
+        if (failed) this.events.push({ type: "failed", run_ref: w.ref, task_id: w.task.id, reason: "launch_interrupted" });
       }
       return;
     }
-    if (attempt.finished_at) this.followUpFinished(task, resolution, ref, run);
-    else if (run.status === "running" || run.status === "blocked") this.watchActive(task, resolution, ref, run);
-    if (this.failedNow.has(ref)) this.maybeRetry(task, resolution, ref);
+    if (attempt.finished_at) this.followUpFinished(w, run);
+    else if (run.status === "running" || run.status === "blocked") this.watchActive(w, run);
+    if (this.failedNow.has(w.ref)) this.maybeRetry(w);
   }
 
-  report(task: Task, ref: string, n: number, status: RunStatus, reason: string | null, message?: string | null): void {
-    this.events.push({ type: status as ExecEventType, run_ref: ref, task_id: task.id, attempt: n, reason, ...(message ? { message } : {}) });
-    if (status === "failed" || status === "timed_out") this.failedNow.add(ref);
+  report(w: Watched, n: number, status: RunStatus, reason: string | null, message?: string | null): void {
+    this.events.push({ type: status as ExecEventType, run_ref: w.ref, task_id: w.task.id, attempt: n, reason, ...(message ? { message } : {}) });
+    if (status === "failed" || status === "timed_out") this.failedNow.add(w.ref);
   }
 
-  /** Ends the latest attempt with `status` unless something else ended it meanwhile, and reports it. */
-  end(task: Task, resolution: Resolution, ref: string, n: number, status: RunStatus, reason: string | null, message?: string): boolean {
+  /** Ends attempt `n` with `status` unless something else ended it meanwhile, and reports it. */
+  end(w: Watched, n: number, status: RunStatus, reason: string | null, message?: string): boolean {
     let ended = false;
-    const at = stamp(this.ctx, resolution.timezone);
-    updateRun(this.ctx, ref, (r) => {
+    updateRun(this.ctx, w.ref, (r) => {
       const a = r.attempts[n - 1];
       if (!a || a.finished_at) return;
-      endAttempt(r, n, status, reason, at, message ? { message } : {});
-      r.events.push({ at, event: "reported", attempt: n });
+      endAttempt(r, n, status, reason, this.at(w), { message, reported: true });
       ended = true;
     });
-    if (ended) this.report(task, ref, n, status, reason, message);
+    if (ended) this.report(w, n, status, reason, message);
     return ended;
   }
 
-  watchActive(task: Task, resolution: Resolution, ref: string, run: Run): void {
+  /** Closes a session and turns a failed close into an anomaly. */
+  settle(w: Watched, opts: SettleOptions): void {
+    const result = settleSession(this.ctx, w.task, w.ref, opts);
+    if (result.action === "close_failed") this.anomaly(`could not close the session of ${w.ref}: ${result.error}`, w.ref, w.task.id);
+  }
+
+  watchActive(w: Watched, run: Run): void {
     const attempt = lastAttempt(run)!;
     const n = attempt.n;
-    const record = sessionOf(attempt);
-    if (!record) {
+    const session = sessionFor(this.ctx, w.task, w.resolution, run);
+    if (!session) {
       // Launch in progress in another process, or interrupted before recording the session.
       if (this.nowMs - Date.parse(attempt.started_at) > LAUNCH_GRACE_MS) {
-        this.end(task, resolution, ref, n, "failed", "launch_interrupted", "the launch never recorded a session");
-      }
-      return;
-    }
-    const spec = resolveLauncher(resolution.launcher);
-    const input = sessionInput(this.ctx, task, resolution, run, attempt);
-
-    const timeoutMs = parseDuration(resolution.timeout);
-    if (this.nowMs - Date.parse(attempt.started_at) > timeoutMs) {
-      captureLog(spec, input);
-      if (this.end(task, resolution, ref, n, "timed_out", null, `ran longer than the ${resolution.timeout} timeout`)) {
-        settleSession(this.ctx, task, ref, { force: true });
+        this.end(w, n, "failed", "launch_interrupted", "the launch never recorded a session");
       }
       return;
     }
 
-    const status = sessionStatus(spec, input, commandEnv(input));
+    if (this.nowMs - Date.parse(attempt.started_at) > parseDuration(w.resolution.timeout)) {
+      if (this.end(w, n, "timed_out", null, `ran longer than the ${w.resolution.timeout} timeout`)) this.settle(w, { force: true, capture: true });
+      return;
+    }
+
+    // Throws when the state is unknown (status timed out or could not run): an anomaly, not a failure.
+    const status = sessionStatus(session.spec, session.input);
     if (!status) return;
     switch (status.state) {
       case "gone":
       case "exited":
-        if (this.end(task, resolution, ref, n, "failed", "exited_without_report", "the session ended without calling finish")) {
-          if (status.state === "gone") markSessionGone(this.ctx, ref, stamp(this.ctx, resolution.timezone));
-          else settleSession(this.ctx, task, ref, { capture: true });
+        if (this.end(w, n, "failed", "exited_without_report", "the session ended without calling finish")) {
+          if (status.state === "gone") markSessionGone(this.ctx, w.ref, this.at(w));
+          else this.settle(w, { capture: true });
         }
         return;
       case "blocked":
-        if (run.status !== "blocked") this.setBlocked(task, resolution, ref, n, true);
+        if (run.status !== "blocked") this.setBlocked(w, n, true);
         return;
       default:
-        if (run.status === "blocked") this.setBlocked(task, resolution, ref, n, false);
+        if (run.status === "blocked") this.setBlocked(w, n, false);
     }
   }
 
-  setBlocked(task: Task, resolution: Resolution, ref: string, n: number, blocked: boolean): void {
-    const at = stamp(this.ctx, resolution.timezone);
+  setBlocked(w: Watched, n: number, blocked: boolean): void {
     let changed = false;
-    updateRun(this.ctx, ref, (r) => {
+    updateRun(this.ctx, w.ref, (r) => {
       const a = r.attempts[n - 1];
       if (!a || a.finished_at || n !== r.attempts.length) return;
       const status = blocked ? "blocked" : "running";
       if (r.status === status) return;
       r.status = status;
       a.status = status;
-      r.events.push({ at, event: blocked ? "blocked" : "unblocked", attempt: n });
+      r.events.push({ at: this.at(w), event: blocked ? "blocked" : "unblocked", attempt: n });
       changed = true;
     });
-    if (changed && blocked) this.events.push({ type: "blocked", run_ref: ref, task_id: task.id, attempt: n });
+    if (changed && blocked) this.events.push({ type: "blocked", run_ref: w.ref, task_id: w.task.id, attempt: n });
   }
 
-  /** An attempt ended by `finish`: report it once, and close its session if `finish` could not. */
-  followUpFinished(task: Task, resolution: Resolution, ref: string, run: Run): void {
+  /** An ended attempt: report it once (if `finish` ended it), and close its session if nobody could. */
+  followUpFinished(w: Watched, run: Run): void {
     const attempt = lastAttempt(run)!;
     const n = attempt.n;
-    const finishedMs = Date.parse(attempt.finished_at!);
-    const reported = run.events.some((e) => e.event === "reported" && e.attempt === n);
-    if (!reported && FINISHED_STATUSES.includes(attempt.status)) {
-      updateRun(this.ctx, ref, (r) => void r.events.push({ at: stamp(this.ctx, resolution.timezone), event: "reported", attempt: n }));
-      this.report(task, ref, n, attempt.status, attempt.reason ?? null, attempt.summary);
+    if (!isReported(run, n) && FINISHED_STATUSES.includes(attempt.status)) {
+      let claimed = false;
+      updateRun(this.ctx, w.ref, (r) => {
+        if (isReported(r, n)) return;
+        r.events.push({ at: this.at(w), event: "reported", attempt: n });
+        claimed = true;
+      });
+      if (claimed) this.report(w, n, attempt.status, attempt.reason ?? null, attempt.summary);
     }
-    const record = sessionOf(attempt);
-    if (!record || record.closed_at || record.kept_open || this.nowMs - finishedMs < CLOSE_GRACE_MS) return;
-    const spec = resolveLauncher(resolution.launcher);
-    const input = sessionInput(this.ctx, task, resolution, run, attempt);
-    if (sessionStatus(spec, input, commandEnv(input))?.state === "gone") markSessionGone(this.ctx, ref, stamp(this.ctx, resolution.timezone));
-    else settleSession(this.ctx, task, ref, { capture: true });
+    const record = attempt.session;
+    if (!record || record.closed_at || record.kept_open || (record.close_attempts ?? 0) >= MAX_CLOSE_ATTEMPTS) return;
+    if (this.nowMs - Date.parse(attempt.finished_at!) < CLOSE_GRACE_MS) return;
+    const session = sessionFor(this.ctx, w.task, w.resolution, run);
+    if (session && sessionStatus(session.spec, session.input)?.state === "gone") markSessionGone(this.ctx, w.ref, this.at(w));
+    else this.settle(w, { capture: true });
   }
 
-  /** A run whose failure was just reported gets a new attempt while it has retries left. */
-  maybeRetry(task: Task, resolution: Resolution, ref: string): void {
-    const run = readRunRef(this.ctx, ref);
+  /** A run whose failure was just reported gets a new attempt while it has retries left (not for paused or archived tasks). */
+  maybeRetry(w: Watched): void {
+    if (w.archived || !w.task.enabled) return;
+    const run = readRunRef(this.ctx, w.ref);
     if (run.status !== "failed" && run.status !== "timed_out") return;
-    if (run.attempts.length > resolution.retries) return;
-    this.events.push(...startAttempt(this.ctx, task, ref, "retry"));
+    if (run.attempts.length > w.resolution.retries) return;
+    this.events.push(...startAttempt(this.ctx, w.task, w.ref, { by: "retry" }));
   }
 
   // -------------------------------------------------------------------------
@@ -255,7 +273,7 @@ class TickPass {
     for (const slot of plan.candidates) {
       const run = newRun(task.id, slot.at, resolution.timezone, "schedule", "running", null, { event: "claimed", by: "tick" }, at);
       if (!claimRun(ctx.paths, run)) continue; // another tick took it
-      this.events.push(...startAttempt(ctx, task, runRef(task.id, slot.id), "tick"));
+      this.events.push(...startAttempt(ctx, task, runRef(task.id, slot.id), { by: "tick" }));
     }
   }
 }
@@ -283,8 +301,9 @@ export function tick(ctx: Context, opts: TickOptions = {}): TickResult {
   // 1. Watch everything in progress, including runs of archived tasks.
   for (const id of new Set([...byId.keys(), ...taskIdsWithRuns(ctx.paths.runsDir)])) {
     pass.guard(`watching task ${id}`, id, () => {
-      const task = byId.get(id) ?? findTask(ctx, id);
-      if (task) pass.watchTask(task);
+      const current = byId.get(id);
+      const found = current ? { task: current, archived: false } : findTask(ctx, id);
+      if (found) pass.watchTask(found.task, found.archived);
     });
   }
   // 2–3. Reconcile slots and launch candidates.

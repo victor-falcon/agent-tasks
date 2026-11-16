@@ -2,8 +2,8 @@ import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, extname } from "node:path";
 import { parseCommandArgs } from "../args.ts";
 import { output } from "../context.ts";
-import { NotFoundError, UsageError } from "../errors.ts";
-import { dataFile, endAttempt, lastAttempt, readRunRef, requireTask, sessionOf, settleSession, stamp, updateRun } from "../execution.ts";
+import { AgentTasksError, NotFoundError, UsageError } from "../errors.ts";
+import { dataFile, endAttempt, lastAttempt, readRunRef, requireTask, settleSession, stamp, updateRun } from "../execution.ts";
 import { resolvePath } from "../paths.ts";
 import { parseRunRef } from "../slot.ts";
 import type { Command } from "./types.ts";
@@ -18,7 +18,11 @@ const finish: Command = {
 Saves the result of the run's latest attempt and then closes its session with
 the launcher's \`close\`, unless \`keep_open\` says to keep it (\`always\`, or
 \`on_failure\` for a failed run). Calling it again for the same attempt
-changes nothing.
+changes nothing. If tick already ended the attempt (timeout, exited), the
+late report is kept in the run's events and the status stays.
+
+The attempt is taken from $AGENT_TASKS_ATTEMPT when set (the launcher sets
+it), so an old attempt cannot finish a newer one.
 
 Arguments:
   <run_ref>             <task-id>/<slot>, e.g. weekly-report/20261117T080000Z
@@ -45,50 +49,50 @@ Options:
     }
 
     const before = readRunRef(ctx, ref);
-    const attempt = lastAttempt(before);
-    if (!attempt) throw new UsageError(`run ${ref} has no attempt to finish (status: ${before.status})`);
+    const latest = lastAttempt(before);
+    if (!latest) throw new UsageError(`run ${ref} has no attempt to finish (status: ${before.status})`);
+    const fromEnv = ctx.env.AGENT_TASKS_RUN === ref ? Number(ctx.env.AGENT_TASKS_ATTEMPT) : NaN;
+    const n = Number.isInteger(fromEnv) && fromEnv > 0 ? fromEnv : latest.n;
+    if (n !== latest.n) {
+      throw new AgentTasksError("stale_attempt", `attempt ${n} of ${ref} was replaced by attempt ${latest.n}; this report was not recorded`);
+    }
     const task = requireTask(ctx, before.task_id);
     const resolution = ctx.resolveFor(task);
     const at = stamp(ctx, resolution.timezone);
-    const n = attempt.n;
 
-    let already = attempt.finished_at !== null;
-    let outputRel: string | null = null;
-    if (!already) {
+    let outcome = "recorded" as "recorded" | "duplicate" | "late";
+    updateRun(ctx, ref, (r) => {
+      const a = r.attempts[n - 1]!;
+      if (a.finished_at) {
+        // Already ended: by an earlier finish (nothing to do) or by tick (keep the late report).
+        const fromFinish = r.events.some((e) => e.event === a.status && e.attempt === n && e.by === "finish");
+        outcome = fromFinish ? "duplicate" : "late";
+        if (outcome === "late") r.events.push({ at, event: "late_finish", attempt: n, status, summary });
+        return;
+      }
       if (source) {
         const { taskId, slot } = parseRunRef(ref);
-        outputRel = `runs/${taskId}/${slot}${n > 1 ? `.${n}` : ""}.output${extname(source)}`;
-        mkdirSync(dirname(dataFile(ctx, outputRel)), { recursive: true });
-        copyFileSync(source, dataFile(ctx, outputRel));
+        a.output = `runs/${taskId}/${slot}${n > 1 ? `.${n}` : ""}.output${extname(source)}`;
+        mkdirSync(dirname(dataFile(ctx, a.output)), { recursive: true });
+        copyFileSync(source, dataFile(ctx, a.output));
       }
-      updateRun(ctx, ref, (r) => {
-        const a = r.attempts[n - 1]!;
-        if (a.finished_at) {
-          already = true;
-          return;
-        }
-        a.output = outputRel;
-        endAttempt(r, n, status, null, at, { summary });
-        r.events.at(-1)!.by = "finish";
-      });
-    }
-    settleSession(ctx, task, ref, { capture: true, retryable: true });
+      endAttempt(r, n, status, null, at, { summary, by: "finish" });
+    });
+    const settled = settleSession(ctx, task, ref, { capture: true });
 
-    const after = readRunRef(ctx, ref);
-    const final = after.attempts[n - 1]!;
-    const session = sessionOf(final);
+    const final = readRunRef(ctx, ref).attempts[n - 1]!;
+    if (outcome === "late") ctx.stderr.write(`agent-tasks: warning: ${ref} attempt ${n} had already ended as ${final.status} (${final.reason ?? "no reason"}); your report was kept in its events\n`);
     output(
       ctx,
-      { run_ref: ref, attempt: n, status: final.status, summary: final.summary, output: final.output ?? null, already_finished: already, session },
+      { run_ref: ref, attempt: n, status: final.status, summary: final.summary, output: final.output ?? null, already_finished: outcome !== "recorded", late: outcome === "late", session: final.session },
       () => {
-        const head = already ? `${ref} was already finished as ${final.status}.` : `Recorded ${ref} as ${final.status}.`;
-        const tail = !session
-          ? ""
-          : session.kept_open
+        const head = outcome === "recorded" ? `Recorded ${ref} as ${final.status}.` : `${ref} was already finished as ${final.status}.`;
+        const tail =
+          settled.action === "kept"
             ? ` Session kept open (keep_open: ${resolution.keep_open}).`
-            : session.close_error
-              ? ` Could not close the session: ${session.close_error}`
-              : session.closed_at
+            : settled.action === "close_failed"
+              ? ` Could not close the session: ${settled.error}`
+              : settled.action === "closed"
                 ? " Session closed."
                 : "";
         return head + tail;
