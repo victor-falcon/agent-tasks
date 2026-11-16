@@ -47,7 +47,26 @@ export function finishCommand(ref: string): string {
   return `agent-tasks finish ${ref} --status succeeded|failed --summary "<what you did, where the result is>" [--output-file <file>]`;
 }
 
-function personalSection(items: readonly PersonalInstructions[]): string {
+/** Drops `<!-- … -->` comments, so files with only commented examples add nothing. */
+export function stripComments(markdown: string): string {
+  return markdown.replace(/<!--[\s\S]*?-->/g, "").trim();
+}
+
+/** Reads personal instruction files; empty ones (only comments) are skipped, missing ones are listed. */
+export function loadPersonalInstructions(files: readonly string[]): { personal: PersonalInstructions[]; missing: string[] } {
+  const personal: PersonalInstructions[] = [];
+  const missing: string[] = [];
+  for (const file of files) {
+    if (!existsSync(file)) missing.push(file);
+    else {
+      const content = stripComments(readFileSync(file, "utf8"));
+      if (content !== "") personal.push({ file, content });
+    }
+  }
+  return { personal, missing };
+}
+
+export function personalSection(items: readonly PersonalInstructions[]): string {
   if (items.length === 0) return "";
   return `User instructions (they take priority over the defaults above):\n\n${items.map((i) => i.content.trim()).join("\n\n")}`;
 }
@@ -64,13 +83,7 @@ export function loadTaskTemplate(ctx: Context): { template: string; source: stri
 
 /** The personal instruction files of a task, read now: the ones found and the missing paths. */
 export function readPersonalInstructions(ctx: Context, task: Task): { personal: PersonalInstructions[]; missing: string[] } {
-  const personal: PersonalInstructions[] = [];
-  const missing: string[] = [];
-  for (const file of ctx.resolveFor(task).instructions) {
-    if (existsSync(file)) personal.push({ file, content: readFileSync(file, "utf8") });
-    else missing.push(file);
-  }
-  return { personal, missing };
+  return loadPersonalInstructions(ctx.resolveFor(task).instructions);
 }
 
 /** The text the subagent reads: the task template filled for one run (also used by `show --instructions`). */

@@ -69,7 +69,7 @@ describe("exit codes", () => {
   test("group without subcommand → 2, with --help → 0", async () => {
     const r = await runCli(["config"], home);
     expect(r.code).toBe(2);
-    expect(r.stderr).toContain('"config" needs a subcommand: resolve');
+    expect(r.stderr).toContain('"config" needs a subcommand: check, instructions, resolve');
     const h = await runCli(["config", "--help"], home);
     expect(h.code).toBe(0);
     expect(h.stdout).toContain("config resolve");

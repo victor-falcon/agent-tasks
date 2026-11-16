@@ -1,9 +1,14 @@
 import add from "./add.ts";
+import configCheck from "./config-check.ts";
+import configInstructions from "./config-instructions.ts";
 import configResolve from "./config-resolve.ts";
+import doctor from "./doctor.ts";
 import due from "./due.ts";
 import edit from "./edit.ts";
 import finish from "./finish.ts";
 import help from "./help.ts";
+import init from "./init.ts";
+import install from "./install.ts";
 import list from "./list.ts";
 import log from "./log.ts";
 import pause from "./pause.ts";
@@ -30,11 +35,16 @@ export type { Command } from "./types.ts";
  */
 export const commands: Command[] = [
   add,
+  configCheck,
+  configInstructions,
   configResolve,
+  doctor,
   due,
   edit,
   finish,
   help,
+  init,
+  install,
   list,
   log,
   pause,
