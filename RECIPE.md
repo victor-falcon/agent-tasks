@@ -397,6 +397,22 @@ Prove the whole cycle works: a task runs, succeeds, and its session closes.
    process. For the `herdr` preset it must run inside a Herdr terminal; for
    `rex`, inside the same Rex session.
 
+   In Herdr, open it as its own tab of the space the user wants (the
+   current one is the `herdr.space` label in `hc get "$HC_TERMINAL_ID"`),
+   with an interactive shell so it is the same as a tab the user opened, and
+   type the command into it once the prompt shows (`hc read <address>`):
+
+   ```sh
+   hc run --bg --json --no-parent --no-notify --keep --name agent-tasks-runner \
+     --cwd ~ --label herdr.space=<space id> --label herdr.tab=tb$(openssl rand -hex 16) \
+     -- /usr/bin/env PATH="$PATH" "$SHELL" -i
+   hc send <address> "agent-tasks runner"
+   ```
+
+   `hc wait` doesn't help here: it waits for an agent, and a shell at its
+   prompt never reports one. `agent-tasks runner status` says when the
+   runner is up.
+
 3. Wait: the runner ticks every `runner.every` (5 minutes by default), so
    the task starts within about 7 minutes. Check:
 
