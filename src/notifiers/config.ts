@@ -1,5 +1,9 @@
 import { Checker, checkUnknownKeys, isObject } from "../schema.ts";
+import { variablesIn } from "../template.ts";
 import { NOTIFY_EVENTS, type NotifierConfig } from "./types.ts";
+
+/** Variables a `command` notifier's `run` can use (each also as `<name>_quoted`). */
+export const NOTIFICATION_VARS: readonly string[] = ["event", "task_id", "title", "run_ref", "message", "count"];
 
 // The `notifiers` section of config.json (doc/roadmap/user-config.md).
 
@@ -24,6 +28,11 @@ function checkNotifier(c: Checker, value: unknown): void {
     const run = value.run;
     const ok = (typeof run === "string" && run.trim() !== "") || (Array.isArray(run) && run.length > 0 && run.every((a) => typeof a === "string"));
     if (!ok) c.at("run").fail('must be an argv array such as ["notify", "{{title}}", "{{message}}"] or a shell string');
+    else {
+      const used = (typeof run === "string" ? [run] : (run as string[])).flatMap(variablesIn);
+      const unknown = used.filter((v) => !NOTIFICATION_VARS.includes(v.replace(/_quoted$/, "")));
+      if (unknown.length > 0) c.at("run").fail(`unknown variable${unknown.length > 1 ? "s" : ""} ${unknown.map((v) => `{{${v}}}`).join(", ")} (known: ${NOTIFICATION_VARS.join(", ")})`);
+    }
   }
 }
 

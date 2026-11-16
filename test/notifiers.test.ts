@@ -26,6 +26,7 @@ describe("config", () => {
     expect(notifierErrors([{ type: "system", events: ["exploded"] }])[0]).toStartWith("notifiers[0].events: must be a non-empty array of: launched, succeeded");
     expect(notifierErrors([{ type: "command", events: ["failed"] }])[0]).toStartWith("notifiers[0].run: must be an argv array");
     expect(notifierErrors([{ type: "system", events: ["failed"], run: ["x"] }])[0]).toStartWith("notifiers[0].run: unknown field");
+    expect(notifierErrors([{ type: "command", events: ["failed"], run: "n {{bogus}} {{title_quoted}}" }])).toEqual(["notifiers[0].run: unknown variable {{bogus}} (known: event, task_id, title, run_ref, message, count)"]);
   });
 });
 

@@ -20,7 +20,7 @@ it happens (launched, succeeded, failed, missed, blocked…) and sends them to
 the notifiers in the config (by default, a desktop notification for
 failed, timed_out and blocked). Leave it open in a terminal tab. A tick that
 fails is shown as ⚠ and the runner carries on. Ctrl-C stops it after the
-current tick; a second Ctrl-C stops it right away.
+current tick.
 
 Only one runner runs at a time (state/runner.lock). The screen output is
 also appended to state/runner.log. On a terminal, it keeps a status line at
@@ -39,7 +39,8 @@ Options:
 
     // The clock is the real time, shifted so that the first tick happens at `--now`.
     const offset = ctx.now.getTime() - Date.now();
-    // The first signal stops after the current tick; a second one (a tick stuck in a launcher) exits now.
+    // The first signal stops after the current tick; a second one exits as soon as the event loop
+    // runs again (launcher commands run synchronously, so not while one of them is still running).
     const controller = new AbortController();
     const stop = () => {
       if (!controller.signal.aborted) return controller.abort();

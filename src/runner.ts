@@ -243,12 +243,17 @@ class Runner {
     this.lock = { pid: deps.pid, terminal: base.env.HC_TERMINAL_ID || null, started_at: formatInZone(startedAt, this.timezone), every: opts.every, last_tick_at: null, next_tick_at: null };
   }
 
+  /** Timestamps in JSON output, in the same format as the tick's `at`. */
+  private stamp(at: Date): string {
+    return formatInZone(at, this.timezone);
+  }
+
   private get paths() {
     return this.base.paths;
   }
 
   private warn(at: Date, message: string): void {
-    this.out.emit({ kind: "warning", at, message }, { type: "warning", at: at.toISOString(), message });
+    this.out.emit({ kind: "warning", at, message }, { type: "warning", at: this.stamp(at), message });
   }
 
   private notify(ctx: Context, items: NotifyItem[]): void {
@@ -296,7 +301,7 @@ class Runner {
     } finally {
       releaseRunnerLock(this.paths, this.lock.pid);
       const final: StatusInfo = { ...this.status, health: this.opts.once ? this.status.health : "stopped", next_tick: null };
-      this.out.final(final, { type: "runner_stopped", at: this.deps.now().toISOString(), ticks: this.ticks, last_tick: this.status.last_tick?.toISOString() ?? null, running: this.status.running, today: this.status.today });
+      this.out.final(final, { type: "runner_stopped", at: this.stamp(this.deps.now()), ticks: this.ticks, last_tick: this.status.last_tick ? this.stamp(this.status.last_tick) : null, running: this.status.running, today: this.status.today });
     }
     return exitCode;
   }
@@ -306,7 +311,7 @@ class Runner {
     const last = new Date(lastTickAt);
     const gap = startedAt.getTime() - last.getTime();
     if (gap <= 2 * this.everyMs) return;
-    this.out.emit({ kind: "recovered", at: startedAt, last_tick: last, gap_ms: gap }, { type: "runner_recovered", at: startedAt.toISOString(), last_tick: lastTickAt, gap_ms: gap });
+    this.out.emit({ kind: "recovered", at: startedAt, last_tick: last, gap_ms: gap }, { type: "runner_recovered", at: this.stamp(startedAt), last_tick: lastTickAt, gap_ms: gap });
     try {
       this.notify(this.deps.context(startedAt), [{ type: "runner_recovered", run_ref: null, task_id: null, message: `no ticks for ${formatDuration(gap)} (last tick ${lastTickAt})` }]);
     } catch (err) {
