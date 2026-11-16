@@ -1,0 +1,19 @@
+{
+  "description": "Each run in its own Herdr tab, in the runner's space and nested under it. Starts an interactive shell and types the agent command into it, so shell aliases loaded at the first prompt (such as clc) work.",
+  "launch": [
+    "hc", "run", "--bg", "--json", "--no-parent", "--no-notify", "--keep",
+    "--name", "{{session_name}}", "--cwd", "{{cwd}}",
+    "--label", "herdr.space={{runner_space}}",
+    "--label", "herdr.tab={{new_tab_id}}",
+    "--label", "herdr.parent={{runner_terminal}}",
+    "--label", "agent-tasks.run={{run_ref}}",
+    "--", "/usr/bin/env", "PATH={{path}}", "{{env_argv}}", "{{shell}}", "-i"
+  ],
+  "handle": "json:.address",
+  "then": [["hc", "send", "{{handle}}", " {{agent}} {{prompt_quoted}}"]],
+  "close": ["hc", "kill", "{{handle}}"],
+  "status": ["hc", "get", "{{handle}}", "--json"],
+  "status_map": "herdr",
+  "read": ["hc", "read", "--lines", "200", "{{handle}}"],
+  "attach": ["hc", "attach", "{{handle}}"]
+}
