@@ -258,6 +258,20 @@ describe("config check", () => {
     expect(r.code).toBe(0);
     expect(r.json().checks.find((c: any) => c.id === "agent.command").status).toBe("warn");
   });
+
+  test("a missing agent command: the hint depends on whether the launcher types it at a shell prompt", async () => {
+    stub("hc");
+    home.writeConfig({
+      launcher: { preset: "herdr" },
+      agent: { command: "my-alias" },
+      profiles: [{ match: "~/work/**", launcher: { preset: "process" }, agent: { command: "other-alias" } }],
+    });
+    const checks = (await cli("config", "check", "--json")).json().checks.filter((c: any) => c.id === "agent.command");
+    expect(checks.map((c: any) => [c.status, c.hint])).toEqual([
+      ["warn", 'fine if my-alias is a shell alias or function: the preset "herdr" launcher types it at an interactive shell\'s prompt (keep "shell": false); the smoke test proves it'],
+      ["warn", 'install it, or set "shell": true if other-alias is a shell alias or function'],
+    ]);
+  });
 });
 
 describe("config instructions", () => {

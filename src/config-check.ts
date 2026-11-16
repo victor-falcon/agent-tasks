@@ -51,6 +51,17 @@ export function launcherNeedsTerminal(spec: LauncherSpec): boolean {
   return launcherCommands(spec).some((c) => /\{\{\s*runner_(terminal|space)(_quoted)?\s*\}\}/.test(JSON.stringify(c)));
 }
 
+/**
+ * Whether a launcher types the agent command at an interactive shell's prompt
+ * (`{{agent}}` in `then`, as the herdr, rex and tmux presets do) rather than
+ * running it as an argv (`{{agent_argv}}`). There, shell aliases and functions
+ * work, even ones loaded lazily at the first prompt.
+ */
+export function launcherTypesAgent(spec: LauncherSpec): boolean {
+  const uses = (name: string) => launcherCommands(spec).some((c) => new RegExp(`\\{\\{\\s*${name}(_quoted)?\\s*\\}\\}`).test(JSON.stringify(c)));
+  return uses("agent") && !uses("agent_argv");
+}
+
 /** The launchers a config can use: the root one, then each profile's own. */
 export function configuredLaunchers(config: UserConfig): { where: string; launcher: LauncherConfig }[] {
   const list = [{ where: config.launcher ? "launcher" : "launcher (default)", launcher: config.launcher ?? BUILTIN_DEFAULTS.launcher }];
@@ -150,15 +161,31 @@ function launcherChecks(loaded: LoadedConfig): Check[] {
 
 function agentChecks(loaded: LoadedConfig): Check[] {
   const { config } = loaded;
-  const agents: { where: string; agent: AgentSpec | string }[] = [{ where: config.agent ? "agent" : "agent (default)", agent: config.agent ?? BUILTIN_DEFAULTS.agent }];
+  const rootLauncher = config.launcher ?? BUILTIN_DEFAULTS.launcher;
+  const agents: { where: string; agent: AgentSpec | string; launcher: LauncherConfig }[] = [
+    { where: config.agent ? "agent" : "agent (default)", agent: config.agent ?? BUILTIN_DEFAULTS.agent, launcher: rootLauncher },
+  ];
   config.profiles?.forEach((p, i) => {
-    if (p.agent) agents.push({ where: `profiles[${i}].agent (${p.match})`, agent: p.agent });
+    if (p.agent) agents.push({ where: `profiles[${i}].agent (${p.match})`, agent: p.agent, launcher: p.launcher ?? rootLauncher });
   });
-  return agents.map(({ where, agent }) => {
+  return agents.map(({ where, agent, launcher }) => {
     const spec = typeof agent === "string" ? { command: agent, shell: false } : agent;
     if (spec.shell) return ok("agent.command", `${where}: ${spec.command} runs in an interactive shell (aliases are not checked)`);
     const found = findExecutable(spec.command, loaded.env);
     if (found) return ok("agent.command", `${where}: ${spec.command} found (${tildify(found, loaded.env)})`);
+    let typed = false;
+    try {
+      typed = launcherTypesAgent(resolveLauncher(launcher));
+    } catch {
+      // An invalid launcher is reported by the launcher checks.
+    }
+    if (typed) {
+      return warn(
+        "agent.command",
+        `${where}: ${spec.command} not found on PATH`,
+        `fine if ${spec.command} is a shell alias or function: the ${launcherName(launcher)} launcher types it at an interactive shell's prompt (keep "shell": false); the smoke test proves it`,
+      );
+    }
     return warn("agent.command", `${where}: ${spec.command} not found on PATH`, `install it, or set "shell": true if ${spec.command} is a shell alias or function`);
   });
 }
