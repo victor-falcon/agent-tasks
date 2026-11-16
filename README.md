@@ -18,6 +18,20 @@ profiles, notifications, extra instructions for agents) lives in
 
 Status: planning. See [doc/roadmap](doc/roadmap/README.md).
 
+## Development
+
+Requires [Bun](https://bun.sh).
+
+```sh
+bun install          # dependencies
+bun test             # tests (they never touch your real home)
+bunx tsc --noEmit    # type check
+./bin/agent-tasks --help
+```
+
+Each CLI command lives in its own file under `src/commands/` and is
+registered in `src/commands/index.ts`.
+
 ## License
 
 [MIT](LICENSE)
