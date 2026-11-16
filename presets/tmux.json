@@ -1,22 +1,35 @@
 {
-  "description": "Each run in its own tmux window, named after the session, in the runner's tmux session (or in a detached \"agent-tasks\" session when the runner is not inside tmux). Starts an interactive shell and types the agent command into it, so shell aliases work; the shell exits with the agent. tmux knows nothing about agents: status only tells whether the window is still there (working) or gone or dead (exited), so blocked runs are not detected.",
+  "description": "Each run in its own tmux window, named after the session, in the runner's tmux session (or in a detached \"agent-tasks\" session when the runner is not inside tmux). Starts an interactive shell and types the agent command into it, so shell aliases work; the shell exits with the agent. The handle is the server's socket and the agent's pane, so later commands reach the right server even without $TMUX. tmux knows nothing about agents: status is working while the pane lives and gone once it closed (exited only for a dead pane kept by remain-on-exit), so blocked runs are not detected. Needs tmux 3.0 or later.",
   "launch": [
     "/bin/sh", "-c",
-    "name=$1 cwd=$2; shift 2; if [ -n \"$TMUX\" ]; then exec tmux new-window -d -P -F '#{window_id}' -t \"$(tmux display -p '#S'):\" -n \"$name\" -c \"$cwd\" -- \"$@\"; elif tmux has-session -t '=agent-tasks' 2>/dev/null; then exec tmux new-window -d -P -F '#{window_id}' -t '=agent-tasks:' -n \"$name\" -c \"$cwd\" -- \"$@\"; else exec tmux new-session -d -P -F '#{window_id}' -s agent-tasks -n \"$name\" -c \"$cwd\" -- \"$@\"; fi",
+    "name=$1 cwd=$2; shift 2; fmt='#{socket_path} #{pane_id}'; if [ -n \"$TMUX\" ]; then sid=$(tmux display-message -p ${TMUX_PANE:+-t \"$TMUX_PANE\"} '#{session_id}') && [ -n \"$sid\" ] || exit 1; exec tmux new-window -d -P -F \"$fmt\" -t \"$sid:\" -n \"$name\" -c \"$cwd\" -- \"$@\"; fi; if ! tmux has-session -t '=agent-tasks' 2>/dev/null; then tmux new-session -d -P -F \"$fmt\" -s agent-tasks -n \"$name\" -c \"$cwd\" -- \"$@\" && exit; fi; exec tmux new-window -d -P -F \"$fmt\" -t '=agent-tasks:' -n \"$name\" -c \"$cwd\" -- \"$@\"",
     "agent-tasks-tmux", "{{session_name}}", "{{cwd}}",
     "/usr/bin/env", "PATH={{path}}", "{{env_argv}}", "{{shell}}", "-i"
   ],
-  "then": [
-    ["tmux", "send-keys", "-t", "{{handle}}", "-l", " {{agent}} {{prompt_quoted}}; exit"],
-    ["tmux", "send-keys", "-t", "{{handle}}", "Enter"]
+  "then": [[
+    "/bin/sh", "-c",
+    "s=${1% %*} p=%${1##* %}; tmux -S \"$s\" send-keys -t \"$p\" -l \"$2\" && tmux -S \"$s\" send-keys -t \"$p\" Enter",
+    "agent-tasks-tmux", "{{handle}}", " {{agent}} {{prompt_quoted}}; exit"
+  ]],
+  "close": [
+    "/bin/sh", "-c",
+    "s=${1% %*} p=%${1##* %}; exec tmux -S \"$s\" kill-window -t \"$p\"",
+    "agent-tasks-tmux", "{{handle}}"
   ],
-  "close": ["tmux", "kill-window", "-t", "{{handle}}"],
-  "status": ["tmux", "list-panes", "-t", "{{handle}}", "-F", "#{pane_dead}"],
+  "status": [
+    "/bin/sh", "-c",
+    "s=${1% %*} p=%${1##* %}; out=$(tmux -S \"$s\" display-message -p -t \"$p\" '#{pane_id} #{pane_dead}') || exit 1; [ \"${out%% *}\" = \"$p\" ] || exit 1; echo \"${out#* }\"",
+    "agent-tasks-tmux", "{{handle}}"
+  ],
   "status_map": { "0": "working", "1": "exited" },
-  "read": ["tmux", "capture-pane", "-p", "-J", "-S", "-200", "-t", "{{handle}}"],
+  "read": [
+    "/bin/sh", "-c",
+    "s=${1% %*} p=%${1##* %}; exec tmux -S \"$s\" capture-pane -p -J -S -200 -t \"$p\"",
+    "agent-tasks-tmux", "{{handle}}"
+  ],
   "attach": [
     "/bin/sh", "-c",
-    "tmux select-window -t \"$1\" || exit; if [ -n \"$TMUX\" ]; then exec tmux switch-client -t \"$1\"; else exec tmux attach-session -t \"$1\"; fi",
+    "s=${1% %*} p=%${1##* %}; tmux -S \"$s\" select-window -t \"$p\" || exit; if [ -n \"$TMUX\" ]; then exec tmux -S \"$s\" switch-client -t \"$p\"; else exec tmux -S \"$s\" attach-session -t \"$p\"; fi",
     "agent-tasks-tmux", "{{handle}}"
   ]
 }

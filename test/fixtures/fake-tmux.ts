@@ -11,7 +11,11 @@ mkdirSync(windows, { recursive: true });
 const argv = process.argv.slice(2);
 appendFileSync(join(dir, "calls.jsonl"), `${JSON.stringify(argv)}\n`);
 
-const [cmd, ...rest] = argv;
+// `-S <socket>` before the command picks the server; the fake has only one.
+const SOCKET = "/tmp/fake-tmux/default";
+let args0 = argv;
+if (args0[0] === "-S") args0 = args0.slice(2);
+const [cmd, ...rest] = args0;
 if (existsSync(join(dir, `fail-${cmd}`))) {
   process.stderr.write(`fake tmux: ${cmd} failed\n`);
   process.exit(1);
@@ -33,6 +37,7 @@ for (let i = 0; i < rest.length; i++) {
 }
 
 interface Win {
+  /** Window id `@N`; its only pane is `%N`. */
   id: string;
   session: string;
   name: string;
@@ -41,28 +46,38 @@ interface Win {
   dead: boolean;
   keys: string[];
 }
-const file = (id: string) => join(windows, `${id.replace(/^@/, "")}.json`);
+const file = (id: string) => join(windows, `${id.replace(/^[@%]/, "")}.json`);
 const all = (): Win[] => readdirSync(windows).map((f) => JSON.parse(readFileSync(join(windows, f), "utf8")));
-function target(): Win {
+const find = (): Win | null => {
   const id = String(opts["-t"]);
-  if (!existsSync(file(id))) {
-    process.stderr.write(`can't find window: ${id}\n`);
+  return /^[@%]\d+$/.test(id) && existsSync(file(id)) ? JSON.parse(readFileSync(file(id), "utf8")) : null;
+};
+function target(): Win {
+  const win = find();
+  if (!win) {
+    process.stderr.write(`can't find pane: ${opts["-t"]}\n`);
     process.exit(1);
   }
-  return JSON.parse(readFileSync(file(id), "utf8"));
+  return win;
 }
+const format = (fmt: string, win: Win | null) =>
+  fmt
+    .replace("#{socket_path}", SOCKET)
+    .replace("#{session_id}", "$7")
+    .replace("#{window_id}", win?.id ?? "")
+    .replace("#{pane_id}", win ? `%${win.id.slice(1)}` : "")
+    .replace("#{pane_dead}", win ? (win.dead ? "1" : "0") : "");
 function newWindow(session: string): void {
   const id = `@${readdirSync(windows).length + 1}`;
   const win: Win = { id, session, name: String(opts["-n"]), cwd: String(opts["-c"]), argv: args, dead: false, keys: [] };
   writeFileSync(file(id), JSON.stringify(win));
-  if (opts["-P"]) process.stdout.write(`${String(opts["-F"]).replace("#{window_id}", id)}\n`);
+  if (opts["-P"]) process.stdout.write(`${format(String(opts["-F"]), win)}\n`);
 }
 
 switch (cmd) {
-  case "display":
   case "display-message":
-    // Only what the preset asks: the current session's name.
-    process.stdout.write(`${process.env.TMUX ? "main" : ""}\n`);
+    // Like tmux: an unknown target prints an empty format and still exits 0.
+    process.stdout.write(`${format(args[0]!, find())}\n`);
     break;
   case "has-session":
     if (!all().some((w) => `=${w.session}` === opts["-t"])) process.exit(1);
@@ -79,9 +94,6 @@ switch (cmd) {
     writeFileSync(file(win.id), JSON.stringify(win));
     break;
   }
-  case "list-panes":
-    process.stdout.write(`${target().dead ? 1 : 0}\n`);
-    break;
   case "capture-pane":
     process.stdout.write(`screen of ${target().id}\n`);
     break;

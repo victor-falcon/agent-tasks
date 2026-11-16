@@ -59,9 +59,9 @@ Variables: `{{run_ref}}`, `{{task_id}}`, `{{title}}`, `{{cwd}}`,
 `clc`), `{{handle}}`, `{{shell}}`, `{{path}}` (the runner's `PATH`), and the
 runner's own: `{{runner_terminal}}` (`$HC_TERMINAL_ID`), `{{runner_space}}`
 (its `herdr.space` label) and `{{new_tab_id}}` (`tb` + 32 random hex chars, one
-per launch). `{{env.NAME}}` is any variable of the environment the command
-runs in (e.g. `{{env.REX_SESSION}}`); an unset one is an error, not an empty
-string. Add `_quoted` to any variable for a shell-quoted value. A `json:` handle
+per launch). `{{env.NAME}}` is a variable of agent-tasks' own environment
+(the runner's for `tick`, the agent's for `finish`), e.g. `{{env.REX_SESSION}}`;
+an unset or empty one is an error, not an empty string. Add `_quoted` to any variable for a shell-quoted value. A `json:` handle
 path indexes arrays with numbers (`json:.block_ids.0`).
 
 ### `herdr` preset (verified in Herdr on 2026-11-16)
@@ -133,26 +133,32 @@ What was verified, with test terminals in the "Agent Tasks" space:
 | `tmux` | Each run in its own tmux window (tested against a real tmux). |
 | `rex` | Each run in its own Rex window. **Untested against a real Rex.** |
 
-**`tmux`.** The window goes into the runner's tmux session when the runner
-runs inside tmux (`$TMUX` set; `tmux display -p '#S'`), otherwise into a
-detached `agent-tasks` session, created on the first launch (`tmux attach -t
-agent-tasks` to look at it). It is named `{{session_name}}` and starts in
+**`tmux`** (3.0 or later). The window goes into the runner's tmux session when
+the runner runs inside tmux (`$TMUX` set; the session of `$TMUX_PANE`),
+otherwise into a detached `agent-tasks` session on the default server, created
+on the first launch (`tmux attach -t agent-tasks` to look at it). It is named `{{session_name}}` and starts in
 `{{cwd}}`. Like `herdr`, it starts an interactive `{{shell}} -i` (through
 `/usr/bin/env PATH=…`, because the tmux server keeps the environment it was
 started with) and types ` {{agent}} {{prompt_quoted}}; exit` + Enter with
 `send-keys`, so aliases work and the window closes with the agent. The handle
-is the window id (`@12`). `close` is `kill-window`, `read` is
+is the server's socket and the agent's pane (`/private/tmp/tmux-501/default
+%12`), and every later command passes `-S <socket> -t <pane>`, so a `tick` or
+`finish` without `$TMUX` (cron, another server) still reaches that pane and
+never a window of another server. `close` is `kill-window`, `read` is
 `capture-pane -p -J -S -200`, `attach` is `select-window` plus `switch-client`
 (inside tmux) or `attach-session`. Limits:
 
-- **tmux has no agent status.** `status` (`list-panes -F '#{pane_dead}'`)
-  only says whether the window is there: `working` while it lives, `exited`
-  for a dead pane (with `remain-on-exit`), `gone` once the window closed. So a
-  `blocked` agent is not detected; only the `timeout` catches it.
-- The launch step is a small `/bin/sh -c` script (pick the session, create it
-  if missing); the other commands are plain argv. To use another tmux server,
-  override the commands (e.g. add `-L <socket>`), or put a `tmux` wrapper first
-  on the runner's `PATH`, which is what the real-tmux test does.
+- **tmux has no agent status.** `status` (`display-message -t <pane>
+  '#{pane_dead}'`) only says whether the agent's pane is there: `working`
+  while it lives, `gone` once it closed, `exited` only for a dead pane that
+  `remain-on-exit` keeps. So a `blocked` agent is not detected; only the
+  `timeout` catches it.
+- The shell exits with the agent, so the window closes by itself and
+  `keep_open` cannot keep it around (unless you set `remain-on-exit`).
+- The commands are small `/bin/sh -c` scripts (pick or create the session,
+  split the handle). To start windows on another server, override `launch`
+  or put a `tmux` wrapper first on the runner's `PATH` (`tmux -L <name>
+  "$@"`), which is what the real-tmux test does.
 
 **`rex`.** Written from the `rex` CLI calls of the `delegate` skill's
 `multiplexer.sh`, which work, but **never run against a real Rex**: treat it
@@ -166,11 +172,21 @@ presets. `status` checks the block exists (`rex block inspect`) and maps
 `idle`/`done`/`error` → `idle`, nothing reported → `working`). `read` is
 `rex capture --trim --unwrap` (visible screen only). `close` and `attach` find
 the block's window with `rex block inspect` and run `rex window close` /
-`rex focus`. Limits: needs `rex` and `jq` on the runner's `PATH`
-(`$REX_BIN_DIR` is not used), and `$REX_SESSION` in every process that runs
-launcher commands; that holds for the runner and for the agent's `finish`,
-which run in the same session, but not for `agent-tasks session …` typed in
-another Rex session or outside Rex.
+`rex focus`. Limits:
+
+- Needs `rex` and `jq` on the runner's `PATH` (`$REX_BIN_DIR` is not used).
+- Needs `$REX_SESSION` in every process that runs launcher commands. That
+  holds for a runner inside a Rex block and for the agent's `finish` (same
+  session), but not for a `tick` run by cron or launchd, nor for
+  `agent-tasks session …` typed outside that session: those fail with
+  "`$REX_SESSION` is not set".
+- The command is typed into a shell that has just been created. `multiplexer.sh`
+  warns that Rex can lose text typed while a shell starts (its one-off agent
+  tab does the same and works). If it happens, the shell just sits at its
+  prompt, `program_status` stays empty (`working`) and only the `timeout`
+  catches it; check this first when trying the preset.
+- `done` and `error` both map to `idle`, and the shell exiting with the agent
+  should show up as `gone` (the block disappears), never `exited`.
 
 A preset can be used as is, partially overridden
 (`{ "preset": "herdr", "close": [...] }`) or not used at all, defining every

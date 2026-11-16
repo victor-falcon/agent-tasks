@@ -10,6 +10,7 @@ import { at, DEMO_REF, type ExecHome, execTask, makeExecHome, waitFor } from "./
 setDefaultTimeout(30_000);
 
 const LOG = "runs/demo/20261117T080000Z.log";
+const SOCKET = "/tmp/fake-tmux/default"; // what the fake prints for #{socket_path}
 
 describe("tmux preset (fake tmux)", () => {
   let home: ExecHome;
@@ -19,7 +20,9 @@ describe("tmux preset (fake tmux)", () => {
   });
   afterEach(() => home.cleanup());
 
-  const calls = (cmd: string) => home.fakeCalls("tmux").filter((c) => c[0] === cmd);
+  // Calls without the `-S <socket>` that every command after launch carries.
+  const calls = (cmd: string) => home.fakeCalls("tmux").map((c) => (c[0] === "-S" ? c.slice(2) : c)).filter((c) => c[0] === cmd);
+  const socketOf = (cmd: string) => home.fakeCalls("tmux").find((c) => c[2] === cmd)?.[1];
   const windowFile = (id: string) => join(home.fakeDir("tmux"), "windows", `${id.slice(1)}.json`);
   const window = (id: string) => JSON.parse(readFileSync(windowFile(id), "utf8"));
   const finish = (status: string) => home.cli("finish", DEMO_REF, "--status", status, "--summary", "done", "--now", at(10), "--json");
@@ -27,10 +30,10 @@ describe("tmux preset (fake tmux)", () => {
   test("outside tmux, launch opens a window in a dedicated agent-tasks session and types the agent command", async () => {
     execTask(home, "succeed");
     const { events } = await home.tick(1);
-    expect(events).toEqual([expect.objectContaining({ type: "launched", handle: "@1" })]);
+    expect(events).toEqual([expect.objectContaining({ type: "launched", handle: `${SOCKET} %1` })]);
 
     expect(calls("has-session")).toEqual([["has-session", "-t", "=agent-tasks"]]);
-    expect(calls("new-session")[0]!.slice(0, 11)).toEqual(["new-session", "-d", "-P", "-F", "#{window_id}", "-s", "agent-tasks", "-n", "task-demo-20261117t080000z", "-c", home.project]);
+    expect(calls("new-session")[0]!.slice(0, 11)).toEqual(["new-session", "-d", "-P", "-F", "#{socket_path} #{pane_id}", "-s", "agent-tasks", "-n", "task-demo-20261117t080000z", "-c", home.project]);
     expect(window("@1")).toMatchObject({
       session: "agent-tasks",
       name: "task-demo-20261117t080000z",
@@ -47,7 +50,12 @@ describe("tmux preset (fake tmux)", () => {
       ],
       keys: [` clc '/run-agent-task ${DEMO_REF}'; exit`, "<Enter>"],
     });
-    expect(home.run(DEMO_REF).attempts[0]!.session).toMatchObject({ launcher: "tmux", handle: "@1", closed_at: null });
+    expect(calls("send-keys")).toEqual([
+      ["send-keys", "-t", "%1", "-l", ` clc '/run-agent-task ${DEMO_REF}'; exit`],
+      ["send-keys", "-t", "%1", "Enter"],
+    ]);
+    expect(socketOf("send-keys")).toBe(SOCKET);
+    expect(home.run(DEMO_REF).attempts[0]!.session).toMatchObject({ launcher: "tmux", handle: `${SOCKET} %1`, closed_at: null });
   });
 
   test("a second run goes into the existing agent-tasks session", async () => {
@@ -55,15 +63,15 @@ describe("tmux preset (fake tmux)", () => {
     execTask(home, "succeed", { id: "other" });
     await home.tick(1);
     expect(calls("new-session")).toHaveLength(1);
-    expect(calls("new-window")[0]!.slice(0, 7)).toEqual(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "=agent-tasks:"]);
+    expect(calls("new-window")[0]!.slice(0, 7)).toEqual(["new-window", "-d", "-P", "-F", "#{socket_path} #{pane_id}", "-t", "=agent-tasks:"]);
   });
 
   test("inside tmux, the window goes into the runner's session", async () => {
-    home.env.TMUX = "/tmp/tmux-test/default,1,0";
+    Object.assign(home.env, { TMUX: "/tmp/tmux-test/default,1,0", TMUX_PANE: "%99" });
     execTask(home, "succeed");
     await home.tick(1);
-    expect(calls("display")).toEqual([["display", "-p", "#S"]]);
-    expect(calls("new-window")[0]!.slice(5, 7)).toEqual(["-t", "main:"]);
+    expect(calls("display-message")[0]).toEqual(["display-message", "-p", "-t", "%99", "#{session_id}"]);
+    expect(calls("new-window")[0]!.slice(5, 7)).toEqual(["-t", "$7:"]);
     expect(calls("has-session")).toEqual([]);
   });
 
@@ -74,14 +82,15 @@ describe("tmux preset (fake tmux)", () => {
     expect((await home.tick(5)).events).toEqual([]);
     expect(home.run(DEMO_REF).status).toBe("running");
     expect((await home.cli("session", "read", DEMO_REF)).stdout).toContain("screen of @1");
-    expect(calls("capture-pane")).toEqual([["capture-pane", "-p", "-J", "-S", "-200", "-t", "@1"]]);
+    expect(calls("capture-pane")).toEqual([["capture-pane", "-p", "-J", "-S", "-200", "-t", "%1"]]);
   });
 
   test("finish captures the pane into the log and kills the window", async () => {
     execTask(home, "succeed");
     await home.tick(1);
     expect((await finish("succeeded")).json()).toMatchObject({ status: "succeeded", session: { closed_at: expect.any(String) } });
-    expect(calls("kill-window")).toEqual([["kill-window", "-t", "@1"]]);
+    expect(calls("kill-window")).toEqual([["kill-window", "-t", "%1"]]);
+    expect(socketOf("kill-window")).toBe(SOCKET);
     expect(readFileSync(join(home.dataDir, LOG), "utf8")).toContain("screen of @1\n");
   });
 
@@ -97,7 +106,7 @@ describe("tmux preset (fake tmux)", () => {
     await home.tick(1);
     writeFileSync(windowFile("@1"), JSON.stringify({ ...window("@1"), dead: true }));
     expect((await home.tick(2)).events).toEqual([expect.objectContaining({ type: "failed", reason: "exited_without_report" })]);
-    expect(calls("kill-window")).toEqual([["kill-window", "-t", "@1"]]);
+    expect(calls("kill-window")).toEqual([["kill-window", "-t", "%1"]]);
   });
 
   test("on timeout the pane is captured, the window killed and the run timed_out", async () => {
@@ -105,7 +114,14 @@ describe("tmux preset (fake tmux)", () => {
     await home.tick(1);
     expect((await home.tick(40)).events).toEqual([expect.objectContaining({ type: "timed_out" })]);
     expect(calls("capture-pane")).toHaveLength(1);
-    expect(calls("kill-window")).toEqual([["kill-window", "-t", "@1"]]);
+    expect(calls("kill-window")).toEqual([["kill-window", "-t", "%1"]]);
+  });
+
+  test("a missing folder fails the launch instead of opening a window in $HOME", async () => {
+    execTask(home, "succeed", { cwd: join(home.root, "gone") });
+    const { events } = await home.tick(1);
+    expect(events).toEqual([expect.objectContaining({ type: "failed", reason: "launch_failed" })]);
+    expect(home.fakeCalls("tmux")).toEqual([]);
   });
 
   test("a command that could not be typed is failed / prompt_not_delivered", async () => {
@@ -147,12 +163,12 @@ describe.skipIf(!TMUX)("tmux preset (real tmux)", () => {
   test("launch, read and close a real window", async () => {
     execTask(home, "succeed");
     const { events } = await home.tick(1);
-    const handle = events[0]?.handle as string;
-    expect(events).toEqual([expect.objectContaining({ type: "launched", handle: expect.stringMatching(/^@\d+$/) })]);
-    expect(tmux("list-windows", "-t", "=agent-tasks", "-F", "#{window_id} #{window_name}").stdout.trim()).toBe(`${handle} task-demo-20261117t080000z`);
+    expect(events).toEqual([expect.objectContaining({ type: "launched", handle: expect.stringMatching(new RegExp(`/${socket} %\\d+$`)) })]);
+    const pane = (events[0].handle as string).split(" ").at(-1)!;
+    expect(tmux("list-panes", "-s", "-t", "=agent-tasks", "-F", "#{pane_id} #{window_name}").stdout.trim()).toBe(`${pane} task-demo-20261117t080000z`);
 
     const screen = await waitFor(() => {
-      const out = tmux("capture-pane", "-p", "-J", "-t", handle).stdout;
+      const out = tmux("capture-pane", "-p", "-J", "-t", pane).stdout;
       return out.includes("started /run-agent-task") && out;
     }, "the agent's output in the pane");
     expect(screen).toContain(`started /run-agent-task ${DEMO_REF} in ${realpathSync(home.project)}`);
@@ -161,7 +177,7 @@ describe.skipIf(!TMUX)("tmux preset (real tmux)", () => {
 
     const finished = await home.cli("finish", DEMO_REF, "--status", "succeeded", "--summary", "done", "--now", at(5), "--json");
     expect(finished.json()).toMatchObject({ session: { closed_at: expect.any(String) } });
-    expect(tmux("list-panes", "-t", handle).code).not.toBe(0);
+    expect(tmux("list-panes", "-t", pane).code).not.toBe(0);
     expect(readFileSync(join(home.dataDir, LOG), "utf8")).toContain("started /run-agent-task");
   });
 });
