@@ -149,7 +149,10 @@ class TickPass {
   /** Closes a session and turns a failed close into an anomaly. */
   settle(w: Watched, opts: SettleOptions): void {
     const result = settleSession(this.ctx, w.task, w.ref, opts);
-    if (result.action === "close_failed") this.anomaly(`could not close the session of ${w.ref}: ${result.error}`, w.ref, w.task.id);
+    if (result.action !== "close_failed") return;
+    const attempts = lastAttempt(readRunRef(this.ctx, w.ref))?.session?.close_attempts ?? 0;
+    const tail = attempts >= MAX_CLOSE_ATTEMPTS ? ` (giving up after ${attempts} attempts; close it with "agent-tasks session close ${w.ref}")` : "";
+    this.anomaly(`could not close the session of ${w.ref}: ${result.error}${tail}`, w.ref, w.task.id);
   }
 
   watchActive(w: Watched, run: Run): void {
@@ -164,13 +167,21 @@ class TickPass {
       return;
     }
 
-    if (this.nowMs - Date.parse(attempt.started_at) > parseDuration(w.resolution.timeout)) {
+    const timedOut = this.nowMs - Date.parse(attempt.started_at) > parseDuration(w.resolution.timeout);
+    // Throws when the state is unknown (status timed out or could not run): an anomaly, not a
+    // failure. Past the timeout an unknown state still times the run out.
+    let status: ReturnType<typeof sessionStatus>;
+    try {
+      status = sessionStatus(session.spec, session.input);
+    } catch (err) {
+      if (!timedOut) throw err;
+      status = null;
+    }
+    const gone = status?.state === "gone" || status?.state === "exited";
+    if (timedOut && !gone) {
       if (this.end(w, n, "timed_out", null, `ran longer than the ${w.resolution.timeout} timeout`)) this.settle(w, { force: true, capture: true });
       return;
     }
-
-    // Throws when the state is unknown (status timed out or could not run): an anomaly, not a failure.
-    const status = sessionStatus(session.spec, session.input);
     if (!status) return;
     switch (status.state) {
       case "gone":

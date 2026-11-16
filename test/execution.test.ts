@@ -115,6 +115,23 @@ describe("process preset: launch → finish", () => {
     expect(run.attempts[0]!.session).toMatchObject({ closed_at: expect.any(String) });
   });
 
+  test("an agent that already exited is exited_without_report even past its timeout", async () => {
+    execTask(home, "exit", { timeout: "30m" });
+    await home.tick(1);
+    const pid = pidOf(home.run(DEMO_REF));
+    await waitFor(() => !pidAlive(pid), "the agent to exit");
+    const { events } = await home.tick(60);
+    expect(events).toEqual([expect.objectContaining({ type: "failed", reason: "exited_without_report" })]);
+  });
+
+  test("a broken templates/task.md fails the launch instead of the agent", async () => {
+    mkdirSync(join(home.configDir, "templates"), { recursive: true });
+    writeFileSync(join(home.configDir, "templates", "task.md"), "nothing\n");
+    execTask(home, "succeed");
+    const { events } = await home.tick(1);
+    expect(events).toEqual([expect.objectContaining({ type: "failed", reason: "launch_failed", message: expect.stringContaining("{{finish_command}}") })]);
+  });
+
   test("past its timeout a run is closed and marked timed_out", async () => {
     execTask(home, "hang", { timeout: "30m" });
     await home.tick(1);
@@ -330,6 +347,9 @@ describe("session commands", () => {
     await waitFor(() => !pidAlive(pid), "the agent to be killed");
     expect(home.run(DEMO_REF).attempts[0]!.session).toMatchObject({ closed_at: expect.any(String) });
     expect((await home.cli("session", "status", DEMO_REF, "--json")).json().state).toBe("gone");
+    // Closing a session that is already gone is not an error.
+    expect((await home.cli("session", "close", DEMO_REF)).code).toBe(0);
+    expect(home.run(DEMO_REF).attempts[0]!.session).toMatchObject({ closed_at: expect.any(String), close_error: null });
   });
 
   test("a run that was never launched has no session", async () => {

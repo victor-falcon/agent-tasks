@@ -3,11 +3,12 @@ import { dirname, join } from "node:path";
 import { formatSource, type Resolution } from "./config.ts";
 import type { Context } from "./context.ts";
 import { AgentTasksError, NotFoundError } from "./errors.ts";
-import { closeSession, launch, type LauncherSpec, readSession, resolveLauncher, sessionName, type SessionInput } from "./launcher.ts";
+import { closeSession, launch, type LauncherSpec, readSession, resolveLauncher, sessionName, type SessionInput, sessionStatus } from "./launcher.ts";
 import { resolvePath } from "./paths.ts";
 import type { Attempt, KeepOpen, Run, RunStatus, SessionRecord, Task, Trigger } from "./schema.ts";
 import { parseRunRef, runRef, runSlotId } from "./slot.ts";
 import { isArchived, readArchivedTask, readRun, readTask, runLogRelativePath, writeRun } from "./store.ts";
+import { loadTaskTemplate } from "./task-context.ts";
 import { render } from "./template.ts";
 import { formatInZone } from "./time.ts";
 
@@ -272,6 +273,7 @@ export function startAttempt(ctx: Context, task: Task, ref: string, opts: StartO
   let result: ReturnType<typeof launch>;
   try {
     spec = resolveLauncher(resolution.launcher);
+    loadTaskTemplate(ctx); // a broken templates/task.md would only fail inside the agent
     result = launch(spec, input);
   } catch (err) {
     const message = err instanceof AgentTasksError ? err.message : String(err);
@@ -386,7 +388,16 @@ export function settleSession(ctx: Context, task: Task, ref: string, opts: Settl
   if (!session) return { action: "none" };
   if (opts.capture) captureLog(session.spec, session.input, at);
   const result = closeSession(session.spec, session.input);
-  if (result && !result.ok) return fail(result.error ?? "close failed");
+  if (result && !result.ok) {
+    // A session that is already gone counts as closed (e.g. `kill` of a process that exited).
+    let gone = false;
+    try {
+      gone = sessionStatus(session.spec, session.input)?.state === "gone";
+    } catch {
+      // Unknown state: keep the failure.
+    }
+    if (!gone) return fail(result.error ?? "close failed");
+  }
   updateRun(ctx, ref, (r) => {
     const s = r.attempts[n - 1]!.session!;
     s.close_error = null;

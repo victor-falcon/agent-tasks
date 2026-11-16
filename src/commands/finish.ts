@@ -64,10 +64,11 @@ Options:
     updateRun(ctx, ref, (r) => {
       const a = r.attempts[n - 1]!;
       if (a.finished_at) {
-        // Already ended: by an earlier finish (nothing to do) or by tick (keep the late report).
+        // Already ended: by an earlier finish (nothing to do) or by tick (keep the late report, once).
         const fromFinish = r.events.some((e) => e.event === a.status && e.attempt === n && e.by === "finish");
         outcome = fromFinish ? "duplicate" : "late";
-        if (outcome === "late") r.events.push({ at, event: "late_finish", attempt: n, status, summary });
+        const known = r.events.some((e) => e.event === "late_finish" && e.attempt === n && e.status === status && e.summary === summary);
+        if (outcome === "late" && !known) r.events.push({ at, event: "late_finish", attempt: n, status, summary });
         return;
       }
       if (source) {
@@ -81,12 +82,21 @@ Options:
     const settled = settleSession(ctx, task, ref, { capture: true });
 
     const final = readRunRef(ctx, ref).attempts[n - 1]!;
-    if (outcome === "late") ctx.stderr.write(`agent-tasks: warning: ${ref} attempt ${n} had already ended as ${final.status} (${final.reason ?? "no reason"}); your report was kept in its events\n`);
+    const ended = `${final.status}${final.reason ? ` (${final.reason})` : ""}`;
+    if (outcome === "late") ctx.stderr.write(`agent-tasks: warning: ${ref} attempt ${n} had already ended as ${ended}; your report was kept in the run's events\n`);
+    if (outcome === "duplicate" && (final.status !== status || final.summary !== summary)) {
+      ctx.stderr.write(`agent-tasks: warning: ${ref} attempt ${n} was already finished as ${final.status}; this report (${status}) was not recorded\n`);
+    }
     output(
       ctx,
       { run_ref: ref, attempt: n, status: final.status, summary: final.summary, output: final.output ?? null, already_finished: outcome !== "recorded", late: outcome === "late", session: final.session },
       () => {
-        const head = outcome === "recorded" ? `Recorded ${ref} as ${final.status}.` : `${ref} was already finished as ${final.status}.`;
+        const head =
+          outcome === "recorded"
+            ? `Recorded ${ref} as ${final.status}.`
+            : outcome === "late"
+              ? `${ref} had already ended as ${ended} before this report; the report was kept but the status stays.`
+              : `${ref} was already finished as ${final.status}.`;
         const tail =
           settled.action === "kept"
             ? ` Session kept open (keep_open: ${resolution.keep_open}).`
