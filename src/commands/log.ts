@@ -15,6 +15,7 @@ import { type Attempt, type Run, type RunEvent, type SessionRecord, TASK_ID_RE }
 import { parseRunRef, runRef, runSlotId } from "../slot.ts";
 import { isArchived, listRuns, readRun, runLogRelativePath, taskExists } from "../store.ts";
 import { displayTimezone, warnCorrupt } from "../task-info.ts";
+import { abortableSleep, followRun } from "../follow.ts";
 import type { Command } from "./types.ts";
 
 /** A run ref, or a task id for its latest occurrence. */
@@ -133,10 +134,25 @@ export function renderRunLog(ctx: Context, style: Style, run: Run, attempts: rea
     .replace(/\n{3,}/g, "\n\n");
 }
 
+/** Exit code after Ctrl+C, as shells report a SIGINT. */
+const EXIT_INTERRUPTED = 130;
+
+/** Follows with the real clock; Ctrl+C stops it at the next poll. */
+async function following(ctx: Context, ref: string, opts: { shown: string; raw: boolean }) {
+  const controller = new AbortController();
+  const onInterrupt = () => controller.abort();
+  process.on("SIGINT", onInterrupt);
+  try {
+    return await followRun(ctx, ref, { ...opts, sleep: abortableSleep(controller.signal), signal: controller.signal, style: stdoutStyle(ctx) });
+  } finally {
+    process.off("SIGINT", onInterrupt);
+  }
+}
+
 const log: Command = {
   name: "log",
   summary: "Show what happened in a run: events, attempts and the captured log",
-  usage: `Usage: agent-tasks log <task-id>/<slot> | <task-id> [--attempt <n>] [--raw]
+  usage: `Usage: agent-tasks log <task-id>/<slot> | <task-id> [--attempt <n>] [--raw] [--follow]
 
 Shows one occurrence: its events (claimed, launched, state changes,
 warnings), each attempt with its agent, launcher, handle, status and
@@ -147,11 +163,26 @@ of a run ref, shows the task's latest occurrence. Run refs are listed by
 Options:
   --attempt <n>  Only attempt n (and its log); by default every attempt and the latest log
   --raw          Only the captured log, to pipe into less or another agent
-                 (with --json, the log content is in the JSON anyway)`,
-  run(ctx, args) {
-    const { values, positionals } = parseCommandArgs(args, { attempt: { type: "string" }, raw: { type: "boolean" } }, { minPositionals: 1, maxPositionals: 1 });
-    const run = findRun(ctx, positionals[0]!);
+                 (with --json, the log content is in the JSON anyway)
+  --follow       If the run is still running or blocked, keep printing its new
+                 output (the launcher's read, every few seconds) until it ends,
+                 then print its final status. Ctrl+C stops following. With
+                 --json, waits for the end and prints the final JSON. For a
+                 finished run it is the same as without --follow`,
+  async run(ctx, args) {
+    const { values, positionals } = parseCommandArgs(args, { attempt: { type: "string" }, raw: { type: "boolean" }, follow: { type: "boolean" } }, { minPositionals: 1, maxPositionals: 1 });
+    if (values.follow && values.attempt !== undefined) throw new UsageError("--follow always follows the latest attempt; it can't be combined with --attempt");
+    let run = findRun(ctx, positionals[0]!);
     const ref = runRef(run.task_id, runSlotId(run));
+    const follow = values.follow === true && isInProgress(run.status);
+
+    if (follow && ctx.json) {
+      // JSON is one document: wait quietly for the end, then print the final state.
+      const quiet: Context = Object.create(ctx, { stdout: { value: { write() {} } } });
+      const result = await following(quiet, ref, { shown: "", raw: true });
+      if (!result.finished) return EXIT_INTERRUPTED;
+      run = result.run;
+    }
     let attempts = run.attempts;
     if (values.attempt !== undefined) {
       const n = parseCount("--attempt", values.attempt, 1);
@@ -161,11 +192,14 @@ Options:
     const captured = capturedLog(ctx, run, attempts.at(-1));
 
     if (values.raw && !ctx.json) {
-      if (captured?.content == null) throw new NotFoundError(`no captured log for ${ref}${captured ? ` (expected at ${captured.path})` : " (it has no attempt)"}`);
-      ctx.stdout.write(captured.content);
-      return;
+      if (captured?.content == null && !follow) throw new NotFoundError(`no captured log for ${ref}${captured ? ` (expected at ${captured.path})` : " (it has no attempt)"}`);
+      ctx.stdout.write(captured?.content ?? "");
+    } else {
+      output(ctx, { ref, run, attempt: captured?.attempt ?? null, log: captured }, () => renderRunLog(ctx, stdoutStyle(ctx), run, attempts, captured));
     }
-    output(ctx, { ref, run, attempt: captured?.attempt ?? null, log: captured }, () => renderRunLog(ctx, stdoutStyle(ctx), run, attempts, captured));
+    if (!follow || ctx.json) return;
+    const result = await following(ctx, ref, { shown: captured?.content ?? "", raw: values.raw === true });
+    return result.finished ? undefined : EXIT_INTERRUPTED;
   },
 };
 

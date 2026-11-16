@@ -1,4 +1,5 @@
 import add from "./add.ts";
+import attach from "./attach.ts";
 import configCheck from "./config-check.ts";
 import configInstructions from "./config-instructions.ts";
 import configResolve from "./config-resolve.ts";
@@ -37,6 +38,7 @@ export type { Command } from "./types.ts";
  */
 export const commands: Command[] = [
   add,
+  attach,
   configCheck,
   configInstructions,
   configResolve,

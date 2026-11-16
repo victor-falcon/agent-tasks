@@ -2,6 +2,8 @@
 // $FAKE_HC_DIR/calls.jsonl and keeps one JSON file per terminal in
 // $FAKE_HC_DIR/terminals/, which tests edit to simulate state changes.
 // `$FAKE_HC_DIR/fail-<subcommand>` makes that subcommand exit 1.
+// `$FAKE_HC_DIR/screen-<t>` is what `hc read` prints for terminal t, and
+// `$FAKE_HC_DIR/attach-exit` the exit code of `hc attach` (default 0).
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -54,9 +56,16 @@ switch (sub) {
   case "kill":
     rmSync(file(positional[0]!), { force: true });
     break;
-  case "read":
-    process.stdout.write(`screen of ${positional.at(-1)}\n`);
+  case "read": {
+    const screen = join(dir, `screen-${positional.at(-1)}`);
+    process.stdout.write(existsSync(screen) ? readFileSync(screen, "utf8") : `screen of ${positional.at(-1)}\n`);
     break;
+  }
+  case "attach": {
+    process.stdout.write(`attached to ${positional[0]}\n`);
+    const exit = join(dir, "attach-exit");
+    process.exit(existsSync(exit) ? Number(readFileSync(exit, "utf8").trim()) : 0);
+  }
   default:
     process.stderr.write(`fake hc: unknown subcommand ${sub}\n`);
     process.exit(2);
