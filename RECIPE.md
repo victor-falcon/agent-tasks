@@ -406,12 +406,20 @@ Prove the whole cycle works: a task runs, succeeds, and its session closes.
    hc run --bg --json --no-parent --no-notify --keep --name agent-tasks-runner \
      --cwd ~ --label herdr.space=<space id> --label herdr.tab=tb$(openssl rand -hex 16) \
      -- /usr/bin/env PATH="$PATH" "$SHELL" -i
-   hc send <address> "agent-tasks runner"
+   env -u HC_TERMINAL_ID hc send <address> "agent-tasks runner"
    ```
 
+   Send it without your own address (`env -u HC_TERMINAL_ID`): you are an
+   agent, so once that terminal has run anything that reported an agent
+   status (an earlier runner, for example), `hc send` delivers your text
+   wrapped as `<hc from="…">…</hc>` and the shell answers with a parse error.
+
    `hc wait` doesn't help here: it waits for an agent, and a shell at its
-   prompt never reports one. `agent-tasks runner status` says when the
-   runner is up.
+   prompt never reports one. Instead, check that the runner started: run
+   `agent-tasks runner status` every few seconds until it says a runner is
+   running (it exits with 1 while none is). If it doesn't after about 30
+   seconds, read the tab with `hc read --lines 5 <address>` to see what the
+   shell said.
 
 3. Wait: the runner ticks every `runner.every` (5 minutes by default), so
    the task starts within about 7 minutes. Check:
