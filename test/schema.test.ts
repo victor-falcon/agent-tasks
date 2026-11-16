@@ -42,7 +42,7 @@ describe("task validation", () => {
       extra: 1,
     });
     expect(errors).toEqual([
-      "extra: unknown field (allowed: id, title, description, cwd, instructions, schedule, agent, catch_up, max_delay, timeout, retries, keep_open, enabled, created_at, created_by, updated_at)",
+      "extra: unknown field (allowed: id, title, description, cwd, instructions, schedule, agent, catch_up, max_delay, timeout, retries, keep_open, enabled, created_at, created_by, updated_at, schedule_since)",
       "id: must be a slug: lowercase letters, digits and dashes (max 64 chars)",
       "title: must be a non-empty string",
       'schedule.timezone: must be an IANA time zone such as Europe/Madrid (got "Nowhere/City")',

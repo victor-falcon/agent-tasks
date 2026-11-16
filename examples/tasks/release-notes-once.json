@@ -1,0 +1,19 @@
+{
+  "id": "release-notes-once",
+  "title": "Draft release notes for v1.0",
+  "description": "One-off: prepare the release notes before the release meeting.",
+  "cwd": "~/Projects/example",
+  "instructions": "Read the merged pull requests since the last tag (git log <last-tag>..HEAD) and write a draft of the release notes to RELEASE_NOTES.md, grouped into Features, Fixes and Internal. Do not commit. Done when the file exists and every merged PR appears in it.",
+  "schedule": { "type": "once", "at": "2026-12-01T09:00:00+01:00" },
+  "agent": null,
+  "catch_up": null,
+  "max_delay": "2h",
+  "timeout": "30m",
+  "retries": 0,
+  "keep_open": null,
+  "enabled": true,
+  "created_at": "2026-11-16T15:00:00+01:00",
+  "created_by": { "cwd": "~/Projects/example", "session": null },
+  "updated_at": "2026-11-16T15:00:00+01:00",
+  "schedule_since": null
+}
