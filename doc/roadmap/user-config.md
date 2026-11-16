@@ -1,0 +1,201 @@
+# User configuration (outside the repo)
+
+agent-tasks will be open source soon. The repo only carries code, skills,
+presets, documentation and reasonable defaults. Everything personal lives
+outside: how agents are launched, which command is used, accounts, aliases,
+rules specific to the environment, and also the tasks and their history.
+
+## Where everything lives
+
+| What | Where | Versioned in the repo |
+|---|---|---|
+| Code, skills, presets, docs, examples | this repo | yes |
+| Personal configuration | `~/.config/agent-tasks/config.json` (or `$AGENT_TASKS_CONFIG`) | no |
+| Personal free-text instructions | `~/.config/agent-tasks/instructions/*.md` | no |
+| How agents are launched (Herdr, Rex, Orca…) | `launcher` in `config.json`, starting from a preset in the repo | only the presets |
+| Tasks, runs, heartbeat | `data_dir`, by default `~/.local/share/agent-tasks/` (or `$AGENT_TASKS_HOME`) | no |
+
+Tasks stay out of the repo because they carry the user's paths, prompts and
+results. Anyone who wants them in git can point `data_dir` to their own
+private repo.
+
+The repo ships `examples/config.example.json` and `examples/tasks/*.json` as
+a reference. `agent-tasks init` creates `~/.config/agent-tasks/` from the
+example if it doesn't exist.
+
+## `config.json`
+
+```json
+{
+  "data_dir": "~/.local/share/agent-tasks",
+  "timezone": "Europe/Madrid",
+
+  "runner": { "every": "5m" },
+
+  "launcher": { "preset": "herdr" },
+
+  "agent": { "command": "claude", "args": [], "shell": false },
+  "skill": "run-agent-task",
+
+  "profiles": [
+    {
+      "match": "~/Projects/work/**",
+      "agent": { "command": "clc", "shell": true },
+      "env": { "SOME_FLAG": "1" },
+      "instructions": ["work.md"]
+    },
+    {
+      "match": "~/Projects/**",
+      "agent": { "command": "clc", "shell": true }
+    }
+  ],
+
+  "instructions": {
+    "subagent": ["subagent.md"],
+    "supervisor": ["supervisor.md"]
+  },
+
+  "notifiers": [
+    { "type": "system", "events": ["failed", "timed_out", "blocked"] }
+  ],
+
+  "supervisor": { "enabled": false },
+
+  "defaults": {
+    "catch_up": "latest",
+    "timeout": "45m",
+    "keep_open": "on_failure"
+  }
+}
+```
+
+- `runner`: how often it ticks. See [runner.md](runner.md).
+- `launcher`: the commands that launch, watch and close each subagent
+  (create the sub-tab in Herdr, etc.). A preset from the repo, partly
+  overridden or written from scratch. See [launcher.md](launcher.md).
+- `agent`: the agent command that goes into the `launch`. `shell: true` runs
+  it in an interactive shell (`$SHELL -ic …`) so aliases and functions like
+  `clc` work, with their per-project account logic.
+- `skill`: the skill each subagent starts with (`/{{skill}} <run_ref>`).
+- `profiles`: rules by task folder (`cwd`), in order; the first one that
+  matches wins. They can change the agent, the launcher, the skill, add
+  non-secret environment variables and add instructions.
+- `instructions`: Markdown files from `~/.config/agent-tasks/instructions/`
+  that `agent-tasks task <run_ref>` adds to what the subagent reads, or that
+  the supervisor reads when it starts.
+- `notifiers`, `supervisor`: alerts outside the runner's screen and the
+  optional agent for when something needs judgment. See [runner.md](runner.md).
+- `defaults`: override the project's default values for new tasks.
+
+No secrets in this file. Credentials keep coming from wherever they already
+come from (direnv, the alias itself); the CLI neither reads nor copies them.
+
+## Customizing what the agents do
+
+The runner is not an agent: what it does is decided by the config and the
+launcher commands. The ones that are agents (each task's subagent and, if
+enabled, the supervisor) need to know the user's environment: which
+multiplexer they are in, that `clc` is used, what they must not do on that
+machine…
+There are three levels, from least to most invasive; most people will only
+need the first.
+
+```
+~/.config/agent-tasks/
+├── config.json
+├── instructions/
+│   ├── subagent.md        # level 1: added to what each subagent reads
+│   ├── supervisor.md      # level 1: added to the supervisor skill
+│   └── work.md            # a profile's instructions
+├── templates/
+│   ├── task.md            # level 2: what `agent-tasks task <run_ref>` prints
+│   └── prompt.md          # level 2: the startup prompt (default `/{{skill}} {{run_ref}}`)
+└── skills/
+    └── run-agent-task/    # level 3: replaces the whole skill
+        └── SKILL.md
+```
+
+### Level 1: added instructions
+
+Free-form Markdown. `agent-tasks task <run_ref>` includes it in what the
+subagent reads, marked as user instructions that take priority over the
+defaults. Example `instructions/subagent.md`:
+
+```markdown
+- You run inside Herdr as a sub-agent of the agent-tasks runner. Use `hc` if
+  you need to read or wait for another terminal; don't open new windows.
+- If you need to start another agent, use `clc`, never plain `claude`: it
+  picks the right account for each project. It's a shell alias, so run it in
+  an interactive shell.
+- Don't run detached scripts (`nohup`, `setsid`): this machine has an EDR
+  that kills the whole terminal server.
+- Don't read credentials; the environment comes from direnv.
+```
+
+The same applies to `supervisor.md` and to the files a profile lists.
+
+### Level 2: templates
+
+If the added instructions aren't enough, the whole text is replaced.
+Templates use `{{…}}` variables; unknown ones cause an error when loading
+(`agent-tasks config check`), not a broken prompt in the middle of the night.
+
+- `templates/prompt.md`: the prompt the agent starts with. By default
+  `/{{skill}} {{run_ref}}`. Useful for an agent without skills (another
+  CLI): for example, `Run: agent-tasks task {{run_ref}} and follow it.`
+- `templates/task.md`: what `agent-tasks task` prints. Variables:
+  `{{title}}`, `{{task_id}}`, `{{slot}}`, `{{attempt}}`, `{{cwd}}`,
+  `{{instructions}}`, `{{finish_command}}`, `{{personal_instructions}}`.
+  If `{{finish_command}}` is missing, `config check` warns: without it the
+  agent doesn't know how to close the run and everything would end as
+  `exited_without_report`.
+
+### Level 3: custom skill
+
+`"skill": "my-skill"` in the config (or in a profile) changes the skill the
+subagent starts with. `agent-tasks install` links the ones in
+`~/.config/agent-tasks/skills/` into `~/.claude/skills/`. For anyone who
+wants an entirely different flow; it has to read the task with
+`agent-tasks task` and finish with `agent-tasks finish` so the registry keeps
+working. The same applies to the supervisor (`supervisor.skill`). It is
+documented as "at your own risk": it isn't guaranteed to work across versions.
+
+## Precedence
+
+For each value, the winner is, from strongest to weakest:
+
+1. what the task says (`task.agent`, `task.timeout`, …);
+2. the first `profile` whose `match` fits `task.cwd` (it can change the agent, launcher, skill, environment and instructions);
+3. the root of `config.json`;
+4. the project's default value (`claude`, preset `process`, `5m`, …).
+
+`agent-tasks config resolve <task-id|path>` shows the final result and where
+each value comes from, so you can debug without guessing.
+
+## How the pieces use it
+
+- **Runner / `tick`**: resolves each task's agent, launcher and skill with
+  the precedence above, runs the `launch` and saves what was resolved in the
+  attempt (`attempt.agent`, `attempt.session`) so the history says exactly
+  what was launched and how.
+- **`agent-tasks task <run_ref>`**: the project template + the task's
+  instructions + the personal instructions from `subagent` and from the
+  matching profile.
+- **Skills `run-agent-task` and `supervise-tasks`**: contain nothing from the
+  user; personal content reaches them through `agent-tasks task` and
+  `agent-tasks config instructions supervisor`.
+- **Skill `schedule-agent-task`**: doesn't need to know any of this; the
+  agent creates the task and the configuration is applied when it runs.
+
+## Steps (added to phase 1)
+
+| # | Step | Done when |
+|---|---|---|
+| C1 | `src/config.ts`: loading, validation, `~` and globs, precedence | precedence and profile tests |
+| C2 | `data_dir` outside the repo; `agent-tasks init` with the example | the clean repo contains no data after use |
+| C3 | Agent with `shell: true` (aliases like `clc`) inside the `launch` | the subagent starts with `clc` in Herdr |
+| C4 | `config resolve` and `config instructions <subagent\|supervisor>` | readable output, also with `--json` |
+| C5 | `examples/` and a configuration section in the public README | someone without `clc` or Herdr uses it with `claude` and the `process` preset without changing anything |
+| C6 | Personal instructions (level 1) and templates (level 2) with `config check` | the subagent follows `instructions/subagent.md` |
+| C7 | Custom skill (level 3) | a profile with another skill uses it on launch |
+| C8 | `agent-tasks init` creates `instructions/subagent.md` with commented examples | guided first install |
