@@ -6,13 +6,16 @@
 
   "launcher": { "preset": "process" },
 
-  "agent": { "command": "claude", "args": [], "shell": false },
+  "agent": {
+    "command": "claude",
+    "args": ["--permission-mode", "acceptEdits", "--allowedTools", "Bash(agent-tasks:*)", "--print"],
+    "shell": false
+  },
   "skill": "run-agent-task",
 
   "profiles": [
     {
       "match": "~/Projects/work/**",
-      "agent": { "command": "claude", "args": ["--model", "opus"], "shell": false },
       "env": { "EXAMPLE_FLAG": "1" },
       "instructions": ["work.md"]
     }

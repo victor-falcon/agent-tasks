@@ -43,6 +43,14 @@ describe("help", () => {
     expect(b.stdout).toBe(a.stdout);
   });
 
+  test("no help text has an unexpanded ${…} placeholder", async () => {
+    for (const c of commands) {
+      const r = await runCli(["help", ...c.name.split(" ")], home);
+      expect(r.stdout).not.toContain("${");
+    }
+    expect((await runCli(["help", "status"], home)).stdout).toContain("could be read; 1 otherwise");
+  });
+
   test("help --json describes the commands", async () => {
     const r = await runCli(["help", "--json"], home);
     expect(r.code).toBe(0);

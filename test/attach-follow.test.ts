@@ -5,7 +5,7 @@ import { commands } from "../src/commands/index.ts";
 import { createContext } from "../src/context.ts";
 import { abortableSleep, followRun, newLines } from "../src/follow.ts";
 import { createStyle } from "../src/output/style.ts";
-import { at, DEMO_REF, type ExecHome, execTask, FAKE_AGENT, makeExecHome, waitFor } from "./exec-helpers.ts";
+import { at, DEMO_REF, type ExecHome, execTask, FAKE_AGENT, makeExecHome, settled, waitFor } from "./exec-helpers.ts";
 
 // `attach` and `log --follow`, with the process preset (a real child process)
 // and the herdr preset against the fake `hc` in test/fixtures/.
@@ -115,7 +115,7 @@ describe("process preset", () => {
   test("log --follow on a finished run is the same as log", async () => {
     execTask(home, "succeed");
     await home.tick(1);
-    await waitFor(() => (home.run(DEMO_REF).status === "succeeded" ? true : null), "the run to finish");
+    await waitFor(settled(home), "the run to finish and close");
     const plain = await home.cli("log", DEMO_REF, "--now", at(5));
     const followed = await home.cli("log", DEMO_REF, "--follow", "--now", at(5));
     expect(followed.code).toBe(0);

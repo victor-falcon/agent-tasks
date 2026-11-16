@@ -72,15 +72,21 @@ git clone https://github.com/victor-falcon/agent-tasks.git ~/.local/share/agent-
 cd ~/.local/share/agent-tasks-src
 bun install
 bin/agent-tasks install   # links agent-tasks into ~/.local/bin and the skills into ~/.claude/skills
-agent-tasks init          # creates ~/.config/agent-tasks/ (never overwrites)
+agent-tasks init          # creates ~/.config/agent-tasks/ (never overwrites), with the launcher for this terminal
 ```
 
 Then edit `~/.config/agent-tasks/config.json`:
 
-1. `launcher`: `{ "preset": "herdr" }`, `"tmux"`, `"rex"` or `"process"`
-   (see [Presets](#presets)), or your own commands.
+1. `launcher`: `init` picks it from the terminal it runs in: `herdr` inside
+   Herdr, `rex` inside Rex, `tmux` inside tmux, `process` otherwise (see
+   [Presets](#presets)). Change it, or write your own commands.
 2. `agent`: the command that starts your agent, e.g.
-   `{ "command": "claude" }`. Different commands per folder go in `profiles`.
+   `{ "command": "claude" }`. With `process` there is no terminal, so `init`
+   writes `claude` in print mode (`--print`, allowed to edit files and run
+   `agent-tasks` only; add what your tasks need to `--allowedTools`). With
+   the other presets the agent asks for permissions in its tab as usual,
+   unless you add flags to `args`. Different commands per folder go in
+   `profiles`.
 3. `instructions/subagent.md`: what every sub-agent must know about your
    machine.
 
@@ -152,7 +158,7 @@ the launcher commands and variables in
 | `herdr` | Its own Herdr tab, nested under the runner | Agent state (working, idle, blocked) from Herdr. Run the runner inside Herdr. |
 | `rex` | Its own Rex window in the runner's session | **Untested against a real Rex.** Needs `rex` and `jq`. |
 | `tmux` | Its own tmux window | tmux has no agent status: blocked agents are only caught by the timeout. tmux 3.0+. |
-| `process` | A child process of the runner, output in the run's log | No terminal and no agent state. The default; for tests and machines without a multiplexer. |
+| `process` | A child process of the runner, output in the run's log | No terminal and no agent state, so the agent must run non-interactively (`claude --print`). What `init` picks outside a multiplexer; for tests and machines without one. |
 
 The interactive presets (`herdr`, `rex`, `tmux`) start a shell and type the
 agent command at its prompt, so shell aliases and functions work. For
@@ -166,6 +172,18 @@ bun install
 bun test             # tests never touch your real home
 bunx tsc --noEmit    # type check
 bin/agent-tasks help
+```
+
+An end-to-end test runs the `herdr` preset in a real Herdr, with no LLM: from
+a terminal inside Herdr, it opens a runner in a new tab of the current space,
+schedules two one-off tasks a minute ahead for a stand-in agent
+(`test/e2e/herdr-agent.sh`), checks that each one gets its own tab nested
+under the runner, that the succeeded one closes its tab and the failed one
+keeps it open, then kills everything it started. It takes about two minutes
+and is skipped unless you ask for it:
+
+```sh
+AGENT_TASKS_E2E_HERDR=1 bun test test/e2e
 ```
 
 Each CLI command lives in its own file under `src/commands/` and is

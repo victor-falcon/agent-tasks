@@ -13,7 +13,7 @@ import { type RunnerDeps, runRunner } from "../src/runner.ts";
 import type { RunStatus } from "../src/schema.ts";
 import { appendTick, claimRun, readTicks, writeRun } from "../src/store.ts";
 import { tick as realTick, type TickResult } from "../src/tick.ts";
-import { at, DEMO_REF, execTask, FAKE_AGENT, makeExecHome, type ExecHome, waitFor } from "./exec-helpers.ts";
+import { at, DEMO_REF, execTask, FAKE_AGENT, makeExecHome, type ExecHome, settled, waitFor } from "./exec-helpers.ts";
 import { makeTask, makeTempHome, runCli, type TempHome } from "./helpers.ts";
 
 setDefaultTimeout(30_000);
@@ -485,7 +485,7 @@ describe("integration: runner --once with the process preset", () => {
     expect(first.stdout).toContain("tick  1 due · 1 running");
     expect(first.stdout).toMatch(new RegExp(`▶ ${DEMO_REF} +launched in \\d+`));
 
-    await waitFor(() => ex.run(DEMO_REF).attempts[0]?.finished_at, "finish");
+    await waitFor(settled(ex), "finish");
     const second = await ex.cli("runner", "--once", "--now", at(6));
     expect(second.code).toBe(0);
     expect(second.stdout).toMatch(new RegExp(`■ ${DEMO_REF} +succeeded in \\S+ · "did it \\(attempt 1\\)"`));

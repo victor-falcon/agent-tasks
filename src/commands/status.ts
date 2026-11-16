@@ -106,7 +106,7 @@ Under "Attention":
   □  occurrences missed in the last 24 hours, until the task succeeds again
 
 Exit code: 0 when the runner is alive, nothing needs attention and every file
-could be read; ${'${EXIT_ATTENTION}'} otherwise. So it works in scripts and status bars
+could be read; ${EXIT_ATTENTION} otherwise. So it works in scripts and status bars
 (--json too).`,
   run(ctx, args) {
     parseCommandArgs(args, {}, { maxPositionals: 0 });

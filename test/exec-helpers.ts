@@ -89,6 +89,23 @@ export function execTask(home: ExecHome, mode: string, overrides: Partial<Task> 
 
 export const DEMO_REF = "demo/20261117T080000Z";
 
+/**
+ * A `waitFor` check: the run once attempt `n` has ended AND its session is
+ * settled. `finish` writes the result first and settles the session (keeps it
+ * open, or records `closed` and runs `close`) in a later write, so waiting for
+ * `finished_at` alone races with the rest of `finish`. A close that fails
+ * replaces `closed` with `close_failed` afterwards; tests of that wait for it.
+ */
+export function settled(home: ExecHome, ref = DEMO_REF, n = 1): () => Run | null {
+  return () => {
+    const run = home.run(ref);
+    const attempt = run.attempts[n - 1];
+    if (!attempt?.finished_at) return null;
+    if (!attempt.session || attempt.session.kept_open) return run;
+    return run.events.some((e) => e.attempt === n && (e.event === "closed" || e.event === "close_failed" || e.event === "session_gone")) ? run : null;
+  };
+}
+
 /** Waits for a real child process (not for the clock). */
 export async function waitFor<T>(check: () => T | null | undefined | false, what: string, timeoutMs = 20_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
