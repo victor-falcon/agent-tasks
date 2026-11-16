@@ -1,7 +1,7 @@
 import { type Context, output } from "./context.ts";
 import type { Task } from "./schema.ts";
-import { readTask, writeTask } from "./store.ts";
-import { describeNext, nowIso, taskOverview } from "./task-info.ts";
+import { writeTask } from "./store.ts";
+import { describeNext, nowIso, readActiveTask, taskOverview } from "./task-info.ts";
 
 /**
  * A copy of the task with `enabled` set and `updated_at` bumped. Enabling also
@@ -15,7 +15,7 @@ export function withEnabled(ctx: Context, task: Task, enabled: boolean): Task {
 
 /** The body of `pause` and `resume`. Doing it twice is a no-op. */
 export function setEnabled(ctx: Context, id: string, enabled: boolean): void {
-  const stored = readTask(ctx.paths, id);
+  const stored = readActiveTask(ctx, id);
   const changed = stored.enabled !== enabled;
   const task = changed ? withEnabled(ctx, stored, enabled) : stored;
   if (changed) writeTask(ctx.paths, task);

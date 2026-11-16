@@ -3,9 +3,9 @@ import { output } from "../context.ts";
 import { UsageError, ValidationError } from "../errors.ts";
 import { parseJsonObject, readFileArg } from "../input.ts";
 import { isObject, type Task, TASK_FIELDS, taskErrors } from "../schema.ts";
-import { readTask, writeTask } from "../store.ts";
+import { writeTask } from "../store.ts";
 import { applyTaskFlags, normalizeTaskCwd, orderTaskKeys, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE } from "../task-flags.ts";
-import { describeNext, nowIso, taskOverview } from "../task-info.ts";
+import { describeNext, nowIso, readActiveTask, taskOverview } from "../task-info.ts";
 import type { Command } from "./types.ts";
 
 /** Fields `edit` keeps for itself; a patch may repeat them unchanged but not change them. */
@@ -57,7 +57,7 @@ ${TASK_FLAGS_USAGE}
     if (patchFile === "-" && values["instructions-file"] === "-") throw new UsageError("stdin can hold the patch or the instructions, not both");
     if (patchFile === undefined && Object.keys(values).length === 0) throw new UsageError("nothing to change: pass field options, --file or -");
 
-    const old = readTask(ctx.paths, positionals[0]!);
+    const old = readActiveTask(ctx, positionals[0]!);
     let task = structuredClone(old);
     if (patchFile !== undefined) task = applyPatch(task, parseJsonObject(await readFileArg(ctx, patchFile), "the patch"));
     await applyTaskFlags(ctx, task, values);

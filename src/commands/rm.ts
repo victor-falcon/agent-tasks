@@ -1,8 +1,9 @@
 import { parseCommandArgs } from "../args.ts";
 import { output } from "../context.ts";
 import { isFinalStatus } from "../schema.ts";
-import { archiveTask, listRuns, readTask, taskPath } from "../store.ts";
+import { archiveTask, listRuns, taskPath } from "../store.ts";
 import { displayPath } from "../task-flags.ts";
+import { readActiveTask } from "../task-info.ts";
 import { withEnabled } from "../task-toggle.ts";
 import type { Command } from "./types.ts";
 
@@ -20,7 +21,7 @@ Moves the task to <data_dir>/archive/<id>.json, paused, and keeps its runs.
 It is reversible: move the file back to <data_dir>/tasks/ and resume it.`,
   run(ctx, args) {
     const { positionals } = parseCommandArgs(args, {}, { minPositionals: 1, maxPositionals: 1 });
-    const stored = readTask(ctx.paths, positionals[0]!);
+    const stored = readActiveTask(ctx, positionals[0]!);
     // Archived paused, so a restored task needs a `resume`, which skips the slots it was away for.
     const task = stored.enabled ? withEnabled(ctx, stored, false) : stored;
     const unfinished = listRuns(ctx.paths, task.id).items.filter((r) => !isFinalStatus(r.run.status)).map((r) => r.ref);

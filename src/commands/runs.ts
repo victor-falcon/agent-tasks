@@ -65,7 +65,7 @@ Options:
 
     warnCorrupt(ctx, errors);
     output(ctx, { runs: shown, total: views.length, errors: errors.map((e) => e.message) }, () => {
-      const more = views.length > shown.length ? `\n(${views.length - shown.length} more; use --limit)` : "";
+      const more = views.length > shown.length ? `\n(${views.length - shown.length} more; use --limit <n>)` : "";
       return renderRuns(shown, displayTimezone(ctx)) + more;
     });
   },

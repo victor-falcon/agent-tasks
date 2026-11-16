@@ -21,6 +21,7 @@ export async function readFileArg(ctx: Context, path: string): Promise<string> {
 
 /** Parses JSON read from stdin or a file, as an object. */
 export function parseJsonObject(text: string, what: string): Record<string, unknown> {
+  if (text.trim() === "") throw new AgentTasksError("invalid_json", `${what} is empty`);
   let value: unknown;
   try {
     value = JSON.parse(text);

@@ -30,7 +30,7 @@ export const TASK_FLAG_OPTIONS = {
 
 export type TaskFlagValues = { [K in keyof typeof TASK_FLAG_OPTIONS]?: string };
 
-export const TASK_FLAGS_USAGE = `  --title <text>              Title (the id is derived from it)
+export const TASK_FLAGS_USAGE = `  --title <text>              Title
   --description <text>        Why the task exists; read by a person
   --cwd <dir>                 Working directory (must exist)
   --at <iso>                  Run once at this time, e.g. 2026-11-20T09:00:00+01:00

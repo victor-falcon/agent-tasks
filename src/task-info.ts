@@ -5,7 +5,7 @@ import type { DataPaths } from "./paths.ts";
 import { isTaskFinished, nextRunTimes, planSlots, type SlotPlan } from "./schedule.ts";
 import type { Run, RunStatus, Task } from "./schema.ts";
 import { NotFoundError, UsageError } from "./errors.ts";
-import { isArchived, listRuns, readArchivedTask, readTask, readTicks, recordedSlots, type StoredRun, taskExists } from "./store.ts";
+import { archivedTaskPath, isArchived, listRuns, readArchivedTask, readTask, readTicks, recordedSlots, type StoredRun, taskExists } from "./store.ts";
 import { slotId } from "./slot.ts";
 import { formatInZone, isIsoTimestamp, systemTimezone } from "./time.ts";
 
@@ -143,6 +143,14 @@ export function parseSince(value: string, now: Date): Date {
 export function warnCorrupt(ctx: Context, errors: readonly Error[]): void {
   if (ctx.json) return;
   for (const err of errors) ctx.stderr.write(`warning: ${err.message}\n`);
+}
+
+/** A saved (not archived) task; an archived id gets a hint on how to restore it. */
+export function readActiveTask(ctx: Context, id: string): Task {
+  if (!taskExists(ctx.paths, id) && isArchived(ctx.paths, id)) {
+    throw new NotFoundError(`task "${id}" is archived; restore it first: mv ${archivedTaskPath(ctx.paths, id)} ${ctx.paths.tasksDir}/ && agent-tasks resume ${id}`);
+  }
+  return readTask(ctx.paths, id);
 }
 
 /** A saved task, or an archived one (`archived: true`). */
