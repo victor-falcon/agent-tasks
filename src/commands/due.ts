@@ -2,7 +2,7 @@ import { parseCommandArgs } from "../args.ts";
 import { output } from "../context.ts";
 import type { SlotRef } from "../schedule.ts";
 import { listRuns, listTasks } from "../store.ts";
-import { planTask, warnCorrupt } from "../task-info.ts";
+import { nowIso, planTask, warnCorrupt } from "../task-info.ts";
 import { formatInZone } from "../time.ts";
 import type { Command } from "./types.ts";
 
@@ -47,19 +47,13 @@ heartbeat; writes nothing.`,
       const resolution = ctx.resolveFor(task);
       const plan = planTask(ctx.paths, task, resolution, ctx.now, runs.items);
       const view = (s: SlotRef & { reason?: string }): DueSlot => ({ slot: formatInZone(s.at, resolution.timezone), id: s.id, ...(s.reason ? { reason: s.reason } : {}) });
-      const entry: DueTask = {
-        task_id: task.id,
-        candidates: plan.candidates.map(view),
-        missed: plan.missed.map(view),
-        superseded: plan.superseded.map(view),
-        cancelled: plan.cancelled.map(view),
-      };
+      const entry = { task_id: task.id, ...Object.fromEntries(KINDS.map((k) => [k, plan[k].map(view)])) } as DueTask;
       if (KINDS.some((k) => entry[k].length > 0)) result.push(entry);
     }
     const totals = Object.fromEntries(KINDS.map((k) => [k, result.reduce((n, t) => n + t[k].length, 0)]));
 
     warnCorrupt(ctx, errors);
-    output(ctx, { now: ctx.now.toISOString(), tasks: result, totals, errors: errors.map((e) => e.message) }, () => {
+    output(ctx, { now: nowIso(ctx), tasks: result, totals, errors: errors.map((e) => e.message) }, () => {
       if (result.length === 0) return "Nothing due.";
       const lines: string[] = [];
       for (const t of result) {

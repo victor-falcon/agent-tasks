@@ -1,10 +1,10 @@
 import { parseCommandArgs } from "../args.ts";
 import { type Context, output } from "../context.ts";
-import { UsageError } from "../errors.ts";
+import { parseEnumList } from "../input.ts";
 import { resolvePath } from "../paths.ts";
 import type { RunStatus, Task } from "../schema.ts";
-import { listArchivedTasks, listRuns, listTasks } from "../store.ts";
-import { nextRuns, TASK_STATES, type TaskState, table, taskState, warnCorrupt } from "../task-info.ts";
+import { listArchivedTasks, listTasks } from "../store.ts";
+import { describeSchedule, TASK_STATES, type TaskState, table, taskOverview, warnCorrupt } from "../task-info.ts";
 import type { Command } from "./types.ts";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -16,6 +16,7 @@ export interface TaskRow {
   cwd: string;
   state: TaskState;
   schedule: string;
+  /** In the task's time zone. */
   next_run: string | null;
   last_status: RunStatus | null;
   last_slot: string | null;
@@ -24,33 +25,27 @@ export interface TaskRow {
   missed_7d: number;
 }
 
-function describeSchedule(task: Task): string {
-  const s = task.schedule;
-  return s.type === "once" ? `once ${s.at}` : `cron ${s.cron}${s.timezone ? ` (${s.timezone})` : ""}`;
-}
-
 function taskRow(ctx: Context, task: Task, archived: boolean): { row: TaskRow; errors: Error[] } {
-  const runs = listRuns(ctx.paths, task.id);
-  const stored = runs.items.map((r) => r.run);
-  const state = taskState(task, stored, archived);
-  const resolution = ctx.resolveFor(task);
+  const overview = taskOverview(ctx, task, { archived, nextCount: 1 });
+  const runs = overview.runs.map((r) => r.run); // oldest first
   const weekAgo = ctx.now.getTime() - WEEK_MS;
-  const recent = stored.filter((r) => Date.parse(r.slot) >= weekAgo && Date.parse(r.slot) <= ctx.now.getTime());
-  const last = stored.at(-1);
+  const recent = runs.filter((r) => Date.parse(r.slot) >= weekAgo && Date.parse(r.slot) <= ctx.now.getTime());
+  const count = (...statuses: RunStatus[]) => recent.filter((r) => statuses.includes(r.status)).length;
+  const last = runs.at(-1);
   return {
     row: {
       id: task.id,
       title: task.title,
       cwd: task.cwd,
-      state,
+      state: overview.state,
       schedule: describeSchedule(task),
-      next_run: nextRuns(task, state, resolution, ctx.now, 1)[0] ?? null,
+      next_run: overview.next[0] ?? null,
       last_status: last?.status ?? null,
       last_slot: last?.slot ?? null,
-      failed_7d: recent.filter((r) => r.status === "failed" || r.status === "timed_out").length,
-      missed_7d: recent.filter((r) => r.status === "missed").length,
+      failed_7d: count("failed", "timed_out"),
+      missed_7d: count("missed"),
     },
-    errors: runs.errors,
+    errors: overview.errors,
   };
 }
 
@@ -82,25 +77,21 @@ Options:
   --all              Include finished and archived tasks`,
   run(ctx, args) {
     const { values } = parseCommandArgs(args, { status: { type: "string" }, cwd: { type: "string" }, all: { type: "boolean" } }, { maxPositionals: 0 });
-    let states: readonly TaskState[] = values.all ? TASK_STATES : DEFAULT_STATES;
-    if (values.status !== undefined) {
-      const wanted = values.status.split(",").map((s) => s.trim()).filter(Boolean);
-      const bad = wanted.filter((s) => !(TASK_STATES as readonly string[]).includes(s));
-      if (bad.length > 0 || wanted.length === 0) throw new UsageError(`--status: unknown state "${bad[0] ?? ""}" (states: ${TASK_STATES.join(", ")})`);
-      states = wanted as TaskState[];
-    }
+    const states = values.status !== undefined ? parseEnumList("--status", values.status, TASK_STATES) : values.all ? TASK_STATES : DEFAULT_STATES;
     const cwdFilter = values.cwd === undefined ? undefined : resolvePath(values.cwd, ctx.env, ctx.cwd);
 
     const tasks = listTasks(ctx.paths);
     const archived = states.includes("archived") ? listArchivedTasks(ctx.paths) : { items: [], errors: [] };
     const errors: Error[] = [...tasks.errors, ...archived.errors];
     const rows: TaskRow[] = [];
-    for (const [task, isArchivedTask] of [...tasks.items.map((t) => [t, false] as const), ...archived.items.map((t) => [t, true] as const)]) {
-      if (cwdFilter !== undefined && !isInside(resolvePath(task.cwd, ctx.env, ctx.cwd), cwdFilter)) continue;
-      const { row, errors: runErrors } = taskRow(ctx, task, isArchivedTask);
+    const add = (task: Task, isArchived: boolean) => {
+      if (cwdFilter !== undefined && !isInside(resolvePath(task.cwd, ctx.env, ctx.cwd), cwdFilter)) return;
+      const { row, errors: runErrors } = taskRow(ctx, task, isArchived);
       errors.push(...runErrors);
       if (states.includes(row.state)) rows.push(row);
-    }
+    };
+    for (const task of tasks.items) add(task, false);
+    for (const task of archived.items) add(task, true);
     rows.sort((a, b) => a.id.localeCompare(b.id));
 
     warnCorrupt(ctx, errors);

@@ -139,6 +139,19 @@ describe("add", () => {
     expect(both.code).toBe(2);
   });
 
+  test("an id left with run history by a removed task is taken", async () => {
+    writeRun("weekly-report", "2026-11-09T08:00:00Z", "succeeded");
+    const r = await runCli(["add", "--title", "Weekly report", ...cronFlags, "--json", NOW], home, project);
+    expect(r.json().task.id).toBe("weekly-report-2");
+    expect((await runCli(["add", "--title", "X", "--id", "weekly-report", ...cronFlags, "--json", NOW], home, project)).json().error.code).toBe("conflict");
+  });
+
+  test("a cwd of the wrong type is a validation error, not a crash", async () => {
+    const r = await runWithStdin(["add", "-", "--json", NOW], JSON.stringify({ title: "X", instructions: "x", cwd: 5, schedule: { type: "cron", cron: "0 9 * * *" } }));
+    expect(r.code).toBe(1);
+    expect(r.json().error.details).toEqual(["cwd: must be a non-empty string"]);
+  });
+
   test("unknown fields in the stdin JSON are rejected", async () => {
     const r = await runWithStdin(["add", "-", "--json", NOW], JSON.stringify({ title: "X", instructions: "x", schedule: { type: "cron", cron: "0 9 * * *" }, color: "red" }));
     expect(r.code).toBe(1);
@@ -282,6 +295,17 @@ describe("edit", () => {
     expect(byId.control.missed.length).toBeGreaterThan(300);
   });
 
+  test("moving a finished once task to a new time makes it active again", async () => {
+    home.writeTask(makeTask({ id: "once", schedule: { type: "once", at: "2026-11-10T09:00:00Z" } }));
+    writeRun("once", "2026-11-10T09:00:00Z", "missed", { reason: "runner_offline" });
+    expect((await runCli(["show", "once", "--json", NOW], home)).json().state).toBe("finished");
+    const r = await runCli(["edit", "once", "--at", "2026-11-20T09:00:00Z", "--json", NOW], home);
+    expect(r.json().next_runs).toEqual(["2026-11-20T10:00:00+01:00"]);
+    expect((await runCli(["show", "once", "--json", NOW], home)).json().state).toBe("active");
+    const due = (await runCli(["due", "--json", "--now=2026-11-20T09:01:00Z"], home)).json();
+    expect(due.tasks[0].candidates.map((s: { id: string }) => s.id)).toEqual(["20261120T090000Z"]);
+  });
+
   test("a new cwd must exist", async () => {
     const r = await runCli(["edit", "weekly-report", "--cwd", "/nope/missing", "--json", NOW], home);
     expect(r.json().error.code).toBe("invalid_cwd");
@@ -329,6 +353,13 @@ describe("rm", () => {
     expect(existsSync(join(home.paths.runsDir, "weekly-report", "20261109T080000Z.json"))).toBe(true);
     expect((await runCli(["runs", "weekly-report", "--json", NOW], home)).json().runs).toHaveLength(1);
     expect((await runCli(["rm", "weekly-report", NOW], home)).code).toBe(1);
+  });
+
+  test("warns about occurrences still in progress", async () => {
+    home.writeTask(makeTask());
+    writeRun("weekly-report", "2026-11-16T08:00:00Z", "running");
+    const r = await runCli(["rm", "weekly-report", "--json", NOW], home);
+    expect(r.json().unfinished_runs).toEqual(["weekly-report/20261116T080000Z"]);
   });
 });
 

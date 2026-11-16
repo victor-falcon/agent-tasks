@@ -1,10 +1,11 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { Context } from "./context.ts";
-import { AgentTasksError, NotFoundError, UsageError } from "./errors.ts";
+import { AgentTasksError, UsageError } from "./errors.ts";
+import { parseCount, readFileArg } from "./input.ts";
 import { homeDir, resolvePath, tildify } from "./paths.ts";
-import { isObject, type Schedule, type Task, TASK_FIELDS } from "./schema.ts";
-import { systemTimezone, formatInZone } from "./time.ts";
+import type { Schedule, Task } from "./schema.ts";
+import { TASK_FIELDS } from "./schema.ts";
 
 /**
  * Flags shared by `add` and `edit` to set task fields. With `edit`, an empty
@@ -44,33 +45,9 @@ export const TASK_FLAGS_USAGE = `  --title <text>              Title (the id is 
   --keep-open <mode>          always | on_failure | never
   --agent <command>           Agent command for this task (normally from config)`;
 
-/** Reads all of stdin as text. */
-export async function readStdin(): Promise<string> {
-  return await Bun.stdin.text();
-}
-
-/** Parses JSON read from stdin or a file, as an object. */
-export function parseJsonObject(text: string, what: string): Record<string, unknown> {
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch (err) {
-    throw new AgentTasksError("invalid_json", `${what} is not valid JSON: ${(err as Error).message}`);
-  }
-  if (!isObject(value)) throw new AgentTasksError("invalid_json", `${what} must be a JSON object`);
-  return value;
-}
-
-/** Reads a file argument relative to the command's cwd, or stdin for "-". */
-export async function readFileArg(ctx: Context, path: string): Promise<string> {
-  if (path === "-") return await readStdin();
-  const file = resolvePath(path, ctx.env, ctx.cwd);
-  if (!existsSync(file)) throw new NotFoundError(`file not found: ${file}`);
-  return readFileSync(file, "utf8");
-}
-
 /** Resolves a task folder against the command's cwd, checks it exists and stores it with `~`. */
-export function normalizeTaskCwd(ctx: Context, cwd: string): string {
+export function normalizeTaskCwd(ctx: Context, cwd: unknown): string {
+  if (typeof cwd !== "string" || cwd.trim() === "") throw new AgentTasksError("invalid_cwd", "cwd must be a non-empty string");
   const abs = resolvePath(cwd, ctx.env, ctx.cwd);
   if (!existsSync(abs) || !statSync(abs).isDirectory()) {
     throw new AgentTasksError("invalid_cwd", `cwd does not exist or is not a folder: ${abs}`);
@@ -92,12 +69,8 @@ export function displayPath(ctx: Context, path: string): string {
   return tildify(path, ctx.env);
 }
 
-/** "Now" as an ISO timestamp with offset, in the configured (or system) time zone. */
-export function nowIso(ctx: Context): string {
-  return formatInZone(ctx.now, ctx.config.config.timezone ?? systemTimezone());
-}
-
-function orNull(value: string): string | null {
+/** `--timeout ""` resets a field to the default (null). */
+function emptyToNull(value: string): string | null {
   return value.trim() === "" ? null : value;
 }
 
@@ -113,19 +86,16 @@ export async function applyTaskFlags(ctx: Context, task: Partial<Task>, values: 
   }
 
   if (values.title !== undefined) task.title = values.title;
-  if (values.description !== undefined) task.description = orNull(values.description);
+  if (values.description !== undefined) task.description = emptyToNull(values.description);
   if (values.cwd !== undefined) task.cwd = values.cwd;
   if (values.instructions !== undefined) task.instructions = values.instructions;
   if (values["instructions-file"] !== undefined) task.instructions = (await readFileArg(ctx, values["instructions-file"])).trim();
-  if (values["catch-up"] !== undefined) task.catch_up = orNull(values["catch-up"]) as Task["catch_up"];
-  if (values["max-delay"] !== undefined) task.max_delay = orNull(values["max-delay"]);
-  if (values.timeout !== undefined) task.timeout = orNull(values.timeout);
-  if (values["keep-open"] !== undefined) task.keep_open = orNull(values["keep-open"]) as Task["keep_open"];
-  if (values.agent !== undefined) task.agent = orNull(values.agent);
-  if (values.retries !== undefined) {
-    if (!/^\d+$/.test(values.retries)) throw new UsageError(`--retries must be an integer >= 0 (got "${values.retries}")`);
-    task.retries = Number(values.retries);
-  }
+  if (values["catch-up"] !== undefined) task.catch_up = emptyToNull(values["catch-up"]) as Task["catch_up"];
+  if (values["max-delay"] !== undefined) task.max_delay = emptyToNull(values["max-delay"]);
+  if (values.timeout !== undefined) task.timeout = emptyToNull(values.timeout);
+  if (values["keep-open"] !== undefined) task.keep_open = emptyToNull(values["keep-open"]) as Task["keep_open"];
+  if (values.agent !== undefined) task.agent = emptyToNull(values.agent);
+  if (values.retries !== undefined) task.retries = parseCount("--retries", values.retries, 0);
 
   const previous = task.schedule;
   if (values.at !== undefined) {
@@ -136,13 +106,13 @@ export async function applyTaskFlags(ctx: Context, task: Partial<Task>, values: 
     task.schedule = {
       type: "cron",
       cron: values.cron,
-      timezone: values.timezone !== undefined ? orNull(values.timezone) : (old?.timezone ?? null),
+      timezone: values.timezone !== undefined ? emptyToNull(values.timezone) : (old?.timezone ?? null),
       starts_at: old?.starts_at ?? null,
       until: old?.until ?? null,
     };
   } else if (values.timezone !== undefined) {
     if (previous?.type !== "cron") throw new UsageError("--timezone only applies to --cron schedules");
-    task.schedule = { ...previous, timezone: orNull(values.timezone) } satisfies Schedule;
+    task.schedule = { ...previous, timezone: emptyToNull(values.timezone) } satisfies Schedule;
   }
 }
 
