@@ -1,0 +1,157 @@
+import { existsSync, readFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+import { parseCommandArgs } from "../args.ts";
+import { type Context, output } from "../context.ts";
+import { NotFoundError, UsageError } from "../errors.ts";
+import { parseCount } from "../input.ts";
+import { slotLabel } from "../output/runs-table.ts";
+import { stdoutStyle, type Style } from "../output/style.ts";
+import { statusLabel } from "../output/symbols.ts";
+import { renderTable } from "../output/table.ts";
+import { absoluteTime, clockTimeWithSeconds, formatSpan, sameDay, timeNear } from "../output/time.ts";
+import { tildify } from "../paths.ts";
+import { type Attempt, type Run, type RunEvent, TASK_ID_RE } from "../schema.ts";
+import { parseRunRef, runRef, runSlotId } from "../slot.ts";
+import { isArchived, listRuns, readRun, runLogRelativePath, taskExists } from "../store.ts";
+import { displayTimezone } from "../task-info.ts";
+import type { Command } from "./types.ts";
+
+/** A run ref, or a task id for its latest occurrence. */
+function findRun(ctx: Context, arg: string): Run {
+  if (arg.includes("/")) {
+    const { taskId, slot } = parseRunRef(arg);
+    return readRun(ctx.paths, taskId, slot);
+  }
+  if (!TASK_ID_RE.test(arg)) throw new UsageError(`invalid run ref or task id "${arg}" (expected <task-id> or <task-id>/<slot>)`);
+  const latest = listRuns(ctx.paths, arg).items.at(-1);
+  if (latest) return latest.run;
+  if (taskExists(ctx.paths, arg) || isArchived(ctx.paths, arg)) throw new NotFoundError(`task "${arg}" has no runs yet`);
+  throw new NotFoundError(`task "${arg}" not found (run "agent-tasks list --all" to see every task)`);
+}
+
+interface CapturedLog {
+  attempt: number;
+  path: string;
+  exists: boolean;
+  content: string | null;
+}
+
+/** The attempt's captured output; runs without a recorded path use the default `runs/<task>/<slot>.log`. */
+function capturedLog(ctx: Context, run: Run, attempt: Attempt | undefined): CapturedLog | null {
+  if (!attempt) return null;
+  const relative = attempt.log ?? runLogRelativePath(run.task_id, runSlotId(run));
+  const path = isAbsolute(relative) ? relative : join(ctx.paths.dataDir, relative);
+  const exists = existsSync(path);
+  return { attempt: attempt.n, path, exists, content: exists ? readFileSync(path, "utf8") : null };
+}
+
+/** `key=value` pairs of an object, skipping empty values. */
+function pairs(record: Record<string, unknown>, skip: readonly string[] = []): string {
+  return Object.entries(record)
+    .filter(([k, v]) => !skip.includes(k) && v !== null && v !== undefined && v !== "")
+    .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
+    .join(" ");
+}
+
+function eventTime(at: string, run: Run, tz: string, now: Date): string {
+  const date = new Date(at);
+  return sameDay(date, new Date(run.slot), tz) ? clockTimeWithSeconds(date, tz) : `${absoluteTime(date, tz, now)}:${clockTimeWithSeconds(date, tz).slice(-2)}`;
+}
+
+function renderEvents(run: Run, tz: string, now: Date): string {
+  if (run.events.length === 0) return "Events: none";
+  const rows = run.events.map((e: RunEvent) => [eventTime(e.at, run, tz, now), e.event, pairs(e, ["at", "event"])]);
+  return `Events\n${renderTable(rows, { header: false, indent: "  " })}`;
+}
+
+function agentText(agent: Record<string, unknown> | null): string {
+  if (!agent) return "—";
+  const command = [agent.command, ...(Array.isArray(agent.args) ? agent.args : [])].filter((x) => x !== undefined).join(" ");
+  const shell = agent.shell === true ? " (shell)" : "";
+  const from = typeof agent.from === "string" ? `  ← ${agent.from}` : "";
+  const rest = pairs(agent, ["command", "args", "shell", "from"]);
+  return `${command || "?"}${shell}${rest ? ` ${rest}` : ""}${from}`;
+}
+
+function sessionText(session: Record<string, unknown> | null): string {
+  if (!session) return "—";
+  const launcher = typeof session.launcher === "string" ? session.launcher : "?";
+  const rest = pairs(session, ["launcher"]);
+  return rest ? `${launcher} · ${rest}` : launcher;
+}
+
+function renderAttempt(ctx: Context, style: Style, run: Run, attempt: Attempt, log: CapturedLog | null, tz: string): string {
+  const start = new Date(attempt.started_at);
+  const end = attempt.finished_at ? new Date(attempt.finished_at) : null;
+  const duration = formatSpan((end ?? ctx.now).getTime() - start.getTime());
+  const when = `started ${timeNear(start, new Date(run.slot), tz, ctx.now)} · ${end ? duration : `${duration} so far`}`;
+  const rows = [
+    ["agent", agentText(attempt.agent)],
+    ["launcher", sessionText(attempt.session)],
+    ["summary", attempt.summary ?? "—"],
+    ...(log ? [["log", `${tildify(log.path, ctx.env)}${log.exists ? "" : " (not captured)"}`]] : []),
+  ];
+  return `Attempt ${attempt.n} · ${statusLabel(style, attempt.status)} · ${when}\n${renderTable(rows, { header: false, indent: "  " })}`;
+}
+
+function renderLog(ctx: Context, run: Run, log: CapturedLog | null): string {
+  if (!log) return run.status === "missed" || run.status === "superseded" || run.status === "cancelled" ? "Log: none (it never started)" : "Log: none (no attempt yet)";
+  const where = tildify(log.path, ctx.env);
+  if (log.content === null) return run.status === "running" || run.status === "blocked" ? `Log: not captured yet (still in progress): ${where}` : `Log: none captured (${where})`;
+  if (log.content === "") return `Log (attempt ${log.attempt}): empty (${where})`;
+  return `Log (attempt ${log.attempt}): ${where}\n\n${log.content.trimEnd()}`;
+}
+
+export function renderRunLog(ctx: Context, style: Style, run: Run, attempts: readonly Attempt[], log: CapturedLog | null): string {
+  const tz = displayTimezone(ctx);
+  const ref = runRef(run.task_id, runSlotId(run));
+  const head = `${statusLabel(style, run.status)}  ${style.paint("bold", ref)} · slot ${slotLabel(run, tz, ctx.now)}${run.reason ? ` · reason ${run.reason}` : ""}`;
+  return [
+    head,
+    "",
+    renderEvents(run, tz, ctx.now),
+    "",
+    ...(attempts.length === 0 ? ["Attempts: none"] : attempts.flatMap((a, i) => [...(i > 0 ? [""] : []), renderAttempt(ctx, style, run, a, a.n === log?.attempt ? log : null, tz)])),
+    "",
+    renderLog(ctx, run, log),
+  ]
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+const log: Command = {
+  name: "log",
+  summary: "Show what happened in a run: events, attempts and the captured log",
+  usage: `Usage: agent-tasks log <task-id>/<slot> | <task-id> [--attempt <n>] [--raw]
+
+Shows one occurrence: its events (claimed, launched, state changes,
+warnings), each attempt with its agent, launcher, handle, status and
+summary, and then the log captured from the agent. With a task id instead
+of a run ref, shows the task's latest occurrence. Run refs are listed by
+"agent-tasks runs".
+
+Options:
+  --attempt <n>  Only attempt n (and its log); by default every attempt and the latest log
+  --raw          Only the captured log, to pipe into less or another agent`,
+  run(ctx, args) {
+    const { values, positionals } = parseCommandArgs(args, { attempt: { type: "string" }, raw: { type: "boolean" } }, { minPositionals: 1, maxPositionals: 1 });
+    const run = findRun(ctx, positionals[0]!);
+    const ref = runRef(run.task_id, runSlotId(run));
+    let attempts = run.attempts;
+    if (values.attempt !== undefined) {
+      const n = parseCount("--attempt", values.attempt, 1);
+      attempts = run.attempts.filter((a) => a.n === n);
+      if (attempts.length === 0) throw new NotFoundError(`run "${ref}" has no attempt ${n} (it has ${run.attempts.length})`);
+    }
+    const captured = capturedLog(ctx, run, attempts.at(-1));
+
+    if (values.raw && !ctx.json) {
+      if (captured?.content == null) throw new NotFoundError(`no captured log for ${ref}${captured ? ` (expected at ${captured.path})` : " (it has no attempt)"}`);
+      ctx.stdout.write(captured.content);
+      return;
+    }
+    output(ctx, { ref, run, attempt: captured?.attempt ?? null, log: captured }, () => renderRunLog(ctx, stdoutStyle(ctx), run, attempts, captured));
+  },
+};
+
+export default log;

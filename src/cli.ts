@@ -3,6 +3,7 @@ import { createContext, type Writer } from "./context.ts";
 import { AgentTasksError, UsageError } from "./errors.ts";
 import type { Env } from "./paths.ts";
 import { printHelp } from "./help.ts";
+import { withSchema } from "./output/json.ts";
 import { parseIsoTimestamp } from "./time.ts";
 
 export const EXIT_OK = 0;
@@ -52,7 +53,7 @@ function reportError(err: unknown, json: boolean, stdout: Writer, stderr: Writer
   if (json) {
     const details = known ? err.details : [];
     const summary = known && details.length > 0 ? message.split("\n")[0] : message;
-    stdout.write(`${JSON.stringify({ error: { code, message: summary, details } }, null, 2)}\n`);
+    stdout.write(`${JSON.stringify(withSchema({ error: { code, message: summary, details } }), null, 2)}\n`);
   } else {
     stderr.write(`agent-tasks: ${message}\n${hint ? `${hint}\n` : ""}`);
   }

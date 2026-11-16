@@ -1,5 +1,6 @@
 import type { Command } from "./commands/types.ts";
 import { type LoadedConfig, loadConfig, type Resolution, type ResolvableTask, resolveFor } from "./config.ts";
+import { withSchema } from "./output/json.ts";
 import { buildPaths, type Env, type Paths, resolveConfigLocation, resolveDataDir } from "./paths.ts";
 
 export interface Writer {
@@ -48,9 +49,9 @@ export function createContext(opts: ContextOptions): Context {
   return ctx;
 }
 
-/** Prints `data` as JSON with `--json`, otherwise the human text. */
-export function output(ctx: Context, data: unknown, human: string | (() => string)): void {
-  if (ctx.json) ctx.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
+/** Prints `data` as JSON (with `"schema": 1`) with `--json`, otherwise the human text. */
+export function output(ctx: Pick<Context, "json" | "stdout">, data: object, human: string | (() => string)): void {
+  if (ctx.json) ctx.stdout.write(`${JSON.stringify(withSchema(data), null, 2)}\n`);
   else {
     const text = typeof human === "function" ? human() : human;
     ctx.stdout.write(text.endsWith("\n") ? text : `${text}\n`);

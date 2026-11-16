@@ -1,22 +1,32 @@
 import { parseCommandArgs } from "../args.ts";
-import { output } from "../context.ts";
+import { type Context, output } from "../context.ts";
 import { NotFoundError } from "../errors.ts";
 import { parseCount, parseEnumList } from "../input.ts";
 import { RUN_STATUSES } from "../schema.ts";
-import { isArchived, listRuns, taskExists, taskIdsWithRuns } from "../store.ts";
-import { displayTimezone, parseSince, runView, type RunView, table, warnCorrupt } from "../task-info.ts";
-import { formatInZone } from "../time.ts";
+import { runnerBanner } from "../output/banner.ts";
+import { renderRunsTable } from "../output/runs-table.ts";
+import { stdoutStyle } from "../output/style.ts";
+import { isArchived, listRuns, type StoredRun, taskExists, taskIdsWithRuns } from "../store.ts";
+import { displayTimezone, findTask, parseSince, runView, warnCorrupt } from "../task-info.ts";
 import type { Command } from "./types.ts";
 
 const DEFAULT_LIMIT = 50;
 
-/** Plain aligned table. Kept apart so the phase-2 renderer can replace it. */
-export function renderRuns(runs: readonly RunView[], tz: string): string {
-  if (runs.length === 0) return "No runs.";
-  return table([
-    ["RUN", "SLOT", "TRIGGER", "STATUS", "REASON", "ATTEMPTS", "SUMMARY"],
-    ...runs.map((r) => [r.ref, formatInZone(new Date(r.slot), tz), r.trigger, r.status, r.reason ?? "-", String(r.attempts), r.summary ?? "-"]),
-  ]);
+/** Attempts allowed per task (`retries + 1`), for tasks that still exist. */
+function maxAttemptsLookup(ctx: Context): (taskId: string) => number | undefined {
+  const cache = new Map<string, number | undefined>();
+  return (taskId) => {
+    if (!cache.has(taskId)) {
+      let max: number | undefined;
+      try {
+        max = (findTask(ctx, taskId).task.retries ?? 0) + 1;
+      } catch {
+        max = undefined; // removed or unreadable task: show the plain count
+      }
+      cache.set(taskId, max);
+    }
+    return cache.get(taskId);
+  };
 }
 
 const runs: Command = {
@@ -25,7 +35,9 @@ const runs: Command = {
   usage: `Usage: agent-tasks runs [<id>] [--status <status,…>] [--since <duration|iso>] [--limit <n>]
 
 Lists occurrences of every task (archived ones included) or of one task,
-newest first.
+newest first: slot, status, when the first attempt started, how long the
+latest one took, attempts (used/allowed) and the summary or the reason.
+Pass the RUN column to "agent-tasks log" to see what happened.
 
 Options:
   --status <statuses>  Only these statuses, comma-separated: ${RUN_STATUSES.join(", ")}
@@ -50,23 +62,32 @@ Options:
     } else ids = taskIdsWithRuns(ctx.paths);
 
     const errors: Error[] = [];
-    const views: RunView[] = [];
+    const matching: StoredRun[] = [];
     for (const taskId of ids) {
       const result = listRuns(ctx.paths, taskId);
       errors.push(...result.errors);
       for (const stored of result.items) {
         if (statuses && !statuses.includes(stored.run.status)) continue;
         if (since && Date.parse(stored.run.slot) < since.getTime()) continue;
-        views.push(runView(stored));
+        matching.push(stored);
       }
     }
-    views.sort((a, b) => Date.parse(b.slot) - Date.parse(a.slot) || b.ref.localeCompare(a.ref));
-    const shown = views.slice(0, limit);
+    matching.sort((a, b) => Date.parse(b.run.slot) - Date.parse(a.run.slot) || b.ref.localeCompare(a.ref));
+    const shown = matching.slice(0, limit);
 
+    runnerBanner(ctx);
     warnCorrupt(ctx, errors);
-    output(ctx, { runs: shown, total: views.length, errors: errors.map((e) => e.message) }, () => {
-      const more = views.length > shown.length ? `\n(${views.length - shown.length} more; use --limit <n>)` : "";
-      return renderRuns(shown, displayTimezone(ctx)) + more;
+    output(ctx, { runs: shown.map(runView), total: matching.length, errors: errors.map((e) => e.message) }, () => {
+      if (shown.length === 0) return "No runs.";
+      const tableText = renderRunsTable(shown, {
+        style: stdoutStyle(ctx),
+        timezone: displayTimezone(ctx),
+        now: ctx.now,
+        showRef: true,
+        maxAttempts: maxAttemptsLookup(ctx),
+      });
+      const more = matching.length > shown.length ? `\n(${matching.length - shown.length} more; use --limit <n>)` : "";
+      return `${tableText}${more}\nDetails of a run: agent-tasks log <run>`;
     });
   },
 };
