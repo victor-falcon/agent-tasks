@@ -7,6 +7,7 @@ import { newRun } from "../src/execution.ts";
 import { exec } from "../src/launcher.ts";
 import type { NotifierDeps } from "../src/notifiers/index.ts";
 import { acquireRunnerLock, readRunnerLock, RunnerLockedError, runnerLockPath, runnerLogPath } from "../src/runner-lock.ts";
+import { contextRunnerHealth } from "../src/runner-health.ts";
 import { oscAgentState, oscTitle } from "../src/runner-render.ts";
 import { type RunnerDeps, runRunner } from "../src/runner.ts";
 import type { RunStatus } from "../src/schema.ts";
@@ -115,7 +116,7 @@ describe("the loop", () => {
     const lines = h.output().trim().split("\n");
     expect(lines[0]).toBe("agent-tasks runner · every 5m · launcher: process (claude) · data: ~/data");
     expect(lines.filter((l) => l.includes("tick  0 due · 0 running"))).toHaveLength(3);
-    expect(lines.at(-1)).toBe("● stopped · last tick 09:10:00 · running 0 · today ✓0 ✕0 □0 !0");
+    expect(lines.at(-1)).toBe("● stopped · last tick 09:10:00 · running 0 · today ■0 ✕0 □0 !0");
     expect(existsSync(runnerLockPath(home.paths))).toBe(false);
   });
 
@@ -281,7 +282,7 @@ describe("terminal output", () => {
     const h = harness(home, { tty: true, stopAfter: 4, tick: statusTicks });
     await h.run();
     const out = h.output();
-    expect(out.startsWith("\x1b[1magent-tasks runner\x1b[0m")).toBe(true);
+    expect(out.startsWith("\x1b[1magent-tasks runner\x1b[22m")).toBe(true);
     expect(out).toContain(oscTitle("agent-tasks runner"));
     const states = [...out.matchAll(/\x1b\]7501;state=(\w+):app=agent-tasks\x07/g)].map((m) => m[1]);
     expect(states).toEqual(["idle", "working", "idle"]);
@@ -331,7 +332,7 @@ describe("terminal output", () => {
         "agent-tasks runner · every 5m · launcher: process (claude) · data: ~/data",
         "09:00:00  tick  1 due · 0 running",
         "09:00:00  ▶ demo/20261117T080000Z                launched in 4242",
-        "● stopped · last tick 09:00:00 · running 0 · today ✓0 ✕0 □0 !0",
+        "● stopped · last tick 09:00:00 · running 0 · today ■0 ✕0 □0 !0",
         "",
       ].join("\n"),
     );
@@ -347,7 +348,7 @@ describe("terminal output", () => {
     ];
     const h = harness(home, { tick: (ctx) => ({ ...emptyTick(ctx), events }) });
     await h.run({ once: true });
-    expect(h.output()).toContain("today ✓1 ✕2 □1 !1");
+    expect(h.output()).toContain("today ■1 ✕2 □1 !1");
   });
 });
 
@@ -437,6 +438,18 @@ describe("agent-tasks runner status", () => {
   });
 });
 
+describe("runner health (the banner of other commands)", () => {
+  test("uses the live runner's --every from the lock, else runner.every from the config", () => {
+    home.writeConfig({ timezone: "UTC", notifiers: [], runner: { every: "5m" } });
+    appendTick(home.paths, { at: "2026-11-17T09:00:00Z", mode: "runner" });
+    const ctx = createContext({ now: new Date("2026-11-17T09:20:00Z"), json: false, env: home.env, cwd: home.root, stdout: { write() {} }, stderr: { write() {} }, commands });
+    expect(contextRunnerHealth(ctx)).toMatchObject({ state: "stale", every: "5m" });
+    mkdirSync(home.paths.stateDir, { recursive: true });
+    writeFileSync(runnerLockPath(home.paths), JSON.stringify({ pid: process.pid, terminal: null, started_at: "2026-11-17T08:00:00Z", every: "15m" }));
+    expect(contextRunnerHealth(ctx)).toMatchObject({ state: "healthy", every: "15m", next_tick: "2026-11-17T09:15:00Z" });
+  });
+});
+
 describe("runner command", () => {
   test("rejects a bad --every", async () => {
     const r = await runCli(["runner", "--every", "soon", "--once"], home);
@@ -475,9 +488,9 @@ describe("integration: runner --once with the process preset", () => {
     await waitFor(() => ex.run(DEMO_REF).attempts[0]?.finished_at, "finish");
     const second = await ex.cli("runner", "--once", "--now", at(6));
     expect(second.code).toBe(0);
-    expect(second.stdout).toMatch(new RegExp(`✓ ${DEMO_REF} +succeeded in \\d+s · "did it \\(attempt 1\\)"`));
-    expect(second.stdout).toContain("today ✓1 ✕0 □0 !0");
-    expect(readFileSync(runnerLogPath(ex.paths), "utf8")).toContain(`✓ ${DEMO_REF}`);
+    expect(second.stdout).toMatch(new RegExp(`■ ${DEMO_REF} +succeeded in \\S+ · "did it \\(attempt 1\\)"`));
+    expect(second.stdout).toContain("today ■1 ✕0 □0 !0");
+    expect(readFileSync(runnerLogPath(ex.paths), "utf8")).toContain(`■ ${DEMO_REF}`);
   });
 });
 

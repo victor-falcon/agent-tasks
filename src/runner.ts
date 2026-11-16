@@ -20,11 +20,11 @@ import {
   type RunnerEvent,
   type RunnerLine,
   type StatusInfo,
-  type Style,
   type TodayCounts,
-  useColor,
 } from "./runner-render.ts";
-import { listRuns, listTasks, readRunByRef, readTicks, taskIdsWithRuns } from "./store.ts";
+import { colorEnabled, createStyle, type Style } from "./output/style.ts";
+import { lastTick } from "./runner-health.ts";
+import { listRuns, listTasks, readRunByRef, taskIdsWithRuns } from "./store.ts";
 import { tick, type TickResult } from "./tick.ts";
 import { formatInZone, systemTimezone } from "./time.ts";
 
@@ -104,7 +104,7 @@ class RunnerOutput {
   readonly style: Style;
   private statusShown = false;
   private agentState: AgentState | null = null;
-  private readonly plainStyle: Style = { color: false };
+  private readonly plainStyle: Style = createStyle(false);
 
   constructor(
     private readonly stdout: RunnerStdout,
@@ -114,7 +114,7 @@ class RunnerOutput {
     private readonly mode: { json: boolean; quiet: boolean },
   ) {
     this.tty = stdout.isTTY === true && !mode.json;
-    this.style = { color: useColor(this.tty, env) };
+    this.style = createStyle(this.tty && colorEnabled(stdout, env));
   }
 
   private write(text: string): void {
@@ -276,7 +276,7 @@ class Runner {
   async run(): Promise<number> {
     const { startedAt } = this;
     // Read before the first tick appends its heartbeat.
-    const previousTick = readTicks(this.paths).items.at(-1);
+    const previousTick = lastTick(this.paths);
     this.out = new RunnerOutput(this.deps.stdout, runnerLogPath(this.paths), this.timezone, this.base.env, { json: this.base.json, quiet: this.opts.quiet });
     this.notifierDeps = this.deps.notifierDeps ?? defaultNotifierDeps(this.base.env);
     const setup = describeSetup(this.base);

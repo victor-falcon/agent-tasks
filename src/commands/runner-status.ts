@@ -1,15 +1,16 @@
 import { parseCommandArgs } from "../args.ts";
 import { output } from "../context.ts";
 import { formatDuration, parseDuration } from "../duration.ts";
+import { formatSpan } from "../output/time.ts";
 import { pidAlive, readRunnerLock, runnerLockPath } from "../runner-lock.ts";
-import { readTicks } from "../store.ts";
+import { lastTick as readLastTick } from "../runner-health.ts";
 import type { Command } from "./types.ts";
 
 /** A heartbeat older than this many intervals means the runner is stuck. */
 const STALLED_INTERVALS = 3;
 
 function ago(ms: number): string {
-  return ms < 1000 ? "just now" : `${formatDuration(ms)} ago`;
+  return ms < 60_000 ? "just now" : `${formatSpan(ms)} ago`;
 }
 
 const runnerStatus: Command = {
@@ -24,7 +25,7 @@ last and next tick. Exits with 1 when no runner is running.`,
     parseCommandArgs(args, {}, { maxPositionals: 0 });
     const lock = readRunnerLock(ctx.paths);
     const alive = lock ? pidAlive(lock.pid) : false;
-    const lastTick = readTicks(ctx.paths).items.at(-1) ?? null;
+    const lastTick = readLastTick(ctx.paths);
     const nowMs = ctx.now.getTime();
     const sinceLast = lastTick ? nowMs - Date.parse(lastTick.at) : null;
     let everyMs: number | null = null;
@@ -59,7 +60,7 @@ last and next tick. Exits with 1 when no runner is running.`,
         `● Runner running: pid ${lock!.pid}${lock!.terminal ? ` in terminal ${lock!.terminal}` : ""}, since ${lock!.started_at}, every ${lock!.every}`,
         `  ${last}${data.next_tick_at ? ` · next tick ${data.next_tick_at}` : ""}`,
       ];
-      if (stalled) lines.push(`⚠ No heartbeat for ${formatDuration(sinceLast!)}: the runner may be stuck in a tick.`);
+      if (stalled) lines.push(`⚠ No heartbeat for ${formatSpan(sinceLast!)}: the runner may be stuck in a tick.`);
       return lines.join("\n");
     });
     return alive ? 0 : 1;

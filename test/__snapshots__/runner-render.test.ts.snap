@@ -2,45 +2,45 @@
 
 exports[`event lines launched, plain and colored 1`] = `"10:05:01  ▶ sentry-summary/20261117T090000Z      launched in t45"`;
 
-exports[`event lines launched, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[0m  \x1B[36m▶\x1B[0m sentry-summary/20261117T090000Z      launched in t45"`;
+exports[`event lines launched, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[22m  \x1B[36m▶\x1B[39m sentry-summary/20261117T090000Z      launched in t45"`;
 
-exports[`event lines succeeded, plain and colored 1`] = `"10:05:01  ✓ sentry-summary/20261117T090000Z      succeeded in 6m · "3 new issues in notes/sentry.md""`;
+exports[`event lines succeeded, plain and colored 1`] = `"10:05:01  ■ sentry-summary/20261117T090000Z      succeeded in 6m · "3 new issues in notes/sentry.md""`;
 
-exports[`event lines succeeded, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[0m  \x1B[32m✓\x1B[0m sentry-summary/20261117T090000Z      succeeded in 6m · "3 new issues in notes/sentry.md""`;
+exports[`event lines succeeded, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[22m  \x1B[32m■\x1B[39m sentry-summary/20261117T090000Z      succeeded in 6m · "3 new issues in notes/sentry.md""`;
 
-exports[`event lines failed, plain and colored 1`] = `"10:05:01  ✕ backup-notes/20261117T091500Z        failed (exited_without_report) in 1m30s (attempt 2) · the session ended without calling finish · agent-tasks log backup-notes/20261117T091500Z"`;
+exports[`event lines failed, plain and colored 1`] = `"10:05:01  ✕ backup-notes/20261117T091500Z        failed (exited_without_report) in 1m (attempt 2) · the session ended without calling finish · agent-tasks log backup-notes/20261117T091500Z"`;
 
-exports[`event lines failed, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[0m  \x1B[31m✕\x1B[0m backup-notes/20261117T091500Z        failed (exited_without_report) in 1m30s (attempt 2) · the session ended without calling finish · agent-tasks log backup-notes/20261117T091500Z"`;
+exports[`event lines failed, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[22m  \x1B[31m✕\x1B[39m backup-notes/20261117T091500Z        failed (exited_without_report) in 1m (attempt 2) · the session ended without calling finish · agent-tasks log backup-notes/20261117T091500Z"`;
 
 exports[`event lines timed_out, plain and colored 1`] = `"10:05:01  ✕ backup-notes/20261117T091500Z        timed out · ran longer than the 45m timeout · agent-tasks log backup-notes/20261117T091500Z"`;
 
-exports[`event lines timed_out, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[0m  \x1B[31m✕\x1B[0m backup-notes/20261117T091500Z        timed out · ran longer than the 45m timeout · agent-tasks log backup-notes/20261117T091500Z"`;
+exports[`event lines timed_out, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[22m  \x1B[31m✕\x1B[39m backup-notes/20261117T091500Z        timed out · ran longer than the 45m timeout · agent-tasks log backup-notes/20261117T091500Z"`;
 
 exports[`event lines missed, plain and colored 1`] = `"10:05:01  □ weekly-deps/20261117T080000Z         missed (runner_offline)"`;
 
-exports[`event lines missed, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[0m  \x1B[35m□\x1B[0m weekly-deps/20261117T080000Z         missed (runner_offline)"`;
+exports[`event lines missed, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[22m  \x1B[33m□\x1B[39m weekly-deps/20261117T080000Z         missed (runner_offline)"`;
 
-exports[`event lines superseded, plain and colored 1`] = `"10:05:01  · weekly-deps/20261117T070000Z         superseded"`;
+exports[`event lines superseded, plain and colored 1`] = `"10:05:01  - weekly-deps/20261117T070000Z         superseded"`;
 
-exports[`event lines superseded, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[0m  \x1B[2m·\x1B[0m weekly-deps/20261117T070000Z         superseded"`;
+exports[`event lines superseded, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[22m  \x1B[2m-\x1B[22m weekly-deps/20261117T070000Z         superseded"`;
 
-exports[`event lines cancelled, plain and colored 1`] = `"10:05:01  · weekly-deps/20261117T060000Z         cancelled (until_passed)"`;
+exports[`event lines cancelled, plain and colored 1`] = `"10:05:01  - weekly-deps/20261117T060000Z         cancelled (until_passed)"`;
 
-exports[`event lines cancelled, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[0m  \x1B[2m·\x1B[0m weekly-deps/20261117T060000Z         cancelled (until_passed)"`;
+exports[`event lines cancelled, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[22m  \x1B[2m-\x1B[22m weekly-deps/20261117T060000Z         cancelled (until_passed)"`;
 
 exports[`event lines blocked, plain and colored 1`] = `"10:05:01  ! review-pr-123/20261117T100000Z       blocked · agent-tasks attach review-pr-123/20261117T100000Z"`;
 
-exports[`event lines blocked, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[0m  \x1B[33m!\x1B[0m review-pr-123/20261117T100000Z       blocked · agent-tasks attach review-pr-123/20261117T100000Z"`;
+exports[`event lines blocked, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[22m  \x1B[35m!\x1B[39m review-pr-123/20261117T100000Z       blocked · agent-tasks attach review-pr-123/20261117T100000Z"`;
 
 exports[`event lines anomaly, plain and colored 1`] = `"10:05:01  ⚠ broken                               watching task broken: invalid JSON"`;
 
-exports[`event lines anomaly, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[0m  \x1B[33m⚠\x1B[0m broken                               watching task broken: invalid JSON"`;
+exports[`event lines anomaly, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[22m  \x1B[33m⚠\x1B[39m broken                               watching task broken: invalid JSON"`;
 
-exports[`event lines tick, recovered and warning lines 1`] = `"\x1B[2m10:05:01\x1B[0m  \x1B[33m⚠\x1B[0m tick failed: boom"`;
+exports[`header and status line header 1`] = `"\x1B[1magent-tasks runner\x1B[22m · every 5m · launcher: herdr (clc) · data: ~/.local/share/agent-tasks"`;
 
-exports[`header and status line header 1`] = `"\x1B[1magent-tasks runner\x1B[0m · every 5m · launcher: herdr (clc) · data: ~/.local/share/agent-tasks"`;
+exports[`event lines tick, recovered and warning lines 1`] = `"\x1B[2m10:05:01\x1B[22m  \x1B[33m⚠\x1B[39m tick failed: boom"`;
 
 exports[`header and status line status line in every health 1`] = `
-"\x1B[2m─────────────────────────────────────────────────────────────────────────────\x1B[0m
-\x1B[32m●\x1B[0m healthy · last tick 10:25:01 · next 10:30:01 · running 1 · today \x1B[32m✓4\x1B[0m \x1B[31m✕1\x1B[0m \x1B[35m□1\x1B[0m \x1B[33m!1\x1B[0m"
+"\x1B[2m─────────────────────────────────────────────────────────────────────────────\x1B[22m
+\x1B[32m●\x1B[39m healthy · last tick 10:25:01 · next 10:30:01 · running 1 · today \x1B[32m■4\x1B[39m \x1B[31m✕1\x1B[39m \x1B[33m□1\x1B[39m \x1B[35m!1\x1B[39m"
 `;

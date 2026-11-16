@@ -1,33 +1,11 @@
-import { formatDuration } from "./duration.ts";
 import type { ExecEvent } from "./execution.ts";
-import { formatInZone } from "./time.ts";
+import type { Color, Style } from "./output/style.ts";
+import { type Mark, RUN_MARKS } from "./output/symbols.ts";
+import { clockTimeWithSeconds as clockTime, formatSpan } from "./output/time.ts";
 
 // What the runner prints: the header, one line per event, the status line,
 // and the terminal escapes Herdr reads (OSC 2 title, OSC 7501 agent state).
-// Kept apart from the loop so it can later be aligned with the shared output
-// module.
-
-export interface Style {
-  color: boolean;
-}
-
-const CODES = { red: 31, green: 32, yellow: 33, blue: 34, magenta: 35, cyan: 36, dim: 2, bold: 1 } as const;
-export type Color = keyof typeof CODES;
-
-export function paint(style: Style, color: Color, text: string): string {
-  return style.color ? `\x1b[${CODES[color]}m${text}\x1b[0m` : text;
-}
-
-/** Colors only for a terminal, and never with NO_COLOR set to a non-empty value (https://no-color.org). */
-export function useColor(isTTY: boolean, env: Record<string, string | undefined>): boolean {
-  return isTTY && !env.NO_COLOR;
-}
-
-/** `HH:MM:SS` of an instant in a time zone. */
-export function clockTime(at: Date | string, timezone: string): string {
-  const date = typeof at === "string" ? new Date(at) : at;
-  return formatInZone(date, timezone).slice(11, 19);
-}
+// Colors, run marks and times come from the shared output module.
 
 // ---------------------------------------------------------------------------
 // Lines
@@ -44,15 +22,16 @@ export type RunnerLine =
   | { kind: "recovered"; at: Date; last_tick: Date; gap_ms: number }
   | { kind: "warning"; at: Date; message: string };
 
-const SYMBOLS: Record<ExecEvent["type"], { symbol: string; color: Color }> = {
+/** Run outcomes use the same marks as `list`, `show` and `runs`; launches and anomalies have their own. */
+const SYMBOLS: Record<ExecEvent["type"], { symbol: string; color?: Color }> = {
   launched: { symbol: "▶", color: "cyan" },
-  succeeded: { symbol: "✓", color: "green" },
-  failed: { symbol: "✕", color: "red" },
-  timed_out: { symbol: "✕", color: "red" },
-  missed: { symbol: "□", color: "magenta" },
-  superseded: { symbol: "·", color: "dim" },
-  cancelled: { symbol: "·", color: "dim" },
-  blocked: { symbol: "!", color: "yellow" },
+  succeeded: RUN_MARKS.succeeded,
+  failed: RUN_MARKS.failed,
+  timed_out: RUN_MARKS.timed_out,
+  missed: RUN_MARKS.missed,
+  superseded: RUN_MARKS.superseded,
+  cancelled: RUN_MARKS.cancelled,
+  blocked: RUN_MARKS.blocked,
   anomaly: { symbol: "⚠", color: "yellow" },
 };
 
@@ -61,7 +40,7 @@ const REF_WIDTH = 36;
 
 function eventDetail(e: RunnerEvent): string {
   const attempt = e.attempt && e.attempt > 1 ? ` (attempt ${e.attempt})` : "";
-  const took = e.duration_ms != null ? ` in ${formatDuration(e.duration_ms)}` : "";
+  const took = e.duration_ms != null ? ` in ${formatSpan(e.duration_ms)}` : "";
   const reason = e.reason ? ` (${e.reason})` : "";
   const quoted = e.message ? ` · "${e.message}"` : "";
   const ref = e.run_ref ?? e.task_id;
@@ -85,20 +64,20 @@ function eventDetail(e: RunnerEvent): string {
 }
 
 export function formatLine(line: RunnerLine, timezone: string, style: Style): string {
-  const time = paint(style, "dim", clockTime(line.at, timezone));
+  const time = style.paint("dim", clockTime(line.at, timezone));
   switch (line.kind) {
     case "tick":
-      return `${time}  ${paint(style, "dim", `tick  ${line.due} due · ${line.running} running`)}`;
+      return `${time}  ${style.paint("dim", `tick  ${line.due} due · ${line.running} running`)}`;
     case "event": {
       const { symbol, color } = SYMBOLS[line.event.type];
       const ref = line.event.run_ref ?? line.event.task_id ?? "";
       const head = ref ? `${ref.padEnd(REF_WIDTH)} ` : "";
-      return `${time}  ${paint(style, color, symbol)} ${head}${eventDetail(line.event)}`;
+      return `${time}  ${style.paint(color, symbol)} ${head}${eventDetail(line.event)}`;
     }
     case "recovered":
-      return `${time}  ${paint(style, "yellow", "↻")} runner recovered after ${formatDuration(line.gap_ms)} without ticks (last tick ${clockTime(line.last_tick, timezone)})`;
+      return `${time}  ${style.paint("yellow", "↻")} runner recovered after ${formatSpan(line.gap_ms)} without ticks (last tick ${clockTime(line.last_tick, timezone)})`;
     case "warning":
-      return `${time}  ${paint(style, "yellow", "⚠")} ${line.message}`;
+      return `${time}  ${style.paint("yellow", "⚠")} ${line.message}`;
   }
 }
 
@@ -110,7 +89,7 @@ export interface HeaderInfo {
 }
 
 export function formatHeader(info: HeaderInfo, style: Style): string {
-  return `${paint(style, "bold", "agent-tasks runner")} · every ${info.every} · launcher: ${info.launcher} (${info.agent}) · data: ${info.dataDir}`;
+  return `${style.paint("bold", "agent-tasks runner")} · every ${info.every} · launcher: ${info.launcher} (${info.agent}) · data: ${info.dataDir}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,12 +121,18 @@ const HEALTH: Record<StatusInfo["health"], { text: string; color: Color }> = {
 export function formatStatus(info: StatusInfo, timezone: string, style: Style): string {
   const health = HEALTH[info.health];
   const t = info.today;
+  const counts: [Mark, number][] = [
+    [RUN_MARKS.succeeded, t.succeeded],
+    [RUN_MARKS.failed, t.failed],
+    [RUN_MARKS.missed, t.missed],
+    [RUN_MARKS.blocked, t.blocked],
+  ];
   const parts = [
-    `${paint(style, health.color, "●")} ${health.text}`,
+    `${style.paint(health.color, "●")} ${health.text}`,
     `last tick ${info.last_tick ? clockTime(info.last_tick, timezone) : "never"}`,
     ...(info.next_tick ? [`next ${clockTime(info.next_tick, timezone)}`] : []),
     `running ${info.running}`,
-    `today ${paint(style, "green", `✓${t.succeeded}`)} ${paint(style, "red", `✕${t.failed}`)} ${paint(style, "magenta", `□${t.missed}`)} ${paint(style, "yellow", `!${t.blocked}`)}`,
+    `today ${counts.map(([mark, n]) => style.paint(mark.color, `${mark.symbol}${n}`)).join(" ")}`,
   ];
   return parts.join(" · ");
 }
@@ -164,7 +149,7 @@ export const CLEAR_STATUS = "\r\x1b[2K\x1b[1A\r\x1b[2K";
  */
 export function formatStatusBlock(info: StatusInfo, timezone: string, style: Style, width?: number): string {
   const rule = width ? RULE.slice(0, Math.max(1, width - 1)) : RULE;
-  return `${paint(style, "dim", rule)}\n${formatStatus(info, timezone, style)}`;
+  return `${style.paint("dim", rule)}\n${formatStatus(info, timezone, style)}`;
 }
 
 // ---------------------------------------------------------------------------

@@ -10,13 +10,13 @@ import {
   type RunnerEvent,
   type RunnerLine,
   type StatusInfo,
-  useColor,
 } from "../src/runner-render.ts";
+import { colorEnabled, createStyle } from "../src/output/style.ts";
 
 const TZ = "Europe/Madrid";
 const AT = new Date("2026-11-17T09:05:01Z");
-const plain = { color: false };
-const color = { color: true };
+const plain = createStyle(false);
+const color = createStyle(true);
 
 const EVENTS: Record<ExecEventType, RunnerEvent> = {
   launched: { type: "launched", run_ref: "sentry-summary/20261117T090000Z", task_id: "sentry-summary", attempt: 1, handle: "t45" },
@@ -56,7 +56,7 @@ describe("event lines", () => {
   test("tick, recovered and warning lines", () => {
     expect(formatLine({ kind: "tick", at: AT, due: 1, running: 0 }, TZ, plain)).toBe("10:05:01  tick  1 due · 0 running");
     expect(formatLine({ kind: "recovered", at: AT, last_tick: new Date("2026-11-17T07:00:00Z"), gap_ms: 2 * 3_600_000 + 5 * 60_000 + 1000 }, TZ, plain)).toBe(
-      "10:05:01  ↻ runner recovered after 2h5m1s without ticks (last tick 08:00:00)",
+      "10:05:01  ↻ runner recovered after 2h05m without ticks (last tick 08:00:00)",
     );
     expect(formatLine({ kind: "warning", at: AT, message: "tick failed: boom" }, TZ, plain)).toBe("10:05:01  ⚠ tick failed: boom");
     expect(formatLine({ kind: "warning", at: AT, message: "tick failed: boom" }, TZ, color)).toMatchSnapshot();
@@ -71,19 +71,20 @@ describe("header and status line", () => {
   });
 
   test("status line in every health", () => {
-    expect(formatStatus(STATUS, TZ, plain)).toBe("● healthy · last tick 10:25:01 · next 10:30:01 · running 1 · today ✓4 ✕1 □1 !1");
+    expect(formatStatus(STATUS, TZ, plain)).toBe("● healthy · last tick 10:25:01 · next 10:30:01 · running 1 · today ■4 ✕1 □1 !1");
     expect(formatStatus({ ...STATUS, health: "degraded" }, TZ, plain)).toStartWith("● degraded");
     expect(formatStatus({ ...STATUS, health: "tick_failed" }, TZ, plain)).toStartWith("● last tick failed");
-    expect(formatStatus({ ...STATUS, health: "stopped", next_tick: null }, TZ, plain)).toBe("● stopped · last tick 10:25:01 · running 1 · today ✓4 ✕1 □1 !1");
+    expect(formatStatus({ ...STATUS, health: "stopped", next_tick: null }, TZ, plain)).toBe("● stopped · last tick 10:25:01 · running 1 · today ■4 ✕1 □1 !1");
     expect(formatStatus({ ...STATUS, last_tick: null }, TZ, plain)).toContain("last tick never");
     expect(formatStatusBlock(STATUS, TZ, color)).toMatchSnapshot();
   });
 
   test("colors only on a terminal and without NO_COLOR", () => {
-    expect(useColor(true, {})).toBe(true);
-    expect(useColor(false, {})).toBe(false);
-    expect(useColor(true, { NO_COLOR: "1" })).toBe(false);
-    expect(useColor(true, { NO_COLOR: "" })).toBe(true);
+    const tty = { write() {}, isTTY: true };
+    expect(colorEnabled(tty, {})).toBe(true);
+    expect(colorEnabled({ write() {} }, {})).toBe(false);
+    expect(colorEnabled(tty, { NO_COLOR: "1" })).toBe(false);
+    expect(colorEnabled(tty, { NO_COLOR: "" })).toBe(true);
   });
 });
 
