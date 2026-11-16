@@ -1,0 +1,22 @@
+{
+  "description": "Each run in its own tmux window, named after the session, in the runner's tmux session (or in a detached \"agent-tasks\" session when the runner is not inside tmux). Starts an interactive shell and types the agent command into it, so shell aliases work; the shell exits with the agent. tmux knows nothing about agents: status only tells whether the window is still there (working) or gone or dead (exited), so blocked runs are not detected.",
+  "launch": [
+    "/bin/sh", "-c",
+    "name=$1 cwd=$2; shift 2; if [ -n \"$TMUX\" ]; then exec tmux new-window -d -P -F '#{window_id}' -t \"$(tmux display -p '#S'):\" -n \"$name\" -c \"$cwd\" -- \"$@\"; elif tmux has-session -t '=agent-tasks' 2>/dev/null; then exec tmux new-window -d -P -F '#{window_id}' -t '=agent-tasks:' -n \"$name\" -c \"$cwd\" -- \"$@\"; else exec tmux new-session -d -P -F '#{window_id}' -s agent-tasks -n \"$name\" -c \"$cwd\" -- \"$@\"; fi",
+    "agent-tasks-tmux", "{{session_name}}", "{{cwd}}",
+    "/usr/bin/env", "PATH={{path}}", "{{env_argv}}", "{{shell}}", "-i"
+  ],
+  "then": [
+    ["tmux", "send-keys", "-t", "{{handle}}", "-l", " {{agent}} {{prompt_quoted}}; exit"],
+    ["tmux", "send-keys", "-t", "{{handle}}", "Enter"]
+  ],
+  "close": ["tmux", "kill-window", "-t", "{{handle}}"],
+  "status": ["tmux", "list-panes", "-t", "{{handle}}", "-F", "#{pane_dead}"],
+  "status_map": { "0": "working", "1": "exited" },
+  "read": ["tmux", "capture-pane", "-p", "-J", "-S", "-200", "-t", "{{handle}}"],
+  "attach": [
+    "/bin/sh", "-c",
+    "tmux select-window -t \"$1\" || exit; if [ -n \"$TMUX\" ]; then exec tmux switch-client -t \"$1\"; else exec tmux attach-session -t \"$1\"; fi",
+    "agent-tasks-tmux", "{{handle}}"
+  ]
+}

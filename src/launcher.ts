@@ -29,7 +29,7 @@ export interface LauncherSpec {
   then: CommandSpec[];
   /** Spawn `launch` as a child process with its output in the run's log; the handle is its pid. */
   background: boolean;
-  /** How to get the handle from `launch`'s stdout: `json:.path`, `regex:<pattern>` or null (trimmed stdout). */
+  /** How to get the handle from `launch`'s stdout: `json:.path` (`.a.0` indexes arrays), `regex:<pattern>` or null (trimmed stdout). */
   handle: string | null;
   close: CommandSpec | null;
   status: CommandSpec | null;
@@ -222,6 +222,7 @@ export function sessionVars(input: SessionInput): Vars {
       runner_space: terminal ? once(() => runnerSpace(env, terminal)) : undefined,
       new_tab_id: once(() => `tb${randomBytes(16).toString("hex")}`),
     },
+    env,
     missing: {
       handle: "the session has no handle yet (only known after launch)",
       path: "$PATH is not set",
@@ -312,7 +313,9 @@ export function extractHandle(rule: string | null, stdout: string): string {
     } catch {
       throw new LauncherError(`launch did not print JSON (handle is "${rule}"): ${stdout.trim().slice(0, 200)}`);
     }
-    for (const key of rule.slice("json:.".length).split(".")) value = isObject(value) ? value[key] : undefined;
+    for (const key of rule.slice("json:.".length).split(".")) {
+      value = Array.isArray(value) && /^\d+$/.test(key) ? value[Number(key)] : isObject(value) ? value[key] : undefined;
+    }
     if (typeof value !== "string" && typeof value !== "number") throw new LauncherError(`launch output has no "${rule.slice(5)}" for the handle`);
     return String(value);
   }

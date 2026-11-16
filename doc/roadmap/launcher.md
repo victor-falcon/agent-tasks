@@ -59,7 +59,10 @@ Variables: `{{run_ref}}`, `{{task_id}}`, `{{title}}`, `{{cwd}}`,
 `clc`), `{{handle}}`, `{{shell}}`, `{{path}}` (the runner's `PATH`), and the
 runner's own: `{{runner_terminal}}` (`$HC_TERMINAL_ID`), `{{runner_space}}`
 (its `herdr.space` label) and `{{new_tab_id}}` (`tb` + 32 random hex chars, one
-per launch).
+per launch). `{{env.NAME}}` is any variable of the environment the command
+runs in (e.g. `{{env.REX_SESSION}}`); an unset one is an error, not an empty
+string. Add `_quoted` to any variable for a shell-quoted value. A `json:` handle
+path indexes arrays with numbers (`json:.block_ids.0`).
 
 ### `herdr` preset (verified in Herdr on 2026-11-16)
 
@@ -127,8 +130,47 @@ What was verified, with test terminals in the "Agent Tasks" space:
 | Preset | How |
 |---|---|
 | `process` | Child process of the runner with output to a file. No agent `status`: only `exited`. For tests and machines without a multiplexer. |
-| `rex` | `rex` CLI. The `multiplexer.sh` helper of the `delegate` skill (Herdr and Rex) serves as a reference. |
-| `tmux` | `tmux new-window`, `capture-pane`, `kill-window`. When someone asks for it. |
+| `tmux` | Each run in its own tmux window (tested against a real tmux). |
+| `rex` | Each run in its own Rex window. **Untested against a real Rex.** |
+
+**`tmux`.** The window goes into the runner's tmux session when the runner
+runs inside tmux (`$TMUX` set; `tmux display -p '#S'`), otherwise into a
+detached `agent-tasks` session, created on the first launch (`tmux attach -t
+agent-tasks` to look at it). It is named `{{session_name}}` and starts in
+`{{cwd}}`. Like `herdr`, it starts an interactive `{{shell}} -i` (through
+`/usr/bin/env PATH=…`, because the tmux server keeps the environment it was
+started with) and types ` {{agent}} {{prompt_quoted}}; exit` + Enter with
+`send-keys`, so aliases work and the window closes with the agent. The handle
+is the window id (`@12`). `close` is `kill-window`, `read` is
+`capture-pane -p -J -S -200`, `attach` is `select-window` plus `switch-client`
+(inside tmux) or `attach-session`. Limits:
+
+- **tmux has no agent status.** `status` (`list-panes -F '#{pane_dead}'`)
+  only says whether the window is there: `working` while it lives, `exited`
+  for a dead pane (with `remain-on-exit`), `gone` once the window closed. So a
+  `blocked` agent is not detected; only the `timeout` catches it.
+- The launch step is a small `/bin/sh -c` script (pick the session, create it
+  if missing); the other commands are plain argv. To use another tmux server,
+  override the commands (e.g. add `-L <socket>`), or put a `tmux` wrapper first
+  on the runner's `PATH`, which is what the real-tmux test does.
+
+**`rex`.** Written from the `rex` CLI calls of the `delegate` skill's
+`multiplexer.sh`, which work, but **never run against a real Rex**: treat it
+as a starting point and expect to fix flags. Each run gets a window in the
+runner's session (`rex window new -s {{env.REX_SESSION}} {{session_name}} -c
+{{cwd}} --focus=false --json -- /usr/bin/env PATH=… {{shell}} -i`); the handle is
+the new block (`json:.block_ids.0`). The agent command is typed with
+`rex send … -b <block>` + `rex send-key … enter`, with `; exit` as in the other
+presets. `status` checks the block exists (`rex block inspect`) and maps
+`rex block call … program_status` (`.records[0].state`: `working`, `blocked`,
+`idle`/`done`/`error` → `idle`, nothing reported → `working`). `read` is
+`rex capture --trim --unwrap` (visible screen only). `close` and `attach` find
+the block's window with `rex block inspect` and run `rex window close` /
+`rex focus`. Limits: needs `rex` and `jq` on the runner's `PATH`
+(`$REX_BIN_DIR` is not used), and `$REX_SESSION` in every process that runs
+launcher commands; that holds for the runner and for the agent's `finish`,
+which run in the same session, but not for `agent-tasks session …` typed in
+another Rex session or outside Rex.
 
 A preset can be used as is, partially overridden
 (`{ "preset": "herdr", "close": [...] }`) or not used at all, defining every
@@ -153,4 +195,4 @@ command by hand, which is the way to go for Orca or any other environment.
 | L4 | `agent-tasks task <run_ref>` and `finish` with `close` and `--output-file` | the agent does not need to know anything about Herdr to close itself |
 | L5 | Global `run-agent-task` skill | an agent launched with `/run-agent-task <ref>` does the task and closes itself |
 | L6 | `session status\|read\|close`, `attach` over the launcher | `agent-tasks attach` opens the subagent in Herdr |
-| L7 | `rex` preset | same cycle as L3 in Rex |
+| L7 | `rex` and `tmux` presets | same cycle as L3, against fake `rex`/`tmux` and a real tmux on a private socket |
