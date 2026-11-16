@@ -3,7 +3,7 @@ import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { commands } from "../src/commands/index.ts";
 import { createContext } from "../src/context.ts";
-import { followRun, newLines } from "../src/follow.ts";
+import { abortableSleep, followRun, newLines } from "../src/follow.ts";
 import { createStyle } from "../src/output/style.ts";
 import { at, DEMO_REF, type ExecHome, execTask, FAKE_AGENT, makeExecHome, waitFor } from "./exec-helpers.ts";
 
@@ -21,7 +21,8 @@ const finish = (status: string, minutes = 10) => home.cli("finish", DEMO_REF, "-
 /** Calls followRun in-process with a sleep that runs `steps` (one per poll) instead of waiting. */
 async function follow(steps: Array<() => Promise<unknown> | unknown>, opts: { raw?: boolean; signal?: AbortSignal; shown?: string } = {}) {
   let out = "";
-  const ctx = createContext({ now: new Date(at(5)), json: false, env: home.env, cwd: home.project, stdout: { write: (t) => void (out += t) }, stderr: { write() {} }, commands });
+  let err = "";
+  const ctx = createContext({ now: new Date(at(5)), json: false, env: home.env, cwd: home.project, stdout: { write: (t) => void (out += t) }, stderr: { write: (t) => void (err += t) }, commands });
   const sleeps: number[] = [];
   let i = 0;
   const result = await followRun(ctx, DEMO_REF, {
@@ -37,7 +38,7 @@ async function follow(steps: Array<() => Promise<unknown> | unknown>, opts: { ra
       await step();
     },
   });
-  return { out, result, sleeps };
+  return { out, err, result, sleeps };
 }
 
 describe("newLines", () => {
@@ -46,6 +47,20 @@ describe("newLines", () => {
     expect(newLines(["a", "b"], ["a", "b"])).toEqual([]);
     expect(newLines([], ["x"])).toEqual(["x"]);
     expect(newLines(["a", "b"], ["x", "y"])).toEqual(["x", "y"]);
+  });
+
+  test("a screen redrawn in place prints only the lines that changed", () => {
+    expect(newLines(["header", "⠋ working", "footer"], ["header", "⠙ working", "footer"], ["header", "⠋ working", "footer"])).toEqual(["⠙ working"]);
+  });
+});
+
+describe("abortableSleep", () => {
+  test("resolves as soon as the signal is aborted", async () => {
+    const controller = new AbortController();
+    const sleeping = abortableSleep(controller.signal)(60_000);
+    controller.abort();
+    await sleeping;
+    await abortableSleep(controller.signal)(60_000);
   });
 });
 
@@ -109,12 +124,13 @@ describe("process preset", () => {
     expect(json.json()).toMatchObject({ ref: DEMO_REF, run: { status: "succeeded" } });
   });
 
-  test("--follow can't be combined with --attempt", async () => {
+  test("--follow can't be combined with --attempt while the run is in progress", async () => {
     await launchHanging();
     const result = await home.cli("log", DEMO_REF, "--follow", "--attempt", "1");
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("can't be combined with --attempt");
     await finish("succeeded");
+    expect((await home.cli("log", DEMO_REF, "--follow", "--attempt", "1")).code).toBe(0);
   });
 
   test("attach without an attach command points at session read", async () => {
@@ -176,9 +192,27 @@ describe("herdr preset (fake hc)", () => {
     await home.cli("session", "close", DEMO_REF);
     const result = await home.cli("attach", DEMO_REF);
     expect(result.code).toBe(1);
-    expect(result.stderr).toMatch(/the session of demo\/20261117T080000Z (was closed|is gone)/);
-    expect(result.stderr).toContain(`agent-tasks log ${DEMO_REF}`);
+    expect(result.stderr).toContain(`the session of ${DEMO_REF} was closed (running); see its output with "agent-tasks log ${DEMO_REF}"`);
     expect(home.hcCalls().filter((c) => c[0] === "attach")).toEqual([]);
+  });
+
+  test("attach to a terminal whose agent exited says so", async () => {
+    execTask(home, "hang");
+    await home.tick(1);
+    const file = join(home.hcDir, "terminals", "t2.json");
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), state: "finished", exit_code: 0 }));
+    const result = await home.cli("attach", "demo", "--json");
+    expect(result.code).toBe(1);
+    expect(result.json()).toMatchObject({ error: { code: "session_gone", message: `the session of ${DEMO_REF} is exited (running); see its output with "agent-tasks log ${DEMO_REF}"` } });
+  });
+
+  test("log --follow says once when the session can't be read, and keeps waiting", async () => {
+    execTask(home, "hang");
+    await home.tick(1);
+    writeFileSync(join(home.hcDir, "fail-read"), "");
+    const { out, err } = await follow([() => {}, () => {}, () => {}, () => {}, () => finish("failed")]);
+    expect(err).toBe(`agent-tasks: the session of ${DEMO_REF} can't be read right now; waiting for the run to finish\n`);
+    expect(out).toBe(`\n✕ failed  ${DEMO_REF} · all done\n`);
   });
 
   test("log --follow diffs the screen from hc read", async () => {
@@ -193,7 +227,7 @@ describe("herdr preset (fake hc)", () => {
       () => finish("succeeded"),
     ]);
     expect(result.run.status).toBe("succeeded");
-    expect(out.split("\n\n■")[0]).toBe("line 1\nline 2\nline 3\nline 4");
-    expect(out).toEndWith(`■ ok  ${DEMO_REF} · all done\n`);
+    // The last poll can't read the killed terminal and uses the screen captured into the log.
+    expect(out).toBe(`line 1\nline 2\nline 3\nline 4\n\n■ ok  ${DEMO_REF} · all done\n`);
   });
 });

@@ -11,28 +11,13 @@ import { renderTable } from "../output/table.ts";
 import { absoluteTimeWithSeconds, clockTimeWithSeconds, formatSpan, sameDay, timeNear } from "../output/time.ts";
 import { isInProgress, neverStarted } from "../run-info.ts";
 import { tildify } from "../paths.ts";
-import { type Attempt, type Run, type RunEvent, type SessionRecord, TASK_ID_RE } from "../schema.ts";
-import { parseRunRef, runRef, runSlotId } from "../slot.ts";
-import { isArchived, listRuns, readRun, runLogRelativePath, taskExists } from "../store.ts";
-import { displayTimezone, warnCorrupt } from "../task-info.ts";
-import { abortableSleep, followRun } from "../follow.ts";
+import { type Attempt, type Run, type RunEvent, type SessionRecord } from "../schema.ts";
+import { runRef, runSlotId } from "../slot.ts";
+import { runLogRelativePath } from "../store.ts";
+import { displayTimezone } from "../task-info.ts";
+import { findRun } from "../find-run.ts";
+import { EXIT_INTERRUPTED, followWithClock } from "../follow.ts";
 import type { Command } from "./types.ts";
-
-/** A run ref, or a task id for its latest occurrence. */
-function findRun(ctx: Context, arg: string): Run {
-  if (arg.includes("/")) {
-    const { taskId, slot } = parseRunRef(arg);
-    return readRun(ctx.paths, taskId, slot);
-  }
-  if (!TASK_ID_RE.test(arg)) throw new UsageError(`invalid run ref or task id "${arg}" (expected <task-id> or <task-id>/<slot>)`);
-  const { items, errors } = listRuns(ctx.paths, arg);
-  // An unreadable file could be the latest run: say so rather than pass an older one off as the latest.
-  warnCorrupt(ctx, errors);
-  const latest = items.at(-1);
-  if (latest) return latest.run;
-  if (taskExists(ctx.paths, arg) || isArchived(ctx.paths, arg)) throw new NotFoundError(`task "${arg}" has no runs yet`);
-  throw new NotFoundError(`task "${arg}" not found (run "agent-tasks list --all" to see every task)`);
-}
 
 interface CapturedLog {
   attempt: number;
@@ -134,21 +119,6 @@ export function renderRunLog(ctx: Context, style: Style, run: Run, attempts: rea
     .replace(/\n{3,}/g, "\n\n");
 }
 
-/** Exit code after Ctrl+C, as shells report a SIGINT. */
-const EXIT_INTERRUPTED = 130;
-
-/** Follows with the real clock; Ctrl+C stops it at the next poll. */
-async function following(ctx: Context, ref: string, opts: { shown: string; raw: boolean }) {
-  const controller = new AbortController();
-  const onInterrupt = () => controller.abort();
-  process.on("SIGINT", onInterrupt);
-  try {
-    return await followRun(ctx, ref, { ...opts, sleep: abortableSleep(controller.signal), signal: controller.signal, style: stdoutStyle(ctx) });
-  } finally {
-    process.off("SIGINT", onInterrupt);
-  }
-}
-
 const log: Command = {
   name: "log",
   summary: "Show what happened in a run: events, attempts and the captured log",
@@ -166,20 +136,21 @@ Options:
                  (with --json, the log content is in the JSON anyway)
   --follow       If the run is still running or blocked, keep printing its new
                  output (the launcher's read, every few seconds) until it ends,
-                 then print its final status. Ctrl+C stops following. With
-                 --json, waits for the end and prints the final JSON. For a
-                 finished run it is the same as without --follow`,
+                 then print its final status. Ctrl+C stops following (exit
+                 130); otherwise the exit code is 0 whatever the run's result.
+                 With --json, waits for the end and prints the final JSON.
+                 For a finished run it is the same as without --follow`,
   async run(ctx, args) {
     const { values, positionals } = parseCommandArgs(args, { attempt: { type: "string" }, raw: { type: "boolean" }, follow: { type: "boolean" } }, { minPositionals: 1, maxPositionals: 1 });
-    if (values.follow && values.attempt !== undefined) throw new UsageError("--follow always follows the latest attempt; it can't be combined with --attempt");
     let run = findRun(ctx, positionals[0]!);
     const ref = runRef(run.task_id, runSlotId(run));
     const follow = values.follow === true && isInProgress(run.status);
+    if (follow && values.attempt !== undefined) throw new UsageError("--follow always follows the latest attempt; it can't be combined with --attempt");
 
     if (follow && ctx.json) {
-      // JSON is one document: wait quietly for the end, then print the final state.
-      const quiet: Context = Object.create(ctx, { stdout: { value: { write() {} } } });
-      const result = await following(quiet, ref, { shown: "", raw: true });
+      // JSON is one document: wait for the end, then print the final state.
+      ctx.stderr.write(`agent-tasks: waiting for ${ref} to finish (Ctrl+C to stop)…\n`);
+      const result = await followWithClock(ctx, ref, { shown: "", quiet: true });
       if (!result.finished) return EXIT_INTERRUPTED;
       run = result.run;
     }
@@ -198,7 +169,7 @@ Options:
       output(ctx, { ref, run, attempt: captured?.attempt ?? null, log: captured }, () => renderRunLog(ctx, stdoutStyle(ctx), run, attempts, captured));
     }
     if (!follow || ctx.json) return;
-    const result = await following(ctx, ref, { shown: captured?.content ?? "", raw: values.raw === true });
+    const result = await followWithClock(ctx, ref, { shown: captured?.content ?? "", raw: values.raw === true });
     return result.finished ? undefined : EXIT_INTERRUPTED;
   },
 };

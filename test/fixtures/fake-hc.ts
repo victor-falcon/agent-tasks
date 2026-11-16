@@ -57,6 +57,10 @@ switch (sub) {
     rmSync(file(positional[0]!), { force: true });
     break;
   case "read": {
+    if (!existsSync(file(positional.at(-1)!))) {
+      process.stderr.write(`no terminal ${positional.at(-1)}\n`);
+      process.exit(1);
+    }
     const screen = join(dir, `screen-${positional.at(-1)}`);
     process.stdout.write(existsSync(screen) ? readFileSync(screen, "utf8") : `screen of ${positional.at(-1)}\n`);
     break;
@@ -65,6 +69,7 @@ switch (sub) {
     process.stdout.write(`attached to ${positional[0]}\n`);
     const exit = join(dir, "attach-exit");
     process.exit(existsSync(exit) ? Number(readFileSync(exit, "utf8").trim()) : 0);
+    break;
   }
   default:
     process.stderr.write(`fake hc: unknown subcommand ${sub}\n`);

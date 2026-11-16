@@ -1,40 +1,28 @@
 import { parseCommandArgs } from "../args.ts";
 import { type Context, output } from "../context.ts";
-import { AgentTasksError, NotFoundError, UsageError } from "../errors.ts";
-import { lastAttempt, readRunRef, requireTask, type Session, sessionFor } from "../execution.ts";
+import { NotFoundError, SessionGoneError } from "../errors.ts";
+import { lastAttempt, requireTask, type Session, sessionFor } from "../execution.ts";
+import { findRun } from "../find-run.ts";
 import { commandEnv, LauncherError, renderCommand, sessionStatus, shellLine } from "../launcher.ts";
 import { isInProgress } from "../run-info.ts";
-import { type Run, TASK_ID_RE } from "../schema.ts";
+import type { Run } from "../schema.ts";
+import { withSigint } from "../sigint.ts";
 import { runRef, runSlotId } from "../slot.ts";
-import { isArchived, listRuns, taskExists } from "../store.ts";
-import { warnCorrupt } from "../task-info.ts";
 import type { Command } from "./types.ts";
 
-class SessionGoneError extends AgentTasksError {
-  constructor(message: string) {
-    super("session_gone", message);
-  }
-}
-
-/** A run ref, or the task's latest running or blocked run. */
-function findRun(ctx: Context, arg: string): Run {
-  if (arg.includes("/")) return readRunRef(ctx, arg);
-  if (!TASK_ID_RE.test(arg)) throw new UsageError(`invalid run ref or task id "${arg}" (expected <task-id> or <task-id>/<slot>)`);
-  const { items, errors } = listRuns(ctx.paths, arg);
-  warnCorrupt(ctx, errors);
-  const active = items.filter((i) => isInProgress(i.run.status)).at(-1);
-  if (active) return active.run;
-  const latest = items.at(-1)?.run;
-  if (latest) {
+/** For a task id: its latest running or blocked run. */
+function activeRun(taskId: string) {
+  return (runs: Run[]): Run => {
+    const active = runs.filter((r) => isInProgress(r.status)).at(-1);
+    if (active) return active;
+    const latest = runs.at(-1)!;
     const ref = runRef(latest.task_id, runSlotId(latest));
-    throw new NotFoundError(`task "${arg}" has no running or blocked run (latest: ${ref}, ${latest.status}); see its output with "agent-tasks log ${ref}"`);
-  }
-  if (taskExists(ctx.paths, arg) || isArchived(ctx.paths, arg)) throw new NotFoundError(`task "${arg}" has no runs yet`);
-  throw new NotFoundError(`task "${arg}" not found (run "agent-tasks list --all" to see every task)`);
+    throw new NotFoundError(`task "${taskId}" has no running or blocked run (latest: ${ref}, ${latest.status}); see its output with "agent-tasks log ${ref}"`);
+  };
 }
 
-/** The run's session, checked to be alive. */
-function liveSession(ctx: Context, run: Run, ref: string): Session {
+/** The run's session, checked to be alive, with its rendered attach command. */
+function liveSession(ctx: Context, run: Run, ref: string): { session: Session; argv: string[] } {
   const task = requireTask(ctx, run.task_id);
   const session = sessionFor(ctx, task, ctx.resolveFor(task), run);
   const seeLog = `see its output with "agent-tasks log ${ref}"`;
@@ -45,22 +33,24 @@ function liveSession(ctx: Context, run: Run, ref: string): Session {
   if (!session.spec.attach) {
     throw new LauncherError(`the ${session.spec.name} launcher has no attach command; read the session's screen with "agent-tasks session read ${ref}" or follow it with "agent-tasks log ${ref} --follow"`);
   }
-  return session;
+  return { session, argv: renderCommand(session.spec.attach, session.input, "launcher.attach") };
 }
 
 /** Runs the launcher's `attach` with the terminal handed over, and returns its exit code. */
 async function handOver(argv: string[], session: Session): Promise<number> {
   // Ctrl+C belongs to the attached program; don't let it kill us before it returns.
-  const ignore = () => {};
-  process.on("SIGINT", ignore);
-  try {
-    const child = Bun.spawn({ cmd: argv, cwd: session.input.cwd, env: commandEnv(session.input) as Record<string, string>, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
-    return await child.exited;
-  } catch (err) {
-    throw new LauncherError(`attach failed: could not run ${shellLine(argv)}: ${(err as Error).message}`);
-  } finally {
-    process.off("SIGINT", ignore);
-  }
+  return withSigint(
+    () => {},
+    async () => {
+      let child: Bun.Subprocess;
+      try {
+        child = Bun.spawn({ cmd: argv, cwd: session.input.cwd, env: commandEnv(session.input) as Record<string, string>, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+      } catch (err) {
+        throw new LauncherError(`attach failed: could not run ${shellLine(argv)}: ${(err as Error).message}`);
+      }
+      return await child.exited;
+    },
+  );
 }
 
 const attach: Command = {
@@ -84,10 +74,10 @@ With --json, the attach command still gets the terminal; when it returns,
 a JSON object with its exit code is printed.`,
   async run(ctx, args) {
     const { positionals } = parseCommandArgs(args, {}, { minPositionals: 1, maxPositionals: 1 });
-    const run = findRun(ctx, positionals[0]!);
+    const arg = positionals[0]!;
+    const run = findRun(ctx, arg, activeRun(arg));
     const ref = runRef(run.task_id, runSlotId(run));
-    const session = liveSession(ctx, run, ref);
-    const argv = renderCommand(session.spec.attach!, session.input, "launcher.attach");
+    const { session, argv } = liveSession(ctx, run, ref);
     const code = await handOver(argv, session);
     if (ctx.json) output(ctx, { run_ref: ref, attempt: lastAttempt(run)?.n ?? null, launcher: session.spec.name, handle: session.record.handle, command: argv, exit_code: code }, "");
     return code;
