@@ -121,6 +121,8 @@ describe("with every status", () => {
   test("runs, of every task and of one", async () => {
     expect((await cli(["runs", "--limit", "8"])).stdout).toMatchSnapshot("all");
     expect((await cli(["runs", "sentry-summary", "--since", "12h"])).stdout).toMatchSnapshot("one task");
+    const ok = (await cli(["runs", "sentry-summary", "--status", "ok", "--json"])).json().runs.map((r: { status: string }) => r.status);
+    expect(new Set(ok)).toEqual(new Set(["succeeded"]));
   });
 
   test("show", async () => {

@@ -41,6 +41,7 @@ Pass the RUN column to "agent-tasks log" to see what happened.
 
 Options:
   --status <statuses>  Only these statuses, comma-separated: ${RUN_STATUSES.join(", ")}
+                       (ok, as the table shows it, means succeeded)
   --since <when>       Only slots from this point on: a duration back from now (7d, 24h) or an ISO time
   --limit <n>          At most n runs (default ${DEFAULT_LIMIT})`,
   run(ctx, args) {
@@ -49,7 +50,10 @@ Options:
       { status: { type: "string" }, since: { type: "string" }, limit: { type: "string" } },
       { maxPositionals: 1 },
     );
-    const statuses = values.status === undefined ? undefined : parseEnumList("--status", values.status, RUN_STATUSES);
+    const statuses =
+      values.status === undefined
+        ? undefined
+        : parseEnumList("--status", values.status, [...RUN_STATUSES, "ok"] as const).map((s) => (s === "ok" ? "succeeded" : s));
     const since = values.since === undefined ? undefined : parseSince(values.since, ctx.now);
     const limit = values.limit === undefined ? DEFAULT_LIMIT : parseCount("--limit", values.limit, 1);
 
