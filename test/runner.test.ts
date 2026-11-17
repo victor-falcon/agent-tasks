@@ -329,10 +329,10 @@ describe("terminal output", () => {
     const log = readFileSync(runnerLogPath(home.paths), "utf8");
     expect(log).toBe(
       [
-        "agent-tasks runner · every 5m · launcher: process (claude) · data: ~/data",
+        "09:00:00  agent-tasks runner · every 5m · launcher: process (claude) · data: ~/data",
         "09:00:00  tick  1 due · 0 running",
         "09:00:00  ▶ demo/20261117T080000Z                launched in 4242",
-        "● stopped · last tick 09:00:00 · running 0 · today ■0 ✕0 □0 !0",
+        "09:05:00  ● stopped · last tick 09:00:00 · running 0 · today ■0 ✕0 □0 !0",
         "",
       ].join("\n"),
     );

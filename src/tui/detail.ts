@@ -12,15 +12,22 @@ import type { Run } from "../schema.ts";
 import { runRef, runSlotId } from "../slot.ts";
 import { readRunByRef, readTask } from "../store.ts";
 import { describeSchedule, displayTimezone } from "../task-info.ts";
-import { sanitize, wrap } from "./text.ts";
+import { fit, sanitize, wrap } from "./text.ts";
 
-// The detail view of one run: what it did (summary, the --output-file), how
-// (attempts, events) and the log captured from its session, as lines ready
-// to scroll. Sections are where `{` and `}` jump to.
+// The detail view of one run. What people open a run for is its result, so
+// that comes first and open (the summary, the --output-file); the rest
+// (details, attempts, events, the captured log) are folded sections that
+// <CR> opens. A run with no result yet (in progress, or it failed without a
+// summary) opens its log instead.
 
 export interface Section {
+  id: "result" | "output" | "details" | "attempts" | "events" | "log";
   name: string;
-  line: number;
+  /** Shown after the name: what is inside when it is folded (`6 events · last 13:12`). */
+  extra: string;
+  lines: string[];
+  /** Open unless the user folds it. */
+  open: boolean;
 }
 
 export interface RunDetail {
@@ -28,8 +35,8 @@ export interface RunDetail {
   run: Run;
   /** `■ ok · 6m`: the title line's right side. */
   status: string;
-  lines: string[];
   sections: Section[];
+  width: number;
 }
 
 /** At most this much of a file is shown; the rest is one line saying where it is. */
@@ -43,25 +50,19 @@ function readShown(path: string): { text: string; cut: boolean } | null {
   return { text: (cut ? content.subarray(content.length - MAX_FILE_BYTES) : content).toString("utf8"), cut };
 }
 
-function heading(style: Style, name: string, extra: string, width: number): string {
-  const head = `── ${name}${extra ? ` · ${extra}` : ""} `;
-  return style.paint("bold", head + "─".repeat(Math.max(0, width - head.length)));
-}
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 export function buildRunDetail(ctx: Context, style: Style, ref: string, width: number): RunDetail {
   const run = readRunByRef(ctx.paths, ref);
   const tz = displayTimezone(ctx);
-  const lines: string[] = [];
   const sections: Section[] = [];
-  const section = (name: string, extra = "") => {
-    if (lines.length > 0) lines.push("");
-    sections.push({ name, line: lines.length });
-    lines.push(heading(style, name, extra, width));
+  const text = (content: string) => wrap(sanitize(content).trimEnd(), width);
+  const fileLines = (path: string): string[] => {
+    const shown = readShown(path);
+    if (!shown) return [];
+    return [...(shown.cut ? [style.paint("dim", `(only the last ${MAX_FILE_BYTES / 1024} KiB)`)] : []), ...text(shown.text)];
   };
-  const text = (content: string) => lines.push(...wrap(sanitize(content).trimEnd(), width));
 
-  // Overview
-  section("Run");
   let task = null;
   try {
     task = readTask(ctx.paths, run.task_id);
@@ -69,57 +70,112 @@ export function buildRunDetail(ctx: Context, style: Style, ref: string, width: n
     // A removed task: its runs are still worth reading.
   }
   const last = run.attempts.at(-1);
+  const took = attemptDuration(run, ctx.now);
+  const inProgress = isInProgress(run.status);
+
+  // The result: how it ended and what the agent said.
+  const result: string[] = [];
+  const facts = [
+    `${statusLabel(style, run.status)}${run.reason ? ` (${run.reason})` : ""}`,
+    slotLabel(run, tz, ctx.now),
+    ...(took !== null ? [`${inProgress ? "running for" : "took"} ${formatSpan(took)}`] : []),
+    ...(run.attempts.length > 1 ? [`attempt ${run.attempts.length}${task ? ` of ${(task.retries ?? 0) + 1}` : ""}`] : []),
+  ];
+  result.push(facts.join(style.paint("dim", " · ")), "");
+  const summary = last?.summary;
+  if (summary) result.push(...text(summary));
+  else if (neverStarted(run.status)) result.push(style.paint("dim", "It never started, so there is no output or log."));
+  else if (inProgress) result.push(style.paint("dim", "Still in progress: the agent reports its result when it finishes. Its log is below."));
+  else result.push(style.paint("dim", "The agent reported no summary. Its log is below."));
+  sections.push({ id: "result", name: "Result", extra: "", lines: result, open: true });
+
+  // The file passed to `finish --output-file`: part of the result.
+  if (last?.output) {
+    const path = isAbsolute(last.output) ? last.output : join(ctx.paths.dataDir, last.output);
+    const lines = fileLines(path);
+    sections.push({ id: "output", name: "Output", extra: tildify(path, ctx.env), lines: lines.length > 0 ? lines : [style.paint("dim", "(the file is gone)")], open: true });
+  }
+
+  // The task and the run, for when the result raises questions.
   const rows: [string, string][] = [
     ["Task", task ? `${task.id} — ${task.title}` : `${run.task_id} (removed)`],
     ...(task ? ([["Folder", tildify(task.cwd, ctx.env)], ["Schedule", describeSchedule(task)]] as [string, string][]) : []),
     ["Slot", slotLabel(run, tz, ctx.now)],
-    ["Status", `${statusLabel(style, run.status)}${run.reason ? ` (${run.reason})` : ""}`],
     ...(last ? ([["Attempts", `${run.attempts.length}${task ? ` of ${(task.retries ?? 0) + 1}` : ""}`]] as [string, string][]) : []),
+    ["Run ref", runRef(run.task_id, runSlotId(run))],
   ];
-  for (const [label, value] of rows) lines.push(`${style.paint("dim", label.padEnd(9))} ${value}`);
-  const summary = last?.summary;
-  if (summary) {
-    lines.push(style.paint("dim", "Summary"));
-    for (const l of wrap(sanitize(summary), Math.max(10, width - 2))) lines.push(`  ${l}`);
-  } else if (neverStarted(run.status)) lines.push(style.paint("dim", "It never started, so there is no output or log."));
-
-  // The file passed to `finish --output-file`
-  if (last?.output) {
-    const path = isAbsolute(last.output) ? last.output : join(ctx.paths.dataDir, last.output);
-    section("Output", tildify(path, ctx.env));
-    const shown = readShown(path);
-    if (!shown) lines.push(style.paint("dim", "(the file is gone)"));
-    else {
-      if (shown.cut) lines.push(style.paint("dim", `(only the last ${MAX_FILE_BYTES / 1024} KiB)`));
-      text(shown.text);
-    }
-  }
+  sections.push({
+    id: "details",
+    name: "Details",
+    extra: task ? `${task.title} · ${tildify(task.cwd, ctx.env)}` : `${run.task_id} (removed)`,
+    lines: rows.map(([label, value]) => `${style.paint("dim", label.padEnd(9))} ${value}`),
+    open: false,
+  });
 
   if (run.attempts.length > 0) {
-    section("Attempts");
+    const lines: string[] = [];
     run.attempts.forEach((attempt, i) => {
       if (i > 0) lines.push("");
       lines.push(...renderAttempt(ctx, style, run, attempt, null, tz).split("\n"));
     });
+    sections.push({ id: "attempts", name: "Attempts", extra: plural(run.attempts.length, "attempt"), lines, open: false });
   }
 
-  section("Events");
-  lines.push(...renderEvents(run, tz, ctx.now).split("\n").slice(1));
+  const events = renderEvents(run, tz, ctx.now).split("\n").slice(1);
+  const lastEvent = run.events.at(-1);
+  sections.push({ id: "events", name: "Events", extra: lastEvent ? `${plural(run.events.length, "event")} · last: ${lastEvent.event}` : "none", lines: events, open: false });
 
   // The output captured from the latest attempt's session
   const log = capturedLog(ctx, run, last);
   if (log) {
-    section("Log", tildify(log.path, ctx.env));
-    const shown = log.exists ? readShown(log.path) : null;
-    if (!shown) lines.push(style.paint("dim", isInProgress(run.status) ? "(not captured yet: it is still in progress)" : "(nothing captured)"));
-    else if (shown.text.trim() === "") lines.push(style.paint("dim", "(empty)"));
-    else {
-      if (shown.cut) lines.push(style.paint("dim", `(only the last ${MAX_FILE_BYTES / 1024} KiB)`));
-      text(shown.text);
-    }
+    const shown = log.exists ? fileLines(log.path) : [];
+    const empty = shown.every((l) => l.trim() === "");
+    const lines = !log.exists ? [style.paint("dim", inProgress ? "(not captured yet: it is still in progress)" : "(nothing captured)")] : empty ? [style.paint("dim", "(empty)")] : shown;
+    const extra = `${log.exists && !empty ? `${plural(shown.length, "line")} · ` : ""}${tildify(log.path, ctx.env)}`;
+    // Without a result to read, the log is the next best thing.
+    sections.push({ id: "log", name: "Log", extra, lines, open: !summary && !last?.output && !neverStarted(run.status) });
   }
 
-  const took = attemptDuration(run, ctx.now);
-  const status = `${statusLabel(style, run.status)}${took !== null ? ` · ${formatSpan(took)}${isInProgress(run.status) ? " so far" : ""}` : ""}`;
-  return { ref: runRef(run.task_id, runSlotId(run)), run, status, lines, sections };
+  const status = `${statusLabel(style, run.status)}${took !== null ? ` · ${formatSpan(took)}${inProgress ? " so far" : ""}` : ""}`;
+  return { ref: runRef(run.task_id, runSlotId(run)), run, status, sections, width };
+}
+
+// ---------------------------------------------------------------------------
+// Folding: the sections as lines on the screen
+// ---------------------------------------------------------------------------
+
+export interface DetailView {
+  detail: RunDetail;
+  scroll: number;
+  /** The section `<CR>` folds or opens; `{` and `}` move it. */
+  selected: number;
+  /** Sections the user opened or folded, by id: kept when the run is read again. */
+  folds: Partial<Record<Section["id"], boolean>>;
+}
+
+export function isOpen(view: DetailView, section: Section): boolean {
+  return view.folds[section.id] ?? section.open;
+}
+
+function heading(style: Style, section: Section, open: boolean, selected: boolean, width: number): string {
+  const head = `${open ? "▾" : "▸"} ${section.name}${section.extra ? ` · ${section.extra}` : ""} `;
+  const rule = fit(head + "─".repeat(Math.max(0, width - Bun.stringWidth(head))), width).trimEnd();
+  return selected ? style.paint("bold", style.paint("cyan", rule)) : open ? style.paint("bold", rule) : rule;
+}
+
+/** The lines to scroll through, and the line each section's heading is on. */
+export function layoutDetail(view: DetailView, style: Style): { lines: string[]; starts: number[] } {
+  const lines: string[] = [];
+  const starts: number[] = [];
+  const { sections, width } = view.detail;
+  sections.forEach((section, i) => {
+    const open = isOpen(view, section);
+    // A blank line before an open section, and after one, sets it apart; folded ones stack.
+    const previousOpen = i > 0 && isOpen(view, sections[i - 1]!);
+    if (i > 0 && (open || previousOpen)) lines.push("");
+    starts.push(lines.length);
+    lines.push(heading(style, section, open, i === view.selected, width));
+    if (open) lines.push(...section.lines);
+  });
+  return { lines, starts };
 }

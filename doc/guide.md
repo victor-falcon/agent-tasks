@@ -191,12 +191,18 @@ another tab or another machine. It has:
 - **Running**: runs in progress, and which are blocked waiting for you.
 - **Next**: the next run of every task, with its schedule and machine.
 - **Recent**: recent results with the agent's summary. Open one (`<CR>`) to
-  read its summary, the file the agent passed to `--output-file`, its
-  attempts, events and the log captured from its session.
-- **Events**: the runner's log (`state/runner.log`).
+  read its result first: the summary and the file the agent passed to
+  `--output-file`. Its details, attempts, events and the log captured from
+  its session are folded below; `{`/`}` select one and `<CR>` opens it
+  (`zR` opens them all, `zM` folds them all). A run with no result yet
+  opens on its log.
+- **Events**: what the runner did (`state/runner.log`): launches, results
+  with their summary, restarts and warnings. It takes the room Recent does
+  not need.
 
 It uses Vim keys: `j`/`k`, `gg`/`G`, `<C-d>`/`<C-u>`, `<Tab>` between
-panels, `<CR>` or `l` to open a run, `{`/`}` between its sections, `h`, `q`
+panels, `<CR>` or `l` to open a run, `{`/`}` between its sections and
+`<CR>` to fold or open one, `h`, `q`
 or `<Esc>` to go back, `a` attach, `r` retry, `R` run now, `p` pause or
 resume, `?` for the full list. Change them in `~/.config/agent-tasks/tui.toml`
 (see [examples/tui.example.toml](../examples/tui.example.toml)).

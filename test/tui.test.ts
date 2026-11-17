@@ -119,6 +119,8 @@ describe("text", () => {
 
   test("wrap and fit", () => {
     expect(wrap("abcdef\nab", 4)).toEqual(["abcd", "ef", "ab"]);
+    expect(wrap("hello big world of words", 10)).toEqual(["hello big", "world of", "words"]);
+    expect(wrap("  - an indented bullet", 14)).toEqual(["  - an", "  indented", "  bullet"]);
     expect(fit("abc", 5)).toBe("abc  ");
     expect(fit("abcdef", 4)).toBe("abc…");
     const styled = createStyle(true).paint("red", "abcdef");
@@ -279,14 +281,14 @@ describe("interactive", () => {
     expect(terminal.screen).toMatch(/› !\s+review-pr-123/);
     terminal.type("\r");
     expect(terminal.screen.split("\n")[0]).toMatch(/^review-pr-123\/\S+ +! blocked/);
-    expect(terminal.screen).toContain("── Run ");
-    expect(terminal.screen).toContain("── Events ");
+    expect(terminal.screen).toContain("▾ Result ");
+    expect(terminal.screen).toContain("▸ Events · 2 events");
     terminal.type("q"); // back, not quit
     expect(terminal.screen).toContain("── Recent");
     tui.stop();
   });
 
-  test("a run shows its summary, output file and captured log; } jumps to sections", () => {
+  test("a run opens on its result; the other sections are folded and <CR> opens them", () => {
     const run = scheduledRun("report", "2026-11-17T08:00:00+01:00", "succeeded", { summary: "report in notes/report.md" });
     run.attempts[0]!.output = "runs/report/out.md";
     home.writeTask(makeTask({ id: "report", title: "Daily report" }));
@@ -295,21 +297,77 @@ describe("interactive", () => {
     writeFileSync(join(home.dataDir, run.attempts[0]!.log!), "\x1b[1mworking\x1b[0m\ndone\n");
     const { tui, terminal } = startTui();
     terminal.type("\r");
+    const heads = () => terminal.screen.split("\n").filter((l) => /^[▾▸] /.test(l)).map((l) => l.replace(/ ─+$/, ""));
     const screen = terminal.screen;
+    expect(screen.split("\n")[1]).toMatch(/^▾ Result/);
     expect(screen).toContain("report in notes/report.md");
-    expect(screen).toContain("── Output · ");
     expect(screen).toContain("All good.");
-    expect(screen).toContain("── Log · ");
-    terminal.type("G");
+    expect(screen).not.toContain("working");
+    expect(heads()).toEqual([
+      "▾ Result",
+      "▾ Output · ~/data/runs/report/out.md",
+      "▸ Details · Daily report · ~/Projects/foo",
+      "▸ Attempts · 1 attempt",
+      "▸ Events · 2 events · last: launched",
+      `▸ Log · 2 lines · ~/data/${run.attempts[0]!.log!}`,
+    ]);
+    // } moves to the next section; <CR> opens it and scrolls to it.
+    for (let i = 0; i < 5; i++) terminal.type("}");
+    terminal.type("\r");
     expect(terminal.screen).toContain("working\ndone");
-    terminal.height = 12; // short enough for every section to reach the top
-    terminal.type("gg");
-    terminal.type("}");
-    expect(terminal.screen.split("\n")[1]).toMatch(/^── Output/);
-    terminal.type("}");
-    expect(terminal.screen.split("\n")[1]).toMatch(/^── Attempts/);
+    terminal.height = 4; // short enough for the log to reach the top
     terminal.type("{");
-    expect(terminal.screen.split("\n")[1]).toMatch(/^── Output/);
+    terminal.type("}");
+    expect(terminal.screen.split("\n")[1]).toMatch(/^▾ Log/);
+    terminal.height = 30;
+    for (let i = 0; i < 3; i++) terminal.type("{");
+    terminal.type(" ");
+    expect(terminal.screen).toContain("Folder    ~/Projects/foo");
+    // Folding the result hides it; zR opens everything, zM folds everything.
+    terminal.type("gg");
+    terminal.type("za");
+    expect(terminal.screen).not.toContain("report in notes/report.md");
+    terminal.type("zM");
+    expect(heads().every((h) => h.startsWith("▸"))).toBe(true);
+    terminal.type("zR");
+    expect(heads().every((h) => h.startsWith("▾"))).toBe(true);
+    tui.stop();
+  });
+
+  test("a run with no result yet opens its log", () => {
+    const run = scheduledRun("report", "2026-11-17T08:00:00+01:00", "failed", {});
+    home.writeTask(makeTask({ id: "report", title: "Daily report" }));
+    writeRun(home.paths, run);
+    writeFileSync(join(home.dataDir, run.attempts[0]!.log!), "Error: no credentials\n");
+    const { tui, terminal } = startTui();
+    terminal.type("\r");
+    expect(terminal.screen).toContain("The agent reported no summary. Its log is below.");
+    expect(terminal.screen).toContain("Error: no credentials");
+    tui.stop();
+  });
+
+  test("the Events panel shows runner.log in columns, with the runner's own lines", () => {
+    mkdirSync(home.paths.stateDir, { recursive: true });
+    writeFileSync(
+      runnerLogPath(home.paths),
+      [
+        "agent-tasks runner · every 5m · launcher: herdr (claude) · data: ~/data",
+        "13:07:15  tick  1 due · 1 running",
+        "13:07:15  ▶ x-autopost/20261117T120700Z          launched in t6q",
+        '13:12:15  ■ x-autopost/20261117T120700Z          succeeded in 15s · "Nothing to post today"',
+        "13:13:15  ✕ zancada/20261117T120000Z             failed (exit 1) in 3s · boom · agent-tasks log zancada/20261117T120000Z",
+        "13:20:00  ● stopped · last tick 13:17:15 · running 0 · today ■1 ✕1 □0 !0",
+      ].join("\n") + "\n",
+    );
+    const { tui, terminal } = startTui();
+    const events = terminal.screen.split("\n").slice(terminal.screen.split("\n").findIndex((l) => l.startsWith("── Events")) + 1, -1).map((l) => l.trimEnd()).filter((l) => l !== "");
+    expect(events).toEqual([
+      "            ● runner started · every 5m · herdr (claude)",
+      "  13:07:15  ▶ x-autopost  launched in t6q",
+      "  13:12:15  ■ x-autopost  succeeded in 15s       Nothing to post today",
+      "  13:13:15  ✕ zancada     failed (exit 1) in 3s  boom",
+      "  13:20:00  ○ runner stopped",
+    ]);
     tui.stop();
   });
 

@@ -3,7 +3,7 @@ import type { Context } from "../context.ts";
 import { colorEnabled, createStyle, type Style } from "../output/style.ts";
 import { isInProgress } from "../run-info.ts";
 import { displayTimezone } from "../task-info.ts";
-import { buildRunDetail } from "./detail.ts";
+import { buildRunDetail, isOpen, layoutDetail } from "./detail.ts";
 import { type Action, type Keymap, KeyMatcher, decodeKeys } from "./keys.ts";
 import { bodyHeight, initialState, maxScroll, PANELS, type PanelId, renderFrame, type ScreenState } from "./render.ts";
 import { buildDashboard, type Dashboard, type DashRun } from "./snapshot.ts";
@@ -151,6 +151,7 @@ export class Tui {
       if (detail) {
         try {
           detail.detail = buildRunDetail(this.ctx, this.style, detail.detail.ref, this.width);
+          detail.selected = Math.min(detail.selected, detail.detail.sections.length - 1);
         } catch {
           // The run file is being rewritten or gone: keep what is shown.
         }
@@ -262,6 +263,11 @@ export class Tui {
       case "next_section":
       case "prev_section":
         return this.jumpSection(action === "next_section" ? 1 : -1);
+      case "toggle_section":
+        return this.toggleSection();
+      case "open_sections":
+      case "fold_sections":
+        return this.foldAll(action === "open_sections");
       case "attach":
         return void this.attach();
       case "retry":
@@ -293,7 +299,11 @@ export class Tui {
   private move(by: number): void {
     if (this.state.view === "detail" && this.state.detail) {
       const d = this.state.detail;
-      d.scroll = Math.max(0, Math.min(maxScroll(d.detail, this.body), by === -Infinity ? 0 : by === Infinity ? Infinity : d.scroll + by));
+      d.scroll = Math.max(0, Math.min(maxScroll(d, this.style, this.body), by === -Infinity ? 0 : by === Infinity ? Infinity : d.scroll + by));
+      // The top and the bottom select the first and the last section.
+      if (by === -Infinity) d.selected = 0;
+      else if (by === Infinity) d.selected = d.detail.sections.length - 1;
+      else this.followScroll();
       return;
     }
     const { list } = this.state;
@@ -302,12 +312,52 @@ export class Tui {
     list.cursor[list.focus] = Math.max(0, Math.min(count - 1, by === -Infinity ? 0 : by === Infinity ? count - 1 : current + by));
   }
 
+  /** After scrolling, a selected section whose heading went off screen gives way to the one being read. */
+  private followScroll(): void {
+    const d = this.state.detail;
+    if (!d) return;
+    const { starts } = layoutDetail(d, this.style);
+    const top = d.scroll;
+    const bottom = d.scroll + this.body;
+    const at = starts[d.selected] ?? 0;
+    if (at >= top && at < bottom) return;
+    // The last section that starts on screen or above it.
+    const visible = starts.findIndex((l) => l >= top && l < bottom);
+    const above = starts.filter((l) => l <= top).length - 1;
+    d.selected = Math.max(0, at < top ? (visible >= 0 ? visible : above) : above);
+  }
+
   private jumpSection(direction: 1 | -1): void {
     const d = this.state.detail;
     if (!d) return;
-    const starts = d.detail.sections.map((s) => s.line);
-    const target = direction > 0 ? starts.find((l) => l > d.scroll) : starts.filter((l) => l < d.scroll).at(-1);
-    d.scroll = Math.min(target ?? (direction > 0 ? d.scroll : 0), maxScroll(d.detail, this.body));
+    d.selected = Math.max(0, Math.min(d.detail.sections.length - 1, d.selected + direction));
+    this.scrollToSelected();
+  }
+
+  /** Puts the selected section's heading at the top (as far as the scroll goes). */
+  private scrollToSelected(): void {
+    const d = this.state.detail;
+    if (!d) return;
+    const { starts } = layoutDetail(d, this.style);
+    d.scroll = Math.min(starts[d.selected] ?? 0, maxScroll(d, this.style, this.body));
+  }
+
+  private toggleSection(): void {
+    const d = this.state.detail;
+    const section = d?.detail.sections[d.selected];
+    if (!d || !section) return;
+    const opening = !isOpen(d, section);
+    d.folds[section.id] = opening;
+    // Opening a section scrolls to it; folding keeps its heading where it was.
+    if (opening) this.scrollToSelected();
+    else d.scroll = Math.min(d.scroll, maxScroll(d, this.style, this.body));
+  }
+
+  private foldAll(open: boolean): void {
+    const d = this.state.detail;
+    if (!d) return;
+    for (const section of d.detail.sections) d.folds[section.id] = open;
+    this.scrollToSelected();
   }
 
   /** The selected row: in the list, or the open run. */
@@ -354,7 +404,7 @@ export class Tui {
       if (!ref) return this.flash(`${target.task_id} has no runs yet`);
     }
     try {
-      this.state.detail = { detail: buildRunDetail(this.ctx, this.style, ref, this.width), scroll: 0 };
+      this.state.detail = { detail: buildRunDetail(this.ctx, this.style, ref, this.width), scroll: 0, selected: 0, folds: {} };
       this.state.view = "detail";
     } catch (err) {
       this.flash((err as Error).message, true);

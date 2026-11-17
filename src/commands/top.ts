@@ -18,15 +18,16 @@ const top: Command = {
 A full-screen dashboard, refreshed as things change: the runner's health,
 runs in progress, the next run of every task, recent results with their
 summary, and the runner's events (state/runner.log). Open a run to read its
-summary, the file it passed to --output-file, its attempts, events and the
-log captured from its session. \`agent-tasks runner\` shows the same
+result (its summary and the file it passed to --output-file); its details,
+attempts, events and the log captured from its session are folded below. \`agent-tasks runner\` shows the same
 dashboard on a terminal; this command is for watching without running the
 scheduler (another tab, another machine).
 
 Keys (Vim style; press ? inside for the full list):
   j/k  move        gg/G  first/last       <C-d>/<C-u>  half a page
   <Tab>/<S-Tab>  next/previous panel      <CR> or l    open the run
-  {/}  previous/next section of a run     h, q or <Esc> back
+  {/}  previous/next section of a run     <CR>, <Space> or za  fold/open it
+  zR/zM  open/fold every section          h, q or <Esc> back
   a  attach to the session   r  retry   R  run the task now   p  pause/resume
   ?  keys    q  quit
 

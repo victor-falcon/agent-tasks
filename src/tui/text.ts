@@ -20,7 +20,10 @@ export function sanitize(text: string): string {
     .join("\n");
 }
 
-/** Plain text (no escapes) split into lines of at most `width` columns. */
+/**
+ * Plain text (no escapes) split into lines of at most `width` columns,
+ * between words when it can (a word longer than a line is cut).
+ */
 export function wrap(text: string, width: number): string[] {
   const out: string[] = [];
   const w = Math.max(1, width);
@@ -29,19 +32,23 @@ export function wrap(text: string, width: number): string[] {
       out.push(line);
       continue;
     }
-    let current = "";
-    let currentWidth = 0;
-    for (const ch of line) {
-      const chWidth = visibleWidth(ch);
-      if (currentWidth + chWidth > w) {
-        out.push(current);
-        current = "";
-        currentWidth = 0;
+    // Continuation lines keep the line's indentation when that leaves room.
+    const indent = /^ */.exec(line)![0];
+    const hang = indent.length < w / 2 ? indent : "";
+    let current = indent;
+    const flush = () => {
+      out.push(current.trimEnd());
+      current = hang;
+    };
+    for (const word of line.slice(indent.length).split(/(?<= )/)) {
+      if (current.trim() !== "" && visibleWidth(current + word.trimEnd()) > w) flush();
+      for (const ch of word) {
+        // Only a word longer than a whole line gets here with no room.
+        if (current.trim() !== "" && visibleWidth(current + ch) > w && ch !== " ") flush();
+        current += ch;
       }
-      current += ch;
-      currentWidth += chWidth;
     }
-    out.push(current);
+    if (current.trim() !== "") out.push(current.trimEnd());
   }
   return out;
 }
