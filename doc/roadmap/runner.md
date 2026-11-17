@@ -126,7 +126,7 @@ without it ran on the hub.
 
 The agent's environment points `AGENT_TASKS_CONFIG` at the execution
 machine's config, so its `agent-tasks task` and `finish` reach the hub
-through the client's forwarding (t2). `task` asks the execution machine
+through the client's forwarding (client mode). `task` asks the execution machine
 (`instructions`) for the task folder and personal instructions.
 
 - **Logs**: a background launcher (`process`) writes to

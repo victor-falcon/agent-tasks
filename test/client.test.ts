@@ -35,9 +35,12 @@ function makeSetup(): Setup {
   mkdirSync(project, { recursive: true });
   const sshDir = join(client.root, "ssh");
   mkdirSync(sshDir, { recursive: true });
-  const { PATH: _, ...hubEnv } = hub.env;
-  writeFileSync(join(sshDir, "hosts.json"), JSON.stringify({ hub: { ...hubEnv, PATH: hub.env.PATH } }));
   Object.assign(client.env, { PATH: [FAKE_BIN, dirname(process.execPath), process.env.PATH].join(":"), FAKE_SSH_DIR: sshDir });
+  // The hub reaches the client back ("mac") to run `remote …` there, e.g. to check a task's cwd.
+  mkdirSync(join(client.root, ".local", "bin"), { recursive: true });
+  symlinkSync(join(REPO, "bin", "agent-tasks"), join(client.root, ".local", "bin", "agent-tasks"));
+  const { PATH: _, ...hubEnv } = hub.env;
+  writeFileSync(join(sshDir, "hosts.json"), JSON.stringify({ hub: { ...hubEnv, PATH: hub.env.PATH, FAKE_SSH_DIR: sshDir }, mac: client.env }));
 
   return {
     hub,
@@ -77,6 +80,13 @@ afterEach(() => {
 const addFlags = ["--cron", "0 9 * * 1", "--instructions", "Do it."];
 
 describe("client mode: forwarding to the hub", () => {
+  test("remote … runs on the client itself, never on the hub", async () => {
+    const r = await s.spawnCli(["remote", "check-cwd", "--json"], JSON.stringify({ protocol: 1, cwd: "~/project" }));
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ protocol: 1, exists: true, cwd: "~/project" });
+    expect(s.sshCalls()).toEqual([]);
+  });
+
   test("a data command runs on the hub, with its output and exit code", async () => {
     s.hub.writeTask(makeTask({ id: "on-hub", machine: "wsl" }));
     const list = await s.cli("list", "--json", NOW);
@@ -209,7 +219,7 @@ describe("client mode: add and edit", () => {
 
 describe("client mode: a subagent on the client", () => {
   test("finish forwards the result, its output file and attempt to the hub", async () => {
-    execTask(s.hub, "hang");
+    execTask(s.hub, "hang", { machine: "wsl" });
     await s.hub.tick(1);
     // Not valid UTF-8: the bytes must arrive as they are.
     const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00, 0x0a]);
@@ -223,7 +233,7 @@ describe("client mode: a subagent on the client", () => {
   });
 
   test("finish passes the launcher's attempt on to the hub", async () => {
-    execTask(s.hub, "hang");
+    execTask(s.hub, "hang", { machine: "wsl" });
     await s.hub.tick(1);
     Object.assign(s.client.env, { AGENT_TASKS_RUN: DEMO_REF, AGENT_TASKS_ATTEMPT: "2" });
     const r = await s.cli("finish", DEMO_REF, "--status", "succeeded", "--summary", "Done", "--json");
@@ -234,7 +244,7 @@ describe("client mode: a subagent on the client", () => {
   });
 
   test("task prints the hub's instructions for the run", async () => {
-    execTask(s.hub, "hang");
+    execTask(s.hub, "hang", { machine: "wsl" });
     await s.hub.tick(1);
     const r = await s.cli("task", DEMO_REF, "--json");
     expect(r.code).toBe(0);
