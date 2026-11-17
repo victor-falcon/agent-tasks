@@ -10,7 +10,9 @@ import {
   type ExecEventType,
   findTask,
   isReported,
+  isWaitingForMachine,
   lastAttempt,
+  MACHINE_UNREACHABLE,
   markSessionGone,
   MAX_CLOSE_ATTEMPTS,
   newRun,
@@ -22,7 +24,8 @@ import {
   startAttempt,
   updateRun,
 } from "./execution.ts";
-import { sessionStatus } from "./launcher.ts";
+import type { StatusResult } from "./launcher.ts";
+import { MachineUnreachableError } from "./ssh.ts";
 import type { Run, RunStatus, Task } from "./schema.ts";
 import { runRef, runSlotId } from "./slot.ts";
 import { appendTick, claimRun, listRuns, listTasks, readTicks } from "./store.ts";
@@ -108,6 +111,10 @@ class TickPass {
 
   watchRun(w: Watched, run: Run): void {
     const attempt = lastAttempt(run);
+    if (!attempt && isWaitingForMachine(run)) {
+      this.relaunchWaiting(w, run);
+      return;
+    }
     if (!attempt) {
       const claimedAt = Date.parse(run.events[0]?.at ?? "");
       if (run.status === "running" && this.nowMs - claimedAt > LAUNCH_GRACE_MS) {
@@ -169,13 +176,18 @@ class TickPass {
 
     const timedOut = this.nowMs - Date.parse(attempt.started_at) > parseDuration(w.resolution.timeout);
     // Throws when the state is unknown (status timed out or could not run): an anomaly, not a
-    // failure. Past the timeout an unknown state still times the run out.
-    let status: ReturnType<typeof sessionStatus>;
+    // failure. Past the timeout an unknown state still times the run out. An unreachable
+    // machine is not a gone session either: try again on the next tick.
+    let status: StatusResult | null;
     try {
-      status = sessionStatus(session.spec, session.input);
+      status = session.ops.status();
     } catch (err) {
-      if (!timedOut) throw err;
-      status = null;
+      if (timedOut) status = null;
+      else if (!(err instanceof MachineUnreachableError)) throw err;
+      else {
+        this.noteUnreachable(w, n, err);
+        return;
+      }
     }
     const gone = status?.state === "gone" || status?.state === "exited";
     if (timedOut && !gone) {
@@ -197,6 +209,14 @@ class TickPass {
       default:
         if (run.status === "blocked") this.setBlocked(w, n, false);
     }
+  }
+
+  /** One `machine_unreachable` event per outage, so `log` shows why a running run is not watched. */
+  noteUnreachable(w: Watched, n: number, err: MachineUnreachableError): void {
+    updateRun(this.ctx, w.ref, (r) => {
+      if (r.events.at(-1)?.event === MACHINE_UNREACHABLE) return;
+      r.events.push({ at: this.at(w), event: MACHINE_UNREACHABLE, attempt: n, machine: err.machine, message: err.message });
+    });
   }
 
   setBlocked(w: Watched, n: number, blocked: boolean): void {
@@ -234,8 +254,51 @@ class TickPass {
     if (!record || record.closed_at || record.kept_open || (record.close_attempts ?? 0) >= MAX_CLOSE_ATTEMPTS) return;
     if (this.nowMs - Date.parse(attempt.finished_at!) < CLOSE_GRACE_MS) return;
     const session = sessionFor(this.ctx, w.task, w.resolution, run);
-    if (session && sessionStatus(session.spec, session.input)?.state === "gone") markSessionGone(this.ctx, w.ref, this.at(w));
+    let state: string | undefined;
+    try {
+      state = session?.ops.status()?.state;
+    } catch (err) {
+      if (err instanceof MachineUnreachableError) return; // close it once the machine is back
+      throw err;
+    }
+    if (state === "gone") markSessionGone(this.ctx, w.ref, this.at(w));
     else this.settle(w, { capture: true });
+  }
+
+  /**
+   * A due run whose machine was unreachable at launch: launch it again, or
+   * once its slot is later than max_delay, record it as missed.
+   */
+  relaunchWaiting(w: Watched, run: Run): void {
+    // Paused or removed meanwhile: cancelled, like the slots of a paused task.
+    const stop: [RunStatus, string] | null =
+      w.archived || !w.task.enabled
+        ? ["cancelled", w.archived ? "archived" : "paused"]
+        : this.nowMs - Date.parse(run.slot) > parseDuration(w.resolution.max_delay)
+          ? ["missed", MACHINE_UNREACHABLE]
+          : null;
+    if (stop) {
+      const [status, reason] = stop;
+      let ended = false;
+      updateRun(this.ctx, w.ref, (r) => {
+        if (!isWaitingForMachine(r)) return;
+        r.status = status;
+        r.reason = reason;
+        r.events.push({ at: this.at(w), event: status, reason, by: "tick" });
+        ended = true;
+      });
+      if (ended) this.events.push({ type: status as ExecEventType, run_ref: w.ref, task_id: w.task.id, reason });
+      return;
+    }
+    const notWaiting = new AgentTasksError("not_waiting", `${w.ref} was launched meanwhile`);
+    try {
+      const precheck = (r: Run) => {
+        if (!isWaitingForMachine(r)) throw notWaiting;
+      };
+      this.events.push(...startAttempt(this.ctx, w.task, w.ref, { by: "tick", deferUnreachable: true, precheck }));
+    } catch (err) {
+      if (err !== notWaiting) throw err; // another tick launched it
+    }
   }
 
   /** A run whose failure was just reported gets a new attempt while it has retries left (not for paused or archived tasks). */
@@ -281,7 +344,7 @@ class TickPass {
     for (const slot of plan.candidates) {
       const run = newRun(task.id, slot.at, resolution.timezone, "schedule", "running", null, { event: "claimed", by: "tick" }, at);
       if (!claimRun(ctx.paths, run)) continue; // another tick took it
-      this.events.push(...startAttempt(ctx, task, runRef(task.id, slot.id), { by: "tick" }));
+      this.events.push(...startAttempt(ctx, task, runRef(task.id, slot.id), { by: "tick", deferUnreachable: true }));
     }
   }
 }

@@ -5,7 +5,7 @@ import { UsageError, ValidationError } from "../errors.ts";
 import { parseJsonObject, readStdin } from "../input.ts";
 import { type Task, taskErrors } from "../schema.ts";
 import { taskPath } from "../store.ts";
-import { applyTaskFlags, checkTaskMachine, displayPath, normalizeTaskCwdFor, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE } from "../task-flags.ts";
+import { applyTaskFlags, checkTaskCwd, checkTaskMachine, displayPath, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE, writeWarnings } from "../task-flags.ts";
 import { createTaskFromTitle, createTaskWithId } from "../task-id.ts";
 import { describeNext, nowIso, taskOverview } from "../task-info.ts";
 import type { Command } from "./types.ts";
@@ -71,15 +71,16 @@ runs.`,
     const errors = taskErrors({ ...task, id: explicitId ?? "placeholder" });
     if (errors.length > 0) throw new ValidationError("task", errors);
     checkTaskMachine(ctx, task.machine);
-    task.cwd = normalizeTaskCwdFor(ctx, task.cwd, task.machine);
+    const warnings = checkTaskCwd(ctx, task as Task);
 
     const created = explicitId !== undefined ? createTaskWithId(ctx, task, explicitId) : createTaskFromTitle(ctx, task as Partial<Task> & { title: string });
     if (created.schedule.type === "once" && Date.parse(created.schedule.at) <= ctx.now.getTime() && !ctx.json) {
       ctx.stderr.write(`warning: ${created.schedule.at} is not in the future; the next tick runs it if it is within max_delay, otherwise it is missed\n`);
     }
 
+    writeWarnings(ctx, warnings);
     const overview = taskOverview(ctx, created);
-    output(ctx, { task: created, next_runs: overview.next }, () =>
+    output(ctx, { task: created, next_runs: overview.next, ...(warnings.length > 0 ? { warnings } : {}) }, () =>
       [`Created task ${created.id}`, `  file: ${displayPath(ctx, taskPath(ctx.paths, created.id))}`, describeNext(overview)].join("\n"),
     );
   },

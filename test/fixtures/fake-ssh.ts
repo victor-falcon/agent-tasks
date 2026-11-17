@@ -1,6 +1,7 @@
-// Fake `ssh` for the client mode tests: runs the remote command line locally
-// with `/bin/sh -c`, in the environment of the host alias, so a hub and a
-// client can live on one machine.
+// Fake `ssh` for the multi-machine tests (client forwarding, remote
+// execution): runs the remote command line locally with `/bin/sh -c`, in the
+// environment of the host alias, so a hub and a client can live on one
+// machine.
 //
 // $FAKE_SSH_DIR/hosts.json maps each alias to the environment of that "machine"
 // (HOME, AGENT_TASKS_HOME, AGENT_TASKS_CONFIG…); the command starts in its

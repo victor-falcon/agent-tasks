@@ -13,6 +13,7 @@ import install from "./install.ts";
 import list from "./list.ts";
 import log from "./log.ts";
 import pause from "./pause.ts";
+import { remoteCommands } from "./remote.ts";
 import resume from "./resume.ts";
 import retry from "./retry.ts";
 import rm from "./rm.ts";
@@ -52,6 +53,7 @@ export const commands: Command[] = [
   list,
   log,
   pause,
+  ...remoteCommands,
   resume,
   retry,
   rm,

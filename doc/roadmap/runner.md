@@ -97,6 +97,71 @@ As described in [phase-1-core.md](phase-1-core.md#tick-step-by-step):
 4. Closes the subagents that have already finished but are still open.
 5. Notifies and writes to the screen.
 
+### Remote machines
+
+The runner only runs on the hub. A task whose `machine` is not the hub is
+launched, watched and closed on that machine over SSH: the hub runs
+`ssh -o BatchMode=yes -o ConnectTimeout=10 <machines[name].ssh>
+~/.local/bin/agent-tasks remote <op> --json` with a JSON payload on stdin
+(`"protocol": 1`) and reads a JSON answer on stdout. The `remote` commands
+always run on the machine itself (a client never forwards them):
+
+| Op | Payload (besides `protocol`) | Answer |
+|---|---|---|
+| `launch` | `machine`, `task` (`id`, `title`, `cwd`, `agent`), `run_ref`, `slot`, `slot_id`, `attempt` | `launcher`, `handle`, `pid`, `delivered`, `error`, `agent`, `cwd` |
+| `status` | the same plus `handle` | `state` (null without a `status` command), `raw` |
+| `read` | the same plus `mode`: `screen` or `capture` | `output`, `source` |
+| `close` | the same plus `handle` | `closed` (null without a `close` command), `error` |
+| `check-cwd` | `cwd` | `exists`, `path`, `cwd` (with `~`) |
+| `instructions` | `task` (`cwd`, `agent`) | `cwd`, `personal_instructions`, `missing_instructions` |
+
+The execution machine resolves the launcher, agent, profile (matched by the
+task's `cwd` there), skill, env, prompt template and personal instructions
+with its own config; the hub keeps time zones, scheduling, timeouts, retries,
+`keep_open` and notifiers (those come from the hub's config, its profiles
+matched against the task's `cwd`). Errors come back as the usual `--json`
+error object, and both sides check `protocol`. The attempt's session records
+`machine`, so later status, read and close go to the same place; runs
+without it ran on the hub.
+
+The agent's environment points `AGENT_TASKS_CONFIG` at the execution
+machine's config, so its `agent-tasks task` and `finish` reach the hub
+through the client's forwarding (t2). `task` asks the execution machine
+(`instructions`) for the task folder and personal instructions.
+
+- **Logs**: a background launcher (`process`) writes to
+  `<data_dir>/remote/<task>/<slot>[.n].log` on the machine; when the session
+  ends, `read --mode capture` copies it (or the screen) into the hub's log.
+- **Unreachable at launch** (ssh exit 255): the due slot keeps no attempt and
+  waits (status `running`, reason `machine_unreachable`, one
+  `machine_unreachable` event); every tick tries again until `max_delay` has
+  passed, then it is `missed` with reason `machine_unreachable` and notified
+  like any missed slot. If the task is paused or removed meanwhile, the slot
+  is `cancelled` (`paused`/`archived`). Manual runs and retries fail right
+  away with that reason.
+- **Launch is idempotent per attempt**: exit 255 also happens when the
+  connection breaks after the remote command started. The machine keeps
+  `<data_dir>/remote/<task>/<slot>[.n].launch.json` and, while that session
+  is alive, answers a repeated `launch` with it (`reused: true`) instead of
+  starting a second agent. A launch that times out on the hub (no answer in
+  90s) still ends as `launch_failed`, and its session, if any, is left there.
+- **Unreachable while running**: never `gone`. Tick adds one
+  `machine_unreachable` event per outage and tries again on the next pass;
+  timeouts still apply. A close that cannot reach the machine sets
+  `close_pending` (it closes on a later tick whatever `keep_open` says), does
+  not count as a failed close, and is retried quietly until the machine is
+  back.
+- **One wait per tick**: once a machine is found unreachable, the rest of
+  that tick skips it, so a machine that is off costs one SSH connect timeout
+  (10s) per tick, not one per run.
+- **`finish`** (forwarded from the client to the hub) closes the session on
+  its machine.
+- **`add`/`edit`** check a remote task's `cwd` with `check-cwd`: a missing
+  folder is an error; an unreachable machine saves the task with a warning
+  (stderr, and `warnings` with `--json`). The `cwd` must be absolute or start
+  with `~`.
+- `attach` and `log --follow` of remote sessions come later (t4).
+
 ## Notifications (notifiers)
 
 The runner screen is the main notification. To find out without watching it,

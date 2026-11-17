@@ -4,7 +4,7 @@ import { UsageError, ValidationError } from "../errors.ts";
 import { parseJsonObject, readFileArg } from "../input.ts";
 import { isObject, orderTaskKeys, type Task, TASK_FIELDS, taskErrors } from "../schema.ts";
 import { writeTask } from "../store.ts";
-import { applyTaskFlags, checkTaskMachine, normalizeTaskCwdFor, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE } from "../task-flags.ts";
+import { applyTaskFlags, checkTaskCwd, checkTaskMachine, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE, writeWarnings } from "../task-flags.ts";
 import { describeNext, nowIso, readActiveTask, taskOverview } from "../task-info.ts";
 import type { Command } from "./types.ts";
 
@@ -67,7 +67,8 @@ ${TASK_FLAGS_USAGE}
     const errors = taskErrors(task);
     if (errors.length > 0) throw new ValidationError("task", errors);
     if (task.machine !== old.machine) checkTaskMachine(ctx, task.machine);
-    if (task.cwd !== old.cwd) task.cwd = normalizeTaskCwdFor(ctx, task.cwd, task.machine);
+    // A task moved to another machine has its folder checked there.
+    const warnings = task.cwd !== old.cwd || task.machine !== old.machine ? checkTaskCwd(ctx, task) : [];
 
     const changed = EDITABLE.filter((k) => !Bun.deepEquals(task[k as keyof Task], old[k as keyof Task]));
     if (changed.length === 0) {
@@ -82,7 +83,8 @@ ${TASK_FLAGS_USAGE}
     writeTask(ctx.paths, task);
 
     const overview = taskOverview(ctx, task);
-    output(ctx, { task, changed, next_runs: overview.next }, () => [`Updated ${task.id}: ${changed.join(", ")}`, describeNext(overview)].join("\n"));
+    writeWarnings(ctx, warnings);
+    output(ctx, { task, changed, next_runs: overview.next, ...(warnings.length > 0 ? { warnings } : {}) }, () => [`Updated ${task.id}: ${changed.join(", ")}`, describeNext(overview)].join("\n"));
   },
 };
 

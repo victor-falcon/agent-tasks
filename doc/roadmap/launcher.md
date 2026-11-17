@@ -201,6 +201,13 @@ command by hand, which is the way to go for Orca or any other environment.
 | The agent command (`clc`, `claude`…) | `agent` in the config and in the per-folder `profiles` |
 | The skill that is invoked | `skill` in the config (`run-agent-task` by default); can be swapped for your own |
 
+On a task that runs on another machine, every launcher command runs there,
+with that machine's own `launcher`, `agent`, `profiles`, `skill` and
+`templates/prompt.md` (see [runner.md](runner.md#remote-machines)). Its
+environment is that of a non-interactive SSH session plus `~/.local/bin` in
+`PATH`, so launchers that need `$HC_TERMINAL_ID` (`herdr` with
+`runner_terminal`) do not fit there; `process` or `tmux` do.
+
 ## Steps
 
 | # | Step | Done when |
