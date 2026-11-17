@@ -1,16 +1,14 @@
 import { forwardToHub, runsLocally } from "./client.ts";
 import { commands, findCommand, subcommandsOf } from "./commands/index.ts";
 import { createContext, type Writer } from "./context.ts";
-import { AgentTasksError, UsageError } from "./errors.ts";
+import { AgentTasksError, EXIT_ERROR, EXIT_OK, EXIT_USAGE, UsageError } from "./errors.ts";
 import type { Env } from "./paths.ts";
 import { printHelp } from "./help.ts";
 import { withSchema } from "./output/json.ts";
 import { CLIENT_PROTOCOL_FLAG, REMOTE_PROTOCOL } from "./ssh.ts";
 import { parseIsoTimestamp } from "./time.ts";
 
-export const EXIT_OK = 0;
-export const EXIT_ERROR = 1;
-export const EXIT_USAGE = 2;
+export { EXIT_ERROR, EXIT_OK, EXIT_USAGE } from "./errors.ts";
 
 export interface GlobalFlags {
   json: boolean;
@@ -125,10 +123,11 @@ function forwardedGlobals(flags: GlobalFlags): string[] {
 function checkClientProtocol(value: string): void {
   if (value === String(REMOTE_PROTOCOL)) return;
   const theirs = Number(value);
-  const update = Number.isInteger(theirs) && theirs < REMOTE_PROTOCOL ? "the client" : "this hub";
+  if (!/^\d+$/.test(value)) throw new UsageError(`${CLIENT_PROTOCOL_FLAG} must be a protocol number (got ${JSON.stringify(value)})`);
+  const update = theirs < REMOTE_PROTOCOL ? "the client" : "this hub";
   throw new AgentTasksError(
     "protocol_mismatch",
-    `the client speaks agent-tasks protocol ${JSON.stringify(value)} and this hub speaks ${REMOTE_PROTOCOL}; update agent-tasks on ${update} (git pull in its agent-tasks checkout)`,
+    `the client speaks agent-tasks protocol ${theirs} and this hub speaks ${REMOTE_PROTOCOL}; update agent-tasks on ${update} (git pull in its agent-tasks checkout)`,
   );
 }
 

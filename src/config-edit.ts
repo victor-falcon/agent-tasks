@@ -1,3 +1,8 @@
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { configErrors } from "./config.ts";
+import { AgentTasksError } from "./errors.ts";
+
 // Editing top-level keys of config.json in place, keeping the rest of the
 // file (its order, blank lines and formatting) as it is. Used by
 // `init --join` and `machines add|rm`. An edit is only written when the
@@ -149,5 +154,39 @@ export function setTopLevelKeys(text: string, values: Record<string, unknown>): 
     return Bun.deepEquals(JSON.parse(out), expected, true) ? out : null;
   } catch {
     return null;
+  }
+}
+
+/** The error for a config that can't be edited safely, with the lines to set by hand. */
+export function handEditError(file: string, values: Record<string, unknown>, then = ""): AgentTasksError {
+  const lines = Object.entries(values).map(([k, v]) => `"${k}": ${formatJson(v, "  ")},`);
+  return new AgentTasksError("config_not_edited", `could not edit ${file} safely; set these top-level keys in it by hand${then}:`, lines);
+}
+
+/** Whether `setTopLevelKeys` can set these keys in the config file (true when it does not exist yet). */
+export function canSetConfigKeys(file: string, values: Record<string, unknown>): boolean {
+  return !existsSync(file) || setTopLevelKeys(readFileSync(file, "utf8"), values) !== null;
+}
+
+/**
+ * Sets top-level keys of config.json, keeping the rest of the file as it
+ * is. A missing file is created with just these keys. Throws (with the lines
+ * to write by hand) when the file can't be edited safely, and when the result
+ * would not be a valid config.
+ */
+export function writeConfigKeys(file: string, values: Record<string, unknown>): void {
+  const text = existsSync(file) ? readFileSync(file, "utf8") : "{}\n";
+  const edited = setTopLevelKeys(text, values);
+  if (edited === null) throw handEditError(file, values);
+  const errors = configErrors(JSON.parse(edited));
+  if (errors.length > 0) throw new AgentTasksError("invalid_config", `${file} would not be a valid config after this change:`, errors);
+  const tmp = `${file}.tmp-${process.pid}`;
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(tmp, edited.endsWith("\n") ? edited : `${edited}\n`);
+    renameSync(tmp, file);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw new AgentTasksError("config_write", `could not write ${file}: ${(err as Error).message}`);
   }
 }

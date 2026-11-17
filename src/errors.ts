@@ -1,3 +1,9 @@
+/** The CLI's exit codes. */
+export const EXIT_OK = 0;
+export const EXIT_ERROR = 1;
+/** Wrong usage (UsageError). */
+export const EXIT_USAGE = 2;
+
 /** Base class for errors the CLI reports to the user with exit code 1. */
 export class AgentTasksError extends Error {
   readonly code: string;

@@ -1,9 +1,10 @@
 import { parseCommandArgs } from "../args.ts";
-import { type Check, checksJson, hasErrors, renderCheck, renderChecks } from "../checks.ts";
+import { checksJson, hasErrors, renderCheck, renderChecks } from "../checks.ts";
 import { isHub, localMachine, type MachineEntry } from "../config.ts";
 import { type Context, output } from "../context.ts";
 import { AgentTasksError, NotFoundError, UsageError } from "../errors.ts";
-import { type PingResult, pingCheck, pingMachine, writeConfigKeys } from "../machines.ts";
+import { writeConfigKeys } from "../config-edit.ts";
+import { checkRegisteredMachine, sshMachines } from "../machines.ts";
 import { tildify } from "../paths.ts";
 import { Checker, checkMachineName } from "../schema.ts";
 import { listTasks } from "../store.ts";
@@ -25,12 +26,6 @@ function checkName(name: string): void {
   const c = new Checker();
   checkMachineName(c, name);
   if (c.errors.length > 0) throw new UsageError(`machine name ${c.errors[0]}`);
-}
-
-/** Pings a registered machine and turns the answer into a doctor line. */
-export function checkRegisteredMachine(ctx: Context, name: string, ssh: string): { result: PingResult; check: Check } {
-  const result = pingMachine({ machine: name, ssh }, ctx.env);
-  return { result, check: pingCheck(result, { id: "machines.reachable", mustBeClient: true, unreachable: "warn" }) };
 }
 
 const list: Command = {
@@ -79,8 +74,8 @@ Options:
     if (name === localMachine(ctx.config.config)) throw new UsageError(`"${name}" is this hub's own name; it is always local`);
     const before = registry(ctx)[name];
     const action = before?.ssh === ssh ? "unchanged" : before ? "updated" : "added";
-    if (action !== "unchanged") writeConfigKeys(ctx.config.file, { machines: { ...registry(ctx), [name]: { ssh } } });
-    const { result, check } = checkRegisteredMachine(ctx, name, ssh);
+    if (action !== "unchanged") writeConfigKeys(ctx.config.file, { machines: { ...registry(ctx), [name]: { ...before, ssh } } });
+    const { result, check } = checkRegisteredMachine({ machine: name, ssh }, ctx.env);
     const file = tildify(ctx.config.file, ctx.env);
     output(ctx, { machine: name, ssh, action, config: ctx.config.file, check, ping: result.answer }, () =>
       [`${action === "unchanged" ? "·" : "✓"} machine ${name} ${action} (ssh ${ssh}) in ${file}`, ...renderCheck(check)].join("\n"),
@@ -129,10 +124,10 @@ errors. "agent-tasks doctor" runs the same checks.`,
   run(ctx, args) {
     const { positionals } = parseCommandArgs(args, {}, { maxPositionals: 1 });
     requireHub(ctx);
-    const machines = Object.entries(registry(ctx)).filter(([, e]) => e.ssh !== undefined);
+    const machines = sshMachines(ctx.config.config);
     const name = positionals[0];
-    if (name !== undefined && !machines.some(([n]) => n === name)) throw new NotFoundError(`machine "${name}" is not in the hub's \`machines\``);
-    const checks = machines.filter(([n]) => name === undefined || n === name).map(([n, e]) => checkRegisteredMachine(ctx, n, e.ssh!).check);
+    if (name !== undefined && !machines.some((m) => m.machine === name)) throw new NotFoundError(`machine "${name}" is not in the hub's \`machines\``);
+    const checks = machines.filter((m) => name === undefined || m.machine === name).map((m) => checkRegisteredMachine(m, ctx.env).check);
     output(ctx, checksJson(checks), () => (checks.length === 0 ? "No machines in the registry." : renderChecks(checks)));
     return hasErrors(checks) ? 1 : 0;
   },

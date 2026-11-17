@@ -1,7 +1,7 @@
 import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type Check, fail, ok, warn } from "./checks.ts";
-import { callHub } from "./client.ts";
+import { callHub } from "./hub.ts";
 import { BUILTIN_DEFAULTS, isHub, isKnownMachine, type LoadedConfig, localMachine, type UserConfig } from "./config.ts";
 import { configChecks, configuredLaunchers, findExecutable, launcherNeedsTerminal } from "./config-check.ts";
 import type { Context } from "./context.ts";
@@ -9,7 +9,7 @@ import { defaultMaxDelay, formatDuration, parseDuration } from "./duration.ts";
 import { CLI_BIN, type InstallDirs, installSources, linkStatus, samePath } from "./install.ts";
 import { AgentTasksError } from "./errors.ts";
 import { resolveLauncher } from "./launcher.ts";
-import { pingCheck, pingMachine } from "./machines.ts";
+import { checkRegisteredMachine, hubCheck, pingMachine, sshMachines } from "./machines.ts";
 import { type Paths, REPO_ROOT, resolveConfigLocation, tildify } from "./paths.ts";
 import { listTasks, readTicks } from "./store.ts";
 
@@ -134,43 +134,26 @@ function heartbeatCheck(ctx: Context, paths: Paths, loaded: LoadedConfig | null)
  */
 function hubChecks(ctx: Context, hubAlias: string): Check[] {
   const self = localMachine(ctx.config.config);
-  const ping = pingMachine({ machine: "hub", ssh: hubAlias }, ctx.env);
-  if (!ping.reachable) {
-    return [fail("hub.reachable", `the hub (ssh ${hubAlias}) is unreachable`, `check that "ssh ${hubAlias}" works without a password from here; every data command goes through it`, [ping.error!.message])];
-  }
-  if (ping.error) {
-    const old = ping.error.code === "usage" || ping.error.code === "remote_protocol";
-    return [fail("hub.reachable", `the hub (ssh ${hubAlias}): ${ping.error.message}`, old ? "update agent-tasks on both machines (git pull in each agent-tasks checkout)" : undefined)];
-  }
-  const a = ping.answer!;
-  if (a.hub !== null && a.hub !== undefined) {
-    return [fail("hub.reachable", `"${hubAlias}" is not a hub: it is a client of "${String(a.hub)}"`, `point "hub" in the config at the machine that holds the data`)];
-  }
-  const checks = [ok("hub.reachable", `hub ${String(a.machine)} (ssh ${hubAlias}): reachable, agent-tasks ${String(a.version)}, protocol ${String(a.protocol)}`)];
+  const check = hubCheck(pingMachine({ machine: "hub", ssh: hubAlias }, ctx.env));
+  if (check.status !== "ok") return [check];
+  let back: Check;
   try {
-    const back = callHub(ctx, hubAlias, ["machines", "check", self]);
-    const found = Array.isArray(back.checks) ? (back.checks[0] as Check | undefined) : undefined;
-    if (!found) checks.push(fail("hub.reach_back", "the hub did not report whether it reaches this machine"));
-    else checks.push({ ...found, id: "hub.reach_back", message: `hub → this machine: ${found.message}` });
+    const answer = callHub(ctx, hubAlias, ["machines", "check", self]);
+    const found = Array.isArray(answer.checks) ? (answer.checks[0] as Check | undefined) : undefined;
+    back = found ? { ...found, id: "hub.reach_back", message: `hub → this machine: ${found.message}` } : fail("hub.reach_back", "the hub did not report whether it reaches this machine");
   } catch (err) {
     if (!(err instanceof AgentTasksError)) throw err;
-    const missing = err.code === "not_found";
-    checks.push(
-      fail(
-        "hub.reach_back",
-        missing ? `this machine ("${self}") is not in the hub's \`machines\`` : `the hub could not check this machine: ${err.message.split("\n")[0]}`,
-        missing ? `run agent-tasks init --join ${hubAlias} --machine ${self} --ssh <alias the hub reaches this machine with>` : undefined,
-      ),
-    );
+    back =
+      err.code === "not_found"
+        ? fail("hub.reach_back", `this machine ("${self}") is not in the hub's \`machines\``, `run agent-tasks init --join ${hubAlias} --machine ${self} --ssh <alias the hub reaches this machine with>`)
+        : fail("hub.reach_back", `the hub could not check this machine: ${err.message.split("\n")[0]}`);
   }
-  return checks;
+  return [check, back];
 }
 
 /** On the hub: every machine in `machines` answers. Unreachable ones are warnings: machines sleep. */
 function machineChecks(ctx: Context, config: UserConfig): Check[] {
-  return Object.entries(config.machines ?? {})
-    .filter(([, entry]) => entry.ssh !== undefined)
-    .map(([name, entry]) => pingCheck(pingMachine({ machine: name, ssh: entry.ssh! }, ctx.env), { id: "machines.reachable", mustBeClient: true, unreachable: "warn" }));
+  return sshMachines(config).map((target) => checkRegisteredMachine(target, ctx.env).check);
 }
 
 export function doctorChecks(ctx: Context, dirs: InstallDirs): Check[] {

@@ -56,6 +56,7 @@ describe("protocol of forwarded commands", () => {
     const older = await s.hub.cli("--client-protocol=0", "list", "--json");
     expect(older.json().error.message).toContain("update agent-tasks on the client");
     expect((await s.hub.cli("--client-protocol=1", "list", "--json")).code).toBe(0);
+    expect((await s.hub.cli("--client-protocol=abc", "list", "--json")).json().error.message).toBe('--client-protocol must be a protocol number (got "abc")');
   });
 
   test("a hub too old to know the flag is reported as such, without its own error", async () => {
@@ -195,6 +196,44 @@ describe("init --join", () => {
     const r = await s.cli("init", "--join", "hub", "--machine", "mini", "--ssh", "mini-lan", "--json");
     expect(r.code).toBe(0);
     expect(readFileSync(s.client.configFile, "utf8")).toBe(`{\n  "machine": "mini",\n  "hub": { "ssh": "hub" },\n  "timezone": "Europe/Madrid",\n\n  "launcher": { "preset": "process" }\n}\n`);
+  });
+
+  test("says what it changed in an existing config", async () => {
+    freshMachine();
+    writeFileSync(s.client.configFile, `{\n  "machine": "local"\n}\n`);
+    const r = await s.cli("init", "--join", "hub", "--machine", "mini", "--ssh", "mini-lan");
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain(`✓ set "machine": "mini" (was "local") and "hub": { "ssh": "hub" } in ~/config/config.json`);
+  });
+
+  test("a hub that can't reach this machine back is an error, with how to fix the alias", async () => {
+    freshMachine();
+    const r = await s.cli("init", "--join", "hub", "--machine", "mini", "--ssh", "wrong-alias", "--json");
+    expect(r.code).toBe(1);
+    expect(r.json().join.check).toMatchObject({
+      status: "error",
+      message: "hub → this machine: machine mini (ssh wrong-alias) is unreachable",
+      hint: 'the hub must reach this machine as "wrong-alias": fix its SSH alias, then re-run with --ssh <the alias the hub uses for this machine>',
+    });
+    // It is joined and registered: re-running with the right alias fixes it.
+    expect(clientConfig()).toMatchObject({ machine: "mini", hub: { ssh: "hub" } });
+    const fixed = await s.cli("init", "--join", "hub", "--machine", "mini", "--ssh", "mini-lan", "--json");
+    expect(fixed.code).toBe(0);
+    expect(fixed.json().join).toMatchObject({ registered: "updated", check: { status: "ok" } });
+  });
+
+  test("a registration that fails on the hub says how to finish", async () => {
+    freshMachine();
+    chmodSync(s.hub.configDir, 0o555);
+    try {
+      const r = await s.cli("init", "--join", "hub", "--machine", "mini", "--ssh", "mini-lan", "--json");
+      expect(r.code).toBe(1);
+      expect(r.json().error.code).toBe("config_write");
+      expect(r.json().error.message).toStartWith('~/config/config.json now has "machine" and "hub", but registering this machine on the hub failed: could not write');
+      expect(r.json().error.message).toEndWith("Fix that, then finish with: agent-tasks machines add mini --ssh mini-lan");
+    } finally {
+      chmodSync(s.hub.configDir, 0o755);
+    }
   });
 
   test("an unreachable hub writes nothing", async () => {

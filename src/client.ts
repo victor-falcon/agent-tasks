@@ -12,17 +12,8 @@ import { parseJsonObject, readFileArg, readStdin, readStdinBytes } from "./input
 import { resolvePath } from "./paths.ts";
 import { attachHere } from "./remote.ts";
 import { isObject } from "./schema.ts";
-import {
-  CLIENT_PROTOCOL_FLAG,
-  COMMAND_NOT_FOUND_EXIT,
-  REMOTE_CLI,
-  REMOTE_PROTOCOL,
-  remoteCliLine,
-  runSshStreaming,
-  SSH_UNREACHABLE_EXIT,
-  SshSpawnError,
-  sshArgv,
-} from "./ssh.ts";
+import { callHub, hubGlobals, isOldHubRejection, notInstalledOnHub, oldHubError } from "./hub.ts";
+import { COMMAND_NOT_FOUND_EXIT, remoteCliLine, runSshStreaming, SshSpawnError, sshArgv } from "./ssh.ts";
 import { displayPath, isMachineIndependentPath, normalizeTaskCwd } from "./task-flags.ts";
 
 // Client mode: a machine whose config has `hub` keeps no data. It forwards
@@ -63,27 +54,6 @@ export interface Forward {
 /** How long a forwarded command's first output is held back, to catch a hub too old for `--client-protocol`. */
 const EARLY_OUTPUT_MS = 300;
 
-/** The error for a hub whose agent-tasks predates the protocol check. */
-export function oldHubError(hubAlias: string): AgentTasksError {
-  return new AgentTasksError(
-    "protocol_mismatch",
-    `the hub "${hubAlias}" runs an older agent-tasks that does not know this client's protocol (${REMOTE_PROTOCOL}); update agent-tasks on the hub (git pull in its agent-tasks checkout)`,
-  );
-}
-
-/** The CLI's exit code for usage errors (EXIT_USAGE in cli.ts). */
-const EXIT_USAGE = 2;
-
-/** Whether a command's failure is an old hub rejecting `--client-protocol` (a usage error naming it). */
-function isOldHubRejection(code: number, output: string): boolean {
-  return code === EXIT_USAGE && output.includes(CLIENT_PROTOCOL_FLAG);
-}
-
-/** The global flags of every forwarded command: the protocol first, so the hub checks it before anything else. */
-function hubGlobals(globals: string[]): string[] {
-  return [`${CLIENT_PROTOCOL_FLAG}=${REMOTE_PROTOCOL}`, ...globals];
-}
-
 /**
  * Runs a command on the hub and returns its exit code. `name` is the
  * command's full name and `args` its own arguments; `globals` are the global
@@ -118,49 +88,6 @@ export async function forwardToHub(ctx: Context, hubAlias: string, name: string,
   if (result.code === COMMAND_NOT_FOUND_EXIT) throw notInstalledOnHub(hubAlias);
   return result.code;
 }
-
-function notInstalledOnHub(hubAlias: string): HubUnreachableError {
-  return new HubUnreachableError(
-    hubAlias,
-    `could not run ${REMOTE_CLI} there: install agent-tasks on the hub ("agent-tasks install") and make sure bun is in the PATH of non-interactive SSH sessions`,
-  );
-}
-
-/**
- * Runs a command on the hub with `--json` and returns its JSON answer (not
- * printed). Throws the hub's error as it reported it.
- */
-export function callHub(ctx: Context, hubAlias: string, args: string[], globals: string[] = []): Record<string, unknown> {
-  const argv = sshArgv(hubAlias, remoteCliLine([...hubGlobals(["--json", ...globals.filter((g) => g !== "--json")]), ...args]));
-  let result: ReturnType<typeof Bun.spawnSync>;
-  try {
-    result = Bun.spawnSync({ cmd: argv, env: ctx.env as Record<string, string>, stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: HUB_CALL_TIMEOUT_MS });
-  } catch (err) {
-    throw new HubUnreachableError(hubAlias, `could not run ssh: ${(err as Error).message}`);
-  }
-  const stdout = result.stdout?.toString() ?? "";
-  const stderr = (result.stderr?.toString() ?? "").trim();
-  const code = result.exitCode;
-  if (code === SSH_UNREACHABLE_EXIT) throw new HubUnreachableError(hubAlias, stderr.split("\n").at(-1) || "ssh exited with 255");
-  if (code === null) throw new HubUnreachableError(hubAlias, `"agent-tasks ${args.join(" ")}" did not answer within ${HUB_CALL_TIMEOUT_MS / 1000}s`);
-  if (code === COMMAND_NOT_FOUND_EXIT && !stdout.trim()) throw notInstalledOnHub(hubAlias);
-  if (isOldHubRejection(code, stdout + stderr)) throw oldHubError(hubAlias);
-  let answer: unknown;
-  try {
-    answer = JSON.parse(stdout);
-  } catch {
-    const detail = (stderr || stdout.trim()).split("\n").slice(-3).join(" | ");
-    throw new AgentTasksError("hub_failed", `"agent-tasks ${args.join(" ")}" failed on the hub "${hubAlias}" (exit ${code})${detail ? `: ${detail}` : ""}`);
-  }
-  if (!isObject(answer)) throw new AgentTasksError("hub_failed", `"agent-tasks ${args.join(" ")}" on the hub "${hubAlias}" did not print a JSON object`);
-  if (isObject(answer.error)) {
-    const { code: errorCode, message, details } = answer.error;
-    throw new AgentTasksError(typeof errorCode === "string" ? errorCode : "hub_failed", String(message ?? "error on the hub"), Array.isArray(details) ? details.map(String) : []);
-  }
-  return answer;
-}
-
-const HUB_CALL_TIMEOUT_MS = 90_000;
 
 /**
  * `attach` from a client: when the session runs on this client, attach here

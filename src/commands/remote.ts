@@ -1,6 +1,7 @@
 import { parseCommandArgs } from "../args.ts";
 import { type Context, output } from "../context.ts";
 import { parseJsonObject, readStdin } from "../input.ts";
+import { REMOTE_PROTOCOL } from "../ssh.ts";
 import { attachHere, remoteCheckCwd, remoteClose, remoteInstructions, remoteLaunch, remotePing, remoteRead, remoteStatus } from "../remote.ts";
 import type { Command } from "./types.ts";
 
@@ -18,7 +19,7 @@ function remoteCommand(op: string, summary: string, handler: Handler): Command {
     hidden: true,
     usage: `Usage: agent-tasks remote ${op} --json < payload.json
 
-Called by the hub over SSH; reads a JSON payload (with "protocol": 1) on
+Called by the hub over SSH; reads a JSON payload (with "protocol": ${REMOTE_PROTOCOL}) on
 stdin and prints a JSON answer. Not meant to be run by hand.`,
     async run(ctx, args) {
       parseCommandArgs(args, {}, { maxPositionals: 0 });
@@ -40,7 +41,7 @@ const remoteAttach: Command = {
   usage: `Usage: agent-tasks remote attach --payload <json>
 
 Called by the hub over "ssh -t"; runs this machine's launcher \`attach\` for
-the session in the payload (with "protocol": 1) with the terminal handed
+the session in the payload (with "protocol": ${REMOTE_PROTOCOL}) with the terminal handed
 over, and exits with its exit code. Not meant to be run by hand.`,
   async run(ctx, args) {
     const { values } = parseCommandArgs(args, { payload: { type: "string" } }, { maxPositionals: 0 });

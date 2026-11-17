@@ -161,10 +161,13 @@ const REMOTE_TIMEOUT_MS = 90_000;
 /** The machine could not be reached over SSH. Never means the session is gone. */
 export class MachineUnreachableError extends AgentTasksError {
   readonly machine: string;
+  /** What ssh said, when known (also at the end of the message). */
+  readonly detail: string | null;
 
-  constructor(machine: string, message: string) {
-    super("machine_unreachable", message);
+  constructor(machine: string, message: string, detail: string | null = null) {
+    super("machine_unreachable", detail ? `${message}: ${detail}` : message);
     this.machine = machine;
+    this.detail = detail;
   }
 }
 
@@ -173,6 +176,62 @@ export interface RemoteTarget {
   machine: string;
   /** Its SSH host alias. */
   ssh: string;
+}
+
+/** What a non-interactive ssh call printed and how it ended (exit code null: timed out). */
+export interface SshCapture {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/** Runs an `ssh` argv and captures its output. Throws `ssh_failed` when ssh can't be started. */
+export function captureSsh(argv: string[], env: Env, opts: { input?: Uint8Array; timeoutMs: number; what: string }): SshCapture {
+  try {
+    const result = Bun.spawnSync({ cmd: argv, env: env as Record<string, string>, stdin: opts.input ?? "ignore", stdout: "pipe", stderr: "pipe", timeout: opts.timeoutMs });
+    return { code: result.exitCode, stdout: result.stdout?.toString() ?? "", stderr: (result.stderr?.toString() ?? "").trim() };
+  } catch (err) {
+    throw new AgentTasksError("ssh_failed", `could not run ssh for ${opts.what}: ${(err as Error).message}`);
+  }
+}
+
+/** The last line ssh printed about a failed connection. */
+export function sshFailure(capture: SshCapture): string {
+  return capture.stderr.split("\n").at(-1) || "ssh exited with 255";
+}
+
+/**
+ * The JSON object an `agent-tasks … --json` command run on `where` printed,
+ * or its error (same code and message, with `where` in front when
+ * `prefixErrors`) thrown. `failedCode` is the code when it printed no JSON.
+ */
+export function jsonAnswer(capture: SshCapture, opts: { command: string; where: string; failedCode: string; prefixErrors: boolean }): Record<string, unknown> {
+  const { stdout, stderr, code } = capture;
+  let answer: unknown;
+  try {
+    answer = JSON.parse(stdout);
+  } catch {
+    const detail = (stderr || stdout.trim()).split("\n").slice(-3).join(" | ");
+    throw new AgentTasksError(opts.failedCode, `${opts.command} on ${opts.where} failed (exit ${code})${detail ? `: ${detail}` : ""}`);
+  }
+  if (!isObject(answer)) throw new AgentTasksError(opts.failedCode, `${opts.command} on ${opts.where} did not print a JSON object`);
+  if (isObject(answer.error)) {
+    const { code: errorCode, message, details } = answer.error;
+    const lines = Array.isArray(details) ? details.map(String) : [];
+    const text = String(message ?? "error");
+    throw new AgentTasksError(typeof errorCode === "string" ? errorCode : opts.failedCode, opts.prefixErrors ? `${opts.where}: ${text}` : text, lines);
+  }
+  if (code !== 0) throw new AgentTasksError(opts.failedCode, `${opts.command} on ${opts.where} failed (exit ${code})`);
+  return answer;
+}
+
+/**
+ * Whether an error from another machine's agent-tasks means it is older than
+ * this one: it does not know a command or flag (a usage error), or speaks
+ * another `remote` protocol.
+ */
+export function isOldPeerError(err: { code: string }): boolean {
+  return err.code === "usage" || err.code === "remote_protocol";
 }
 
 /**
@@ -184,42 +243,14 @@ export interface RemoteTarget {
 export function callRemote(target: RemoteTarget, op: string, payload: Record<string, unknown>, env: Env, timeoutMs = REMOTE_TIMEOUT_MS): Record<string, unknown> {
   const argv = sshArgv(target.ssh, remoteCliLine(["remote", op, "--json"]));
   const where = `machine "${target.machine}" (ssh ${target.ssh})`;
-  let result: ReturnType<typeof Bun.spawnSync>;
-  try {
-    result = Bun.spawnSync({
-      cmd: argv,
-      env: env as Record<string, string>,
-      stdin: new TextEncoder().encode(JSON.stringify({ protocol: REMOTE_PROTOCOL, ...payload })),
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: timeoutMs,
-    });
-  } catch (err) {
-    throw new AgentTasksError("ssh_failed", `could not run ssh for ${where}: ${(err as Error).message}`);
-  }
-  const stdout = result.stdout?.toString() ?? "";
-  const stderr = (result.stderr?.toString() ?? "").trim();
-  const code = result.exitCode;
-  if (code === SSH_UNREACHABLE_EXIT) throw new MachineUnreachableError(target.machine, `${where} is unreachable${stderr ? `: ${stderr.split("\n").at(-1)}` : ""}`);
-  if (code === null) throw new AgentTasksError("remote_timeout", `remote ${op} on ${where} did not answer within ${Math.round(timeoutMs / 1000)}s`);
-  if (code === COMMAND_NOT_FOUND_EXIT && !stdout.trim()) {
+  const input = new TextEncoder().encode(JSON.stringify({ protocol: REMOTE_PROTOCOL, ...payload }));
+  const capture = captureSsh(argv, env, { input, timeoutMs, what: where });
+  if (capture.code === SSH_UNREACHABLE_EXIT) throw new MachineUnreachableError(target.machine, `${where} is unreachable`, sshFailure(capture));
+  if (capture.code === null) throw new AgentTasksError("remote_timeout", `remote ${op} on ${where} did not answer within ${Math.round(timeoutMs / 1000)}s`);
+  if (capture.code === COMMAND_NOT_FOUND_EXIT && !capture.stdout.trim()) {
     throw new AgentTasksError("remote_failed", `agent-tasks is not installed at ${REMOTE_CLI} on ${where}; run "agent-tasks install" there`);
   }
-
-  let answer: unknown;
-  try {
-    answer = JSON.parse(stdout);
-  } catch {
-    const detail = (stderr || stdout.trim()).split("\n").slice(-3).join(" | ");
-    throw new AgentTasksError("remote_failed", `remote ${op} on ${where} failed (exit ${code})${detail ? `: ${detail}` : ""}`);
-  }
-  if (!isObject(answer)) throw new AgentTasksError("remote_failed", `remote ${op} on ${where} did not print a JSON object`);
-  if (isObject(answer.error)) {
-    const { code: errorCode, message, details } = answer.error;
-    const lines = Array.isArray(details) ? details.map(String) : [];
-    throw new AgentTasksError(typeof errorCode === "string" ? errorCode : "remote_failed", `${where}: ${String(message ?? "remote error")}`, lines);
-  }
-  if (code !== 0) throw new AgentTasksError("remote_failed", `remote ${op} on ${where} failed (exit ${code})`);
+  const answer = jsonAnswer(capture, { command: `remote ${op}`, where, failedCode: "remote_failed", prefixErrors: true });
   if (answer.protocol !== REMOTE_PROTOCOL) {
     throw new AgentTasksError("remote_protocol", `remote ${op} on ${where} answered with protocol ${JSON.stringify(answer.protocol ?? null)}, not ${REMOTE_PROTOCOL}; update agent-tasks on both machines`);
   }

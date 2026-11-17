@@ -23,16 +23,12 @@ function activeRun(taskId: string) {
   };
 }
 
-/** A live session to attach to: here (with its attach command), or on another machine. */
-interface Live {
+/** A live session to attach to: here (with this machine's attach command), or on another machine. */
+type Live = {
   session: Session;
   /** The machine that runs it. */
   machine: string;
-  /** How to reach it, when it is not this machine. */
-  target: RemoteTarget | null;
-  /** This machine's attach command, for a session here. */
-  argv: string[] | null;
-}
+} & ({ where: "here"; argv: string[] } | { where: "remote"; target: RemoteTarget });
 
 /** The run's session, checked to be alive. */
 function liveSession(ctx: Context, run: Run, ref: string): Live {
@@ -45,12 +41,12 @@ function liveSession(ctx: Context, run: Run, ref: string): Live {
   if (status && (status.state === "gone" || status.state === "exited")) throw new SessionGoneError(`the session of ${ref} is ${status.state} (${run.status}); ${seeLog}`);
   const machine = session.ops.machine ?? localMachine(ctx.config.config);
   // Its machine checks that the launcher there has an attach command.
-  if (!session.spec) return { session, machine, target: machineTarget(ctx, machine), argv: null };
+  if (!session.spec) return { session, machine, where: "remote", target: machineTarget(ctx, machine)! };
   const { spec } = session;
   if (!spec.attach) {
     throw new LauncherError(`the ${spec.name} launcher has no attach command; read the session's screen with "agent-tasks session read ${ref}" or follow it with "agent-tasks log ${ref} --follow"`);
   }
-  return { session, machine, target: null, argv: renderCommand(spec.attach, session.input, "launcher.attach") };
+  return { session, machine, where: "here", argv: renderCommand(spec.attach, session.input, "launcher.attach") };
 }
 
 /** The payload `remote attach` gets: what the session's machine needs to find it. */
@@ -61,8 +57,8 @@ function attachPayload(live: Live): Record<string, unknown> {
 
 /** Attaches with the terminal handed over and returns the exit code and the command run. */
 async function attachTo(ctx: Context, live: Live): Promise<{ code: number; argv: string[] }> {
-  if (live.argv) return { argv: live.argv, code: await handOverTerminal(live.argv, { cwd: live.session.input.cwd, env: commandEnv(live.session.input) }) };
-  const target = live.target!;
+  if (live.where === "here") return { argv: live.argv, code: await handOverTerminal(live.argv, { cwd: live.session.input.cwd, env: commandEnv(live.session.input) }) };
+  const { target } = live;
   // `remote attach` runs that machine's own launcher; -tt gives it a terminal.
   const argv = sshArgv(target.ssh, remoteCliLine(["remote", "attach", "--payload", JSON.stringify(attachPayload(live))]), { tty: true });
   const code = await handOverTerminal(argv, { cwd: ctx.cwd, env: ctx.env });

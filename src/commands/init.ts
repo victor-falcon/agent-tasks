@@ -2,12 +2,11 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { dirname, join } from "node:path";
 import { parseCommandArgs } from "../args.ts";
 import { type Check, fail, renderCheck } from "../checks.ts";
-import { callHub, oldHubError } from "../client.ts";
-import { formatJson, setTopLevelKeys } from "../config-edit.ts";
+import { canSetConfigKeys, handEditError, writeConfigKeys } from "../config-edit.ts";
+import { callHub, oldHubError } from "../hub.ts";
 import { AgentTasksError, HubUnreachableError, UsageError } from "../errors.ts";
-import { writeConfigKeys } from "../machines.ts";
 import { Checker, checkMachineName, isObject } from "../schema.ts";
-import { callRemote, MachineUnreachableError } from "../ssh.ts";
+import { callRemote, isOldPeerError, MachineUnreachableError } from "../ssh.ts";
 import type { UserConfig } from "../config.ts";
 import { instructionRefs } from "../config-check.ts";
 import { type Context, output } from "../context.ts";
@@ -117,13 +116,13 @@ Options:
       { launcher: { type: "string" }, join: { type: "string" }, machine: { type: "string" }, ssh: { type: "string" } },
       { maxPositionals: 0 },
     );
-    const join_ = joinRequest(values);
+    const request = joinRequest(values);
     const asked = values.launcher as string | undefined;
     if (asked !== undefined && !INIT_PRESETS.includes(asked as InitPreset)) throw new UsageError(`--launcher must be one of ${INIT_PRESETS.join(", ")}`);
     const launcher: LauncherChoice = asked ? { preset: asked as InitPreset, reason: "--launcher" } : detectLauncher(ctx.env);
     const { configDir, configFile } = resolveConfigLocation(ctx.env);
     // Before writing anything: the config can take the keys, and the hub answers.
-    const hub = join_ ? checkHub(ctx, configFile, join_) : null;
+    const hub = request ? verifyJoinable(ctx, configFile, request) : null;
     const instructionsDir = join(configDir, "instructions");
     const files: InitFile[] = [];
     const write = (path: string, content: string): InitFile["action"] => {
@@ -144,7 +143,7 @@ Options:
       for (const { file } of instructionRefs(JSON.parse(example) as UserConfig)) write(resolvePath(file, ctx.env, instructionsDir), placeholder(file));
     }
 
-    const joined = join_ && hub ? joinHub(ctx, configFile, join_, hub) : null;
+    const joined = request && hub ? joinHub(ctx, configFile, request, hub) : null;
 
     const show = (p: string) => tildify(p, ctx.env);
     const where: Record<Exclude<InitPreset, "process">, { unit: string; place: string }> = {
@@ -222,47 +221,62 @@ const joinKeys = (req: JoinRequest) => ({ machine: req.machine, hub: { ssh: req.
  * of the hub: its config can take the keys, and the hub answers over SSH with
  * the same protocol. Returns the hub's ping answer.
  */
-function checkHub(ctx: Context, configFile: string, req: JoinRequest): Record<string, unknown> {
+function verifyJoinable(ctx: Context, configFile: string, req: JoinRequest): Record<string, unknown> {
   if (existsSync(configFile)) {
-    const config = ctx.config.config;
-    if (config.machines && Object.keys(config.machines).length > 0) {
-      throw new AgentTasksError(
-        "is_hub",
-        `this machine is a hub: ${tildify(configFile, ctx.env)} has \`machines\` (${Object.keys(config.machines).join(", ")}); a hub can't join another hub`,
-      );
+    const machines = Object.keys(ctx.config.config.machines ?? {});
+    if (machines.length > 0) {
+      throw new AgentTasksError("is_hub", `this machine is a hub: ${tildify(configFile, ctx.env)} has \`machines\` (${machines.join(", ")}); a hub can't join another hub`);
     }
-    if (setTopLevelKeys(readFileSync(configFile, "utf8"), joinKeys(req)) === null) {
-      const lines = Object.entries(joinKeys(req)).map(([k, v]) => `"${k}": ${formatJson(v, "  ")},`);
-      throw new AgentTasksError("config_not_edited", `could not edit ${configFile} safely; set these top-level keys in it by hand, then run this again:`, lines);
-    }
+    if (!canSetConfigKeys(configFile, joinKeys(req))) throw handEditError(configFile, joinKeys(req), ", then run this again");
   }
   let answer: Record<string, unknown>;
   try {
     answer = callRemote({ machine: "hub", ssh: req.hub }, "ping", {}, ctx.env);
   } catch (err) {
-    if (err instanceof MachineUnreachableError) throw new HubUnreachableError(req.hub, err.message.replace(/^.*? is unreachable:? ?/, "") || "ssh failed");
-    if (err instanceof AgentTasksError && err.code === "usage") throw oldHubError(req.hub);
+    if (err instanceof MachineUnreachableError) throw new HubUnreachableError(req.hub, err.detail ?? "ssh failed");
+    if (err instanceof AgentTasksError && isOldPeerError(err)) throw oldHubError(req.hub);
     throw err;
   }
-  if (answer.hub !== null && answer.hub !== undefined) {
-    throw new AgentTasksError("not_a_hub", `"${req.hub}" is not a hub: it is a client of "${String(answer.hub)}" itself; join that one`);
-  }
+  if (typeof answer.hub === "string") throw new AgentTasksError("not_a_hub", `"${req.hub}" is not a hub: it is a client of "${answer.hub}" itself; join that one`);
   if (answer.machine === req.machine) throw new UsageError(`"${req.machine}" is the hub's own name; pick another --machine`);
   return answer;
 }
 
-/** Writes `machine` and `hub`, registers this machine on the hub and reports whether the hub reaches it back. */
+/**
+ * Writes `machine` and `hub`, registers this machine on the hub and checks
+ * that the hub reaches it back. Here an unreachable machine is an error, not
+ * a warning: it is this one, awake, so the hub's alias for it is wrong.
+ */
 function joinHub(ctx: Context, configFile: string, req: JoinRequest, hub: Record<string, unknown>) {
+  const previous = existsSync(configFile) ? ctx.config.config : {};
   writeConfigKeys(configFile, joinKeys(req));
-  const added = callHub(ctx, req.hub, ["machines", "add", req.machine, "--ssh", req.ssh]);
-  const check = (isObject(added.check) ? added.check : fail("machines.reachable", "the hub did not report whether it reaches this machine")) as Check;
   const show = tildify(configFile, ctx.env);
+  const register = `agent-tasks machines add ${req.machine} --ssh ${req.ssh}`;
+  let added: Record<string, unknown>;
+  try {
+    added = callHub(ctx, req.hub, ["machines", "add", req.machine, "--ssh", req.ssh]);
+  } catch (err) {
+    if (!(err instanceof AgentTasksError)) throw err;
+    throw new AgentTasksError(
+      err.code,
+      `${show} now has "machine" and "hub", but registering this machine on the hub failed: ${err.message}\nFix that, then finish with: ${register}`,
+    );
+  }
+  let check = (isObject(added.check) ? added.check : fail("machines.reachable", "the hub did not report whether it reaches this machine")) as Check;
+  if (check.status === "warn") {
+    check = { ...check, status: "error", hint: `the hub must reach this machine as "${req.ssh}": fix its SSH alias, then re-run with --ssh <the alias the hub uses for this machine>` };
+  }
+  check = { ...check, message: `hub → this machine: ${check.message}` };
+  const was = (key: "machine" | "hub", now: string) => {
+    const before = key === "hub" ? previous.hub?.ssh : previous.machine;
+    return before !== undefined && before !== now ? ` (was ${JSON.stringify(before)})` : "";
+  };
   const json = { hub: req.hub, hub_machine: hub.machine, hub_version: hub.version, machine: req.machine, ssh: req.ssh, registered: added.action, check };
   const lines = [
     `✓ hub "${req.hub}" answers: machine ${String(hub.machine)}, agent-tasks ${String(hub.version)}`,
-    `✓ set "machine": "${req.machine}" and "hub": { "ssh": "${req.hub}" } in ${show}`,
+    `✓ set "machine": "${req.machine}"${was("machine", req.machine)} and "hub": { "ssh": "${req.hub}" }${was("hub", req.hub)} in ${show}`,
     `✓ registered on the hub as machines.${req.machine} = { "ssh": "${req.ssh}" } (${String(added.action)})`,
-    ...renderCheck(check).map((l) => l.replace(/^([✓!✕]) /, "$1 hub → this machine: ")),
+    ...renderCheck(check),
   ];
   return { json, lines, check };
 }
