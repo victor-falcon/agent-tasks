@@ -119,6 +119,9 @@ Phase 2 (details in [phase-2-cli-ui.md](phase-2-cli-ui.md))
 
 - Dependencies between tasks, queues or priorities.
 - Multiple machines: in progress. Tasks carry a `machine` and the config has
-  `machine`, `machines` (on the hub) and `hub` (on clients); forwarding
-  commands from clients and launching on other machines are not implemented yet.
+  `machine`, `machines` (on the hub) and `hub` (on clients); the hub
+  launches, watches and closes sessions on other machines over SSH
+  ([runner.md](runner.md#remote-machines)), and clients forward data commands
+  to the hub ([user-config.md](user-config.md#client-mode)). Remote `attach`/`log
+  --follow`, a protocol-version check and `init --join` come later.
 - Graphical interface (see [future-herdr-panel.md](future-herdr-panel.md)).

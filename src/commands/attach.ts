@@ -3,7 +3,7 @@ import { type Context, output } from "../context.ts";
 import { NotFoundError, SessionGoneError } from "../errors.ts";
 import { lastAttempt, requireTask, type Session, sessionFor } from "../execution.ts";
 import { findRun } from "../find-run.ts";
-import { commandEnv, LauncherError, renderCommand, sessionStatus, shellLine } from "../launcher.ts";
+import { commandEnv, LauncherError, renderCommand, shellLine } from "../launcher.ts";
 import { isInProgress } from "../run-info.ts";
 import type { Run } from "../schema.ts";
 import { withSigint } from "../sigint.ts";
@@ -28,12 +28,16 @@ function liveSession(ctx: Context, run: Run, ref: string): { session: Session; a
   const seeLog = `see its output with "agent-tasks log ${ref}"`;
   if (!session) throw new SessionGoneError(`run ${ref} has no session (it was never launched); ${seeLog}`);
   if (session.record.closed_at) throw new SessionGoneError(`the session of ${ref} was closed (${run.status}); ${seeLog}`);
-  const status = sessionStatus(session.spec, session.input);
-  if (status && (status.state === "gone" || status.state === "exited")) throw new SessionGoneError(`the session of ${ref} is ${status.state} (${run.status}); ${seeLog}`);
-  if (!session.spec.attach) {
-    throw new LauncherError(`the ${session.spec.name} launcher has no attach command; read the session's screen with "agent-tasks session read ${ref}" or follow it with "agent-tasks log ${ref} --follow"`);
+  if (!session.spec) {
+    throw new LauncherError(`the session of ${ref} runs on machine "${session.record.machine}"; attach from that machine, or read its screen with "agent-tasks session read ${ref}"`);
   }
-  return { session, argv: renderCommand(session.spec.attach, session.input, "launcher.attach") };
+  const { spec } = session;
+  const status = session.ops.status();
+  if (status && (status.state === "gone" || status.state === "exited")) throw new SessionGoneError(`the session of ${ref} is ${status.state} (${run.status}); ${seeLog}`);
+  if (!spec.attach) {
+    throw new LauncherError(`the ${spec.name} launcher has no attach command; read the session's screen with "agent-tasks session read ${ref}" or follow it with "agent-tasks log ${ref} --follow"`);
+  }
+  return { session, argv: renderCommand(spec.attach, session.input, "launcher.attach") };
 }
 
 /** Runs the launcher's `attach` with the terminal handed over, and returns its exit code. */
@@ -79,7 +83,7 @@ a JSON object with its exit code is printed.`,
     const ref = runRef(run.task_id, runSlotId(run));
     const { session, argv } = liveSession(ctx, run, ref);
     const code = await handOver(argv, session);
-    if (ctx.json) output(ctx, { run_ref: ref, attempt: lastAttempt(run)?.n ?? null, launcher: session.spec.name, handle: session.record.handle, command: argv, exit_code: code }, "");
+    if (ctx.json) output(ctx, { run_ref: ref, attempt: lastAttempt(run)?.n ?? null, launcher: session.ops.launcherName, handle: session.record.handle, command: argv, exit_code: code }, "");
     return code;
   },
 };

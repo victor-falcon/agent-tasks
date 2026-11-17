@@ -125,9 +125,11 @@ Options:
             ? ` Session kept open (keep_open: ${resolution.keep_open}).`
             : settled.action === "close_failed"
               ? ` Could not close the session: ${settled.error}`
-              : settled.action === "closed"
-                ? " Session closed."
-                : "";
+              : settled.action === "unreachable"
+                ? ` Could not reach the session's machine to close it; the runner closes it once it is back (${settled.error}).`
+                : settled.action === "closed"
+                  ? " Session closed."
+                  : "";
         return head + tail;
       },
     );

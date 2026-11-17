@@ -1,11 +1,13 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { isKnownMachine, knownMachines, localMachine } from "./config.ts";
+import { isKnownMachine, knownMachines } from "./config.ts";
 import type { Context } from "./context.ts";
 import { AgentTasksError, UsageError } from "./errors.ts";
 import { parseCount, readFileArg } from "./input.ts";
 import { homeDir, resolvePath, tildify } from "./paths.ts";
+import { MachineUnreachableError } from "./ssh.ts";
 import { orderTaskKeys, type Schedule, type Task } from "./schema.ts";
+import { callMachine, machineTarget } from "./session-ops.ts";
 
 /**
  * Flags shared by `add` and `edit` to set task fields. With `edit`, an empty
@@ -68,33 +70,61 @@ export function normalizeTaskCwd(ctx: Context, cwd: unknown): string {
   return displayPath(ctx, abs);
 }
 
+export interface RemoteCwdCheck {
+  /** The folder to store: as the machine reports it (with `~`), or as given when it could not be asked. */
+  cwd: string;
+  /** Set when the folder could not be checked (machine unreachable…); the task is saved anyway. */
+  warning: string | null;
+}
+
 /**
- * The cwd of a task that runs on `machine`. On this machine it is resolved,
- * checked and stored with `~` (see `normalizeTaskCwd`). On another machine the
- * folder is that machine's: it must be absolute or start with `~` (relative
- * paths and this machine's home mean nothing there) and is stored as given.
+ * For a task on another machine, checks over SSH (`remote check-cwd`) that
+ * its folder exists there. Returns null when the machine is this one (check
+ * it with `normalizeTaskCwd`). A missing folder is an error; a machine that
+ * cannot be asked gives a warning instead.
  */
-export function normalizeTaskCwdFor(ctx: Context, cwd: unknown, machine: string): string {
-  if (machine === localMachine(ctx.config.config)) return normalizeTaskCwd(ctx, cwd);
+export function checkRemoteCwd(ctx: Context, machine: string, cwd: unknown): RemoteCwdCheck | null {
+  const target = machineTarget(ctx, machine);
+  if (!target) return null;
   if (typeof cwd !== "string" || cwd.trim() === "") throw new AgentTasksError("invalid_cwd", "cwd must be a non-empty string");
   if (!isMachineIndependentPath(cwd)) {
     throw new AgentTasksError("invalid_cwd", `cwd must be absolute or start with ~ for a task on machine "${machine}" (got "${cwd}"): it is a folder on that machine`);
   }
-  checkRemoteCwd(ctx, machine, cwd);
-  return cwd;
+  try {
+    const r = callMachine(ctx, target, "check-cwd", { cwd });
+    if (r.exists !== true) throw new AgentTasksError("invalid_cwd", `cwd does not exist or is not a folder on machine "${machine}": ${String(r.path ?? cwd)}`);
+    return { cwd: typeof r.cwd === "string" ? r.cwd : cwd, warning: null };
+  } catch (err) {
+    if (err instanceof AgentTasksError && err.code === "invalid_cwd") throw err;
+    const why = err instanceof MachineUnreachableError ? err.message : `could not check it: ${(err as Error).message}`;
+    return { cwd, warning: `cwd ${cwd} was not checked on machine "${machine}" (${why}); saved anyway` };
+  }
+}
+
+/**
+ * Checks a task's cwd on the machine that runs it and stores it normalized:
+ * here with `normalizeTaskCwd`, on another machine with `checkRemoteCwd`.
+ * Returns the warnings to show (and to put in --json output).
+ */
+export function checkTaskCwd(ctx: Context, task: Pick<Task, "machine" | "cwd">): string[] {
+  const remote = checkRemoteCwd(ctx, task.machine, task.cwd);
+  if (!remote) {
+    task.cwd = normalizeTaskCwd(ctx, task.cwd);
+    return [];
+  }
+  task.cwd = remote.cwd;
+  return remote.warning ? [remote.warning] : [];
+}
+
+/** Prints warnings to stderr, the way `add` and `edit` do. */
+export function writeWarnings(ctx: Context, warnings: readonly string[]): void {
+  for (const w of warnings) ctx.stderr.write(`warning: ${w}\n`);
 }
 
 /** A path that means the same from any folder: absolute, `~` or `~/…`. */
 export function isMachineIndependentPath(path: string): boolean {
   return path.startsWith("/") || path === "~" || path.startsWith("~/");
 }
-
-/**
- * Checks that a task's folder exists on another machine.
- * TODO(multi-machine t3): check it over SSH with `agent-tasks remote …` on
- * that machine, and save with a warning when the machine is unreachable.
- */
-export function checkRemoteCwd(_ctx: Context, _machine: string, _cwd: string): void {}
 
 /**
  * An existing folder with the home replaced by `~`. Symlinks are resolved on

@@ -107,6 +107,10 @@ export interface SessionRecord {
   close_attempts?: number;
   /** True when `keep_open` left the session open on purpose. */
   kept_open?: boolean;
+  /** The machine that runs the session, when it is not the hub itself (reached over SSH). Absent: this machine. */
+  machine?: string;
+  /** A close that could not reach the session's machine: tick runs it once the machine is back, whatever `keep_open` says. */
+  close_pending?: boolean;
 }
 
 export interface Attempt {

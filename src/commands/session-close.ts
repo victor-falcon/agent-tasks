@@ -1,6 +1,7 @@
 import { parseCommandArgs } from "../args.ts";
 import { output } from "../context.ts";
 import { LauncherError } from "../launcher.ts";
+import { MachineUnreachableError } from "../ssh.ts";
 import { loadSession, settleSession } from "../execution.ts";
 import type { Command } from "./types.ts";
 
@@ -18,9 +19,10 @@ Arguments:
     const { positionals } = parseCommandArgs(args, {}, { minPositionals: 1, maxPositionals: 1 });
     const ref = positionals[0]!;
     const s = loadSession(ctx, ref);
-    if (!s.spec.close) throw new LauncherError(`the ${s.spec.name} launcher has no close command`);
+    if (!s.ops.canClose) throw new LauncherError(`the ${s.ops.launcherName} launcher has no close command`);
     const result = settleSession(ctx, s.task, ref, { force: true });
     if (result.action === "close_failed") throw new LauncherError(result.error);
+    if (result.action === "unreachable") throw new MachineUnreachableError(s.ops.machine ?? "", result.error);
     output(ctx, { run_ref: ref, attempt: s.attempt.n, handle: s.record.handle, closed: true }, `Closed session ${s.record.handle} of ${ref}.`);
   },
 };

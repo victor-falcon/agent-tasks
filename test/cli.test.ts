@@ -31,8 +31,18 @@ describe("help", () => {
       const r = await runCli(args, home);
       expect(r.code).toBe(0);
       expect(r.stdout).toContain("Usage: agent-tasks <command>");
-      for (const c of commands) expect(r.stdout).toContain(c.name);
+      for (const c of commands) {
+        if (c.hidden) expect(r.stdout).not.toContain(c.name);
+        else expect(r.stdout).toContain(c.name);
+      }
     }
+  });
+
+  test("hidden commands (remote …) still have their own help", async () => {
+    expect(commands.some((c) => c.name === "remote launch" && c.hidden)).toBe(true);
+    const r = await runCli(["help", "remote", "launch"], home);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("Usage: agent-tasks remote launch");
   });
 
   test("help for one command, both forms", async () => {
@@ -54,7 +64,7 @@ describe("help", () => {
   test("help --json describes the commands", async () => {
     const r = await runCli(["help", "--json"], home);
     expect(r.code).toBe(0);
-    expect(r.json().commands.map((c: { name: string }) => c.name)).toEqual(commands.map((c) => c.name));
+    expect(r.json().commands.map((c: { name: string }) => c.name)).toEqual(commands.filter((c) => !c.hidden).map((c) => c.name));
   });
 
   test("help works even with a broken config", async () => {

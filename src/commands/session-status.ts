@@ -1,6 +1,6 @@
 import { parseCommandArgs } from "../args.ts";
 import { output } from "../context.ts";
-import { LauncherError, sessionStatus } from "../launcher.ts";
+import { LauncherError } from "../launcher.ts";
 import { loadSession } from "../execution.ts";
 import type { Command } from "./types.ts";
 
@@ -18,12 +18,22 @@ Arguments:
     const { positionals } = parseCommandArgs(args, {}, { minPositionals: 1, maxPositionals: 1 });
     const ref = positionals[0]!;
     const s = loadSession(ctx, ref);
-    const status = sessionStatus(s.spec, s.input);
-    if (!status) throw new LauncherError(`the ${s.spec.name} launcher has no status command`);
+    const status = s.ops.status();
+    if (!status) throw new LauncherError(`the ${s.ops.launcherName} launcher has no status command`);
     output(
       ctx,
-      { run_ref: ref, attempt: s.attempt.n, launcher: s.spec.name, handle: s.record.handle, state: status.state, raw: status.raw, closed_at: s.record.closed_at, kept_open: s.record.kept_open ?? false },
-      `${ref}: ${status.state} (session ${s.record.handle}, ${s.spec.name})`,
+      {
+        run_ref: ref,
+        attempt: s.attempt.n,
+        launcher: s.ops.launcherName,
+        machine: s.record.machine ?? null,
+        handle: s.record.handle,
+        state: status.state,
+        raw: status.raw,
+        closed_at: s.record.closed_at,
+        kept_open: s.record.kept_open ?? false,
+      },
+      `${ref}: ${status.state} (session ${s.record.handle}, ${s.ops.launcherName}${s.record.machine ? ` on ${s.record.machine}` : ""})`,
     );
   },
 };

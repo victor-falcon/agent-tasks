@@ -19,6 +19,7 @@ Arguments:
     const { positionals } = parseCommandArgs(args, {}, { minPositionals: 1, maxPositionals: 1 });
     const result = taskContext(ctx, positionals[0]!);
     for (const file of result.missing_instructions) ctx.stderr.write(`agent-tasks: warning: instructions file not found: ${file}\n`);
+    for (const warning of result.warnings) ctx.stderr.write(`agent-tasks: warning: ${warning}\n`);
     output(ctx, result, result.text);
   },
 };

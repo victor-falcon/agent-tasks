@@ -1,5 +1,7 @@
 import type { Writer } from "./context.ts";
+import { AgentTasksError } from "./errors.ts";
 import type { Env } from "./paths.ts";
+import { isObject } from "./schema.ts";
 import { shellQuote } from "./template.ts";
 
 // Running agent-tasks on another machine over SSH. Non-interactive SSH never
@@ -105,4 +107,83 @@ export async function runSshStreaming(argv: string[], opts: SshStreamOptions): P
     return { code, connectError: null };
   }
   return { code, connectError: held === null ? "the connection was lost" : held.trim() || "ssh exited with 255" };
+}
+
+// ---------------------------------------------------------------------------
+// `agent-tasks remote <op>`: the hub running sessions on another machine
+// (see doc/roadmap/runner.md, "Remote machines"). The payload goes in as JSON
+// on stdin and the answer comes back as JSON on stdout.
+// ---------------------------------------------------------------------------
+
+/** Version of the `remote` payloads. Both sides put it in every message and check it. */
+export const REMOTE_PROTOCOL = 1;
+
+const REMOTE_TIMEOUT_MS = 90_000;
+
+/** The machine could not be reached over SSH. Never means the session is gone. */
+export class MachineUnreachableError extends AgentTasksError {
+  readonly machine: string;
+
+  constructor(machine: string, message: string) {
+    super("machine_unreachable", message);
+    this.machine = machine;
+  }
+}
+
+export interface RemoteTarget {
+  /** The machine's name, for messages. */
+  machine: string;
+  /** Its SSH host alias. */
+  ssh: string;
+}
+
+/**
+ * Runs `agent-tasks remote <op> --json` on `target` with `payload` on stdin
+ * and returns its JSON answer. Throws MachineUnreachableError when SSH could
+ * not connect, and the remote error (same code and message) when the remote
+ * command failed.
+ */
+export function callRemote(target: RemoteTarget, op: string, payload: Record<string, unknown>, env: Env, timeoutMs = REMOTE_TIMEOUT_MS): Record<string, unknown> {
+  const argv = sshArgv(target.ssh, remoteCliLine(["remote", op, "--json"]));
+  const where = `machine "${target.machine}" (ssh ${target.ssh})`;
+  let result: ReturnType<typeof Bun.spawnSync>;
+  try {
+    result = Bun.spawnSync({
+      cmd: argv,
+      env: env as Record<string, string>,
+      stdin: new TextEncoder().encode(JSON.stringify({ protocol: REMOTE_PROTOCOL, ...payload })),
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: timeoutMs,
+    });
+  } catch (err) {
+    throw new AgentTasksError("ssh_failed", `could not run ssh for ${where}: ${(err as Error).message}`);
+  }
+  const stdout = result.stdout?.toString() ?? "";
+  const stderr = (result.stderr?.toString() ?? "").trim();
+  const code = result.exitCode;
+  if (code === SSH_UNREACHABLE_EXIT) throw new MachineUnreachableError(target.machine, `${where} is unreachable${stderr ? `: ${stderr.split("\n").at(-1)}` : ""}`);
+  if (code === null) throw new AgentTasksError("remote_timeout", `remote ${op} on ${where} did not answer within ${Math.round(timeoutMs / 1000)}s`);
+  if (code === COMMAND_NOT_FOUND_EXIT && !stdout.trim()) {
+    throw new AgentTasksError("remote_failed", `agent-tasks is not installed at ${REMOTE_CLI} on ${where}; run "agent-tasks install" there`);
+  }
+
+  let answer: unknown;
+  try {
+    answer = JSON.parse(stdout);
+  } catch {
+    const detail = (stderr || stdout.trim()).split("\n").slice(-3).join(" | ");
+    throw new AgentTasksError("remote_failed", `remote ${op} on ${where} failed (exit ${code})${detail ? `: ${detail}` : ""}`);
+  }
+  if (!isObject(answer)) throw new AgentTasksError("remote_failed", `remote ${op} on ${where} did not print a JSON object`);
+  if (isObject(answer.error)) {
+    const { code: errorCode, message, details } = answer.error;
+    const lines = Array.isArray(details) ? details.map(String) : [];
+    throw new AgentTasksError(typeof errorCode === "string" ? errorCode : "remote_failed", `${where}: ${String(message ?? "remote error")}`, lines);
+  }
+  if (code !== 0) throw new AgentTasksError("remote_failed", `remote ${op} on ${where} failed (exit ${code})`);
+  if (answer.protocol !== REMOTE_PROTOCOL) {
+    throw new AgentTasksError("remote_protocol", `remote ${op} on ${where} answered with protocol ${JSON.stringify(answer.protocol ?? null)}, not ${REMOTE_PROTOCOL}; update agent-tasks on both machines`);
+  }
+  return answer;
 }

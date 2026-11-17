@@ -7,7 +7,8 @@ const GLOBAL_OPTIONS = `Global options:
   --now <iso>    Use this time as "now" (e.g. 2026-11-17T09:00:00+01:00)
   -h, --help     Show help`;
 
-export function renderHelp(commands: readonly Command[]): string {
+export function renderHelp(all: readonly Command[]): string {
+  const commands = all.filter((c) => !c.hidden);
   const width = Math.max(...commands.map((c) => c.name.length));
   const list = commands.map((c) => `  ${c.name.padEnd(width)}  ${c.summary}`).join("\n");
   return `agent-tasks: a minimal scheduler for coding agents
@@ -41,7 +42,7 @@ export function printHelp(ctx: Context, words: string[]): void {
   const { commands } = ctx;
   const name = words.join(" ");
   if (!name) {
-    output(ctx, { commands: commands.map(describe) }, () => renderHelp(commands));
+    output(ctx, { commands: commands.filter((c) => !c.hidden).map(describe) }, () => renderHelp(commands));
     return;
   }
   const cmd = commands.find((c) => c.name === name);

@@ -1,7 +1,6 @@
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import type { Context } from "./context.ts";
 import { lastAttempt, readRunRef, requireTask, sessionFor } from "./execution.ts";
-import { readSession } from "./launcher.ts";
 import { stdoutStyle, type Style } from "./output/style.ts";
 import { statusLabel } from "./output/symbols.ts";
 import { isInProgress } from "./run-info.ts";
@@ -105,19 +104,21 @@ class AttemptOutput {
     const task = requireTask(this.ctx, run.task_id);
     const session = sessionFor(this.ctx, task, this.ctx.resolveFor(task), run);
     if (!session) return null;
-    if (session.spec.read) {
+    // A remote session's launcher is only known on its machine: try its screen.
+    const hasScreen = session.spec ? Boolean(session.spec.read) : true;
+    if (hasScreen) {
       let screen: string | null = null;
       try {
-        screen = readSession(session.spec, session.input);
+        screen = session.ops.read();
       } catch {
         // The session may have just ended; its last screen may be in the log file.
       }
       if (screen !== null) return this.fromScreen(final || screen.endsWith("\n") ? screen : screen.slice(0, screen.lastIndexOf("\n") + 1));
       if (!final) return null;
     }
-    const chunk = readFrom(session.input.logPath, session.spec.read ? 0 : this.offset, final);
+    const chunk = readFrom(session.input.logPath, hasScreen ? 0 : this.offset, final);
     // The last screen captured into the log when the session was closed (see `captureLog`).
-    if (session.spec.read) return this.fromScreen(chunk.text.split(/^--- session output \(.*\) ---\n/m).at(-1)!);
+    if (hasScreen) return this.fromScreen(chunk.text.split(/^--- session output \(.*\) ---\n/m).at(-1)!);
     this.offset = chunk.offset;
     return chunk.text === "" ? "" : chunk.text.replace(/\n$/, "");
   }
