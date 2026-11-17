@@ -1,52 +1,63 @@
 # agent-tasks
 
-A minimal scheduler for coding agents. You describe a task (what to do, in
-which folder, when: once or on a cron schedule) and at that time a fresh
-agent does it in its own terminal tab, reports the result and closes itself.
-Every scheduled occurrence ends up recorded: succeeded, failed, timed out or
-missed, and why.
+**Cron for coding agents.** Tell it what to do, in which folder and when
+(once, or on a schedule), and at that time a fresh agent (Claude Code or any
+other) opens in its own terminal tab, does the work, reports what it did and
+closes itself. Every scheduled run is recorded: succeeded, failed, timed out,
+blocked or missed, and why.
 
-Status: early development. Design docs in [doc/roadmap](doc/roadmap/README.md).
+![The agent-tasks runner dashboard: tasks running, the next runs, recent results with the agent's summary, and the runner's events](doc/images/dashboard.png)
 
-## How it works
+Some things people schedule with it:
 
-```
-agent-tasks runner                 plain process in a tab, no LLM; ticks every 5m
-  │
-  │ launcher "launch"              Herdr tab, tmux window, Rex window, child process…
-  ▼
-sub-agent  "/run-agent-task <run_ref>"
-  ├─ agent-tasks task <run_ref>    reads what to do
-  ├─ … does the work in the task's folder …
-  └─ agent-tasks finish <run_ref>  records the result, then launcher "close"
-                                   closes the sub-agent's own tab
-```
+- "Every Monday at 9, list the outdated dependencies of `~/Projects/api` and
+  write a report."
+- "Every morning, triage yesterday's Sentry errors and open an issue for the
+  new ones."
+- "On December 1st, draft the release notes from the merged PRs."
+- "Every hour, check that PR #123 is green and merge it when it is."
 
-- **The runner** (`agent-tasks runner`) is a normal process you leave open
-  in a tab. Each tick it records a heartbeat, works out which slots are due,
-  watches running sessions and launches new ones. On a terminal it shows a
-  dashboard (what runs, what's next, recent results and their output, with
-  Vim keys) and it can send desktop notifications.
-- **One sub-agent per run**, started by a **launcher**: a few commands in your
-  config (`launch`, `close`, `status`, `read`, `attach`), from a preset or
-  written by hand. The core knows nothing about any multiplexer.
-- **Sub-agents close themselves.** `agent-tasks finish` saves the result and
-  runs the launcher's `close` on its own session (failed runs stay open by
-  default, `keep_open: on_failure`).
-- **Nothing gets lost.** An agent that dies without `finish` is recorded as
-  `failed` (`exited_without_report`); one past its timeout is closed and
-  recorded as `timed_out`; slots that passed while the runner was stopped are
-  recorded as `missed` with the reason (`runner_offline`).
+Status: early development, used every day by its author. Design docs in
+[doc/roadmap](doc/roadmap/README.md).
 
-Tasks, runs and the heartbeat are JSON files in `~/.local/share/agent-tasks/`.
-Your config (launcher, agent command, per-folder profiles, instructions for
-the agents) lives in `~/.config/agent-tasks/`, never in this repo.
+## Contents
+
+- [What you need](#what-you-need)
+- [Quick setup with your agent](#quick-setup-with-your-agent) (recommended)
+- [Manual setup](#manual-setup)
+- [Your first task](#your-first-task)
+- [How it works](#how-it-works)
+- [Daily use](#daily-use)
+- [The dashboard](#the-dashboard)
+- [When a run ends](#when-a-run-ends)
+- [Configuration](#configuration)
+- [Multiple machines](#multiple-machines)
+- [Presets](#presets)
+- [Troubleshooting](#troubleshooting)
+- [Updating and uninstalling](#updating-and-uninstalling)
+- [Development](#development)
+
+## What you need
+
+- **macOS or Linux** (WSL works too).
+- **[Bun](https://bun.sh)** and **git**.
+- **A coding agent you start from a terminal**, such as
+  [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`).
+  The bundled skills are installed for Claude Code (`~/.claude/skills`);
+  another agent works if it can run a slash command or a prompt and shell
+  commands.
+- **Ideally, a terminal multiplexer**: Herdr, tmux or
+  Rex. Each run then gets its own tab you can look at and talk to. Without
+  one, runs are background processes with their output in a log.
+- `~/.local/bin` on your `PATH` (that is where `agent-tasks` is linked).
 
 ## Quick setup with your agent
 
-Paste this into your coding agent (Claude Code or similar), in a terminal of
-the multiplexer you use (Herdr, tmux, Rex…); the runner will get its own tab.
-You don't need to clone anything first.
+The easiest way: paste this into your coding agent (Claude Code or similar),
+running in a terminal of the multiplexer you use (Herdr, tmux, Rex…). You
+don't need to clone anything first. The agent follows
+[RECIPE.md](RECIPE.md), asks you what it can't guess and tells you what it
+set up.
 
 ```text
 Set up agent-tasks (https://github.com/victor-falcon/agent-tasks) on this machine.
@@ -63,10 +74,15 @@ installing anything else (such as bun) or changing my shell profile. At the
 end, report what you set up and what you could not verify.
 ```
 
+When it's done, jump to [Your first task](#your-first-task).
+
 ## Manual setup
 
-Requires [Bun](https://bun.sh) and git. [RECIPE.md](RECIPE.md) has every step
-in detail.
+[RECIPE.md](RECIPE.md) has every step in detail; this is the short version.
+Run it from a terminal of your multiplexer, if you use one: `init` picks the
+launcher from the terminal it runs in.
+
+**1. Install.**
 
 ```sh
 git clone https://github.com/victor-falcon/agent-tasks.git ~/.local/share/agent-tasks-src
@@ -76,83 +92,163 @@ bin/agent-tasks install   # links agent-tasks into ~/.local/bin and the skills i
 agent-tasks init          # creates ~/.config/agent-tasks/ (never overwrites), with the launcher for this terminal
 ```
 
-Then edit `~/.config/agent-tasks/config.json`:
+The links point into the checkout, so keep it where it is.
 
-1. `launcher`: `init` picks it from the terminal it runs in: `herdr` inside
-   Herdr, `rex` inside Rex, `tmux` inside tmux, `process` otherwise (see
-   [Presets](#presets)). Change it, or write your own commands.
-2. `agent`: the command that starts your agent, e.g.
-   `{ "command": "claude" }`. With `process` there is no terminal, so `init`
-   writes `claude` in print mode (`--print`, allowed to edit files and run
-   `agent-tasks` only; add what your tasks need to `--allowedTools`). With
-   the other presets the agent asks for permissions in its tab as usual,
-   unless you add flags to `args`. Different commands per folder go in
-   `profiles`.
-3. `instructions/subagent.md`: what every sub-agent must know about your
-   machine.
+**2. Configure.** Open `~/.config/agent-tasks/config.json`:
 
-Check and start:
+- `launcher`: how each run is opened. `init` picks `herdr` inside Herdr,
+  `rex` inside Rex, `tmux` inside tmux and `process` otherwise (see
+  [Presets](#presets)). Change it, or write your own commands.
+- `agent`: the command that starts your agent, e.g.
+  `{ "command": "claude" }`. With `herdr`, `rex` and `tmux` the agent runs in
+  a real shell, so aliases work, and it asks for permissions in its tab as
+  usual unless you add flags to `args`. With `process` there is no terminal,
+  so `init` writes `claude` in print mode (`--print`, allowed to edit files
+  and run `agent-tasks` only; add what your tasks need to `--allowedTools`).
+  A different agent per folder goes in `profiles`.
+
+Then write in `~/.config/agent-tasks/instructions/subagent.md` what every
+sub-agent should know about your machine (which tools to use, what never to
+do). The file has commented examples.
+
+**3. Check.**
 
 ```sh
-agent-tasks config check
-agent-tasks doctor
-agent-tasks runner        # in its own tab; leave it open
+agent-tasks config check  # the config is valid and its commands exist
+agent-tasks doctor        # this machine is ready; each problem comes with how to fix it
 ```
+
+**4. Start the runner** in its own tab, and leave it open. Nothing runs
+while it's stopped.
+
+```sh
+agent-tasks runner
+```
+
+## Your first task
+
+With the runner open in one tab, go to another one and create a task:
+
+```sh
+mkdir -p ~/agent-tasks-hello
+agent-tasks add --title "Hello" --cwd ~/agent-tasks-hello \
+  --cron "0 9 * * 1" \
+  --instructions "Write the current date and the output of uname -a to hello.md. Done when hello.md exists."
+```
+
+It would run every Monday at 9:00. To try it now, without waiting:
+
+```sh
+agent-tasks run hello
+```
+
+A new tab opens (with a multiplexer) and the agent starts. When it finishes
+it reports and its tab closes. Check the result:
+
+```sh
+agent-tasks runs hello           # the run: succeeded or failed, how long it took
+agent-tasks log hello/<slot>     # what happened, with the captured output (the run_ref is in "runs")
+cat ~/agent-tasks-hello/hello.md
+agent-tasks rm hello             # archive the test task
+```
+
+From now on, the simplest way to create tasks is to ask your agent, in any
+project: *"every weekday at 8, summarize yesterday's commits in this repo
+into notes/standup.md"*. The `schedule-agent-task` skill asks what it can't
+guess, writes self-contained instructions and calls `agent-tasks add`.
+
+## How it works
+
+```
+agent-tasks runner                 plain process in a tab, no LLM; ticks every 5m
+  │
+  │ launcher "launch"              Herdr tab, tmux window, Rex window, child process…
+  ▼
+sub-agent  "/run-agent-task <run_ref>"
+  ├─ agent-tasks task <run_ref>    reads what to do
+  ├─ … does the work in the task's folder …
+  └─ agent-tasks finish <run_ref>  records the result, then launcher "close"
+                                   closes the sub-agent's own tab
+```
+
+The words you'll see everywhere:
+
+| Word | What it is |
+|---|---|
+| **Task** | What to do (instructions), where (`cwd`, and the `machine`) and when (`--at` once, or `--cron`). |
+| **Run** | One occurrence of a task: the 9:00 run of Monday 17. Its id, the **run_ref**, is `<task-id>/<slot>`, e.g. `hello/20261117T080000Z` (the slot in UTC). |
+| **Runner** | `agent-tasks runner`: a normal process, not an agent, so it costs no tokens. Every 5 minutes it records a heartbeat, works out what's due, watches running sessions and launches new ones. |
+| **Launcher** | A few commands in your config (`launch`, `close`, `status`, `read`, `attach`) that open, watch and close a run's terminal. Pick a [preset](#presets) or write your own; the core knows nothing about any multiplexer. |
+| **Sub-agent** | The agent the launcher starts for one run. It gets the task through the `run-agent-task` skill, starts with **no context** beyond the instructions, and reports with `agent-tasks finish`. |
+
+What you can count on:
+
+- **Sub-agents close themselves.** `agent-tasks finish` saves the result and
+  closes the sub-agent's own tab. Failed runs stay open by default, so you
+  can see what happened.
+- **Nothing gets lost.** An agent that dies without reporting is recorded as
+  `failed` (`exited_without_report`); one past its timeout is closed and
+  recorded as `timed_out`; slots that passed while the runner was stopped (or
+  the laptop was asleep) are recorded as `missed` with the reason
+  (`runner_offline`).
+- **Your data stays yours.** Tasks, runs and the heartbeat are JSON files in
+  `~/.local/share/agent-tasks/`. Your config (launcher, agent command,
+  per-folder profiles, instructions for the agents) lives in
+  `~/.config/agent-tasks/`, never in this repo.
 
 ## Daily use
 
-Create tasks by asking your agent ("every Monday at 9, write a dependencies
-report in ~/Projects/foo"): the `schedule-agent-task` skill writes
-self-contained instructions and calls `agent-tasks add`. Or directly:
+### Creating tasks
+
+Ask your agent (the `schedule-agent-task` skill), or call `add` directly:
 
 ```sh
+# Every Monday at 9:00, Madrid time
 agent-tasks add --title "Weekly deps report" --cwd ~/Projects/foo \
   --cron "0 9 * * 1" --timezone Europe/Madrid \
   --instructions "Run bun outdated and write reports/deps.md. Don't upgrade anything."
+
+# Once, on a date, with long instructions from a file
 agent-tasks add --title "Release notes" --at 2026-12-01T09:00:00+01:00 --instructions-file notes.md
 ```
 
+- `--cron` takes a standard 5-field expression (`minute hour day month
+  weekday`): `"0 9 * * 1-5"` is weekdays at 9:00, `"*/30 * * * *"` every half
+  hour. Without `--timezone`, the `timezone` in your config is used.
+- `--at` takes a date and time with its offset, e.g.
+  `2026-12-01T09:00:00+01:00`.
+- `--cwd` defaults to the current folder; it must exist.
+- `add` prints the next 3 runs, so you can check the schedule is the one you
+  meant. `agent-tasks help add` lists every option (`--timeout`,
+  `--retries`, `--notify`, `--keep-open`, `--agent`…).
+
+**Write the instructions for someone who knows nothing.** The sub-agent
+doesn't see the conversation where you created the task. Say what to do,
+where to leave the result, what it must not do, and what counts as done
+("Done when reports/deps.md exists").
+
+### Commands
+
 | Command | What it answers |
 |---|---|
-| `agent-tasks top` | The runner's dashboard, without running the scheduler: runs in progress, the next run of every task, recent results; open a run to read its summary, output file and log; retry, run, pause or attach from there. |
-| `agent-tasks status` | Is everything fine? Runner, last 24h, what needs attention, what's next. Exits 1 when something needs attention. |
+| `agent-tasks top` | The dashboard, without running the scheduler (see [The dashboard](#the-dashboard)). |
+| `agent-tasks status` | Is everything fine? Runner, last 24h, what needs attention, what's next. Exits 1 when something needs attention, so it works in scripts and status bars. |
 | `agent-tasks list` | Every task, its next run and its last 10 results. |
 | `agent-tasks show <id>` | A task's definition and which agent, launcher and profile it resolves to, and why. |
-| `agent-tasks runs [<id>]` | The occurrence history: ok, failed, timed out, missed (with the reason). |
+| `agent-tasks runs [<id>]` | The run history: ok, failed, timed out, missed (with the reason). |
 | `agent-tasks log <run_ref>` | What happened in one run: events, attempts, the captured log. `--follow` keeps reading a running session. |
-| `agent-tasks attach <run_ref>` | Bring a running sub-agent's tab to the front (e.g. when it is blocked on a question). |
+| `agent-tasks attach <run_ref>` | Bring a running sub-agent's tab to the front (e.g. when it's blocked on a question). |
 | `agent-tasks retry <run_ref>` | Launch a new attempt of a failed, timed-out or missed run. |
 | `agent-tasks run <id>` | Run a task now, outside its schedule. |
-| `agent-tasks edit`, `pause`, `resume`, `rm` | Change, pause, resume or archive a task. |
+| `agent-tasks edit <id>` | Change any field: `--cron`, `--instructions`, `--timeout`, `--notify`… |
+| `agent-tasks pause`, `resume`, `rm` | Pause, resume or archive a task (its history is kept). |
+| `agent-tasks due` | What the runner would do right now, without doing it. |
+| `agent-tasks config resolve <id>` | Every setting a task ends up with, and where each one comes from. |
+| `agent-tasks runner status` | Whether a runner is alive, where, and when it ticks next. |
 
-Per task, you choose what happens when it finishes:
-
-```sh
-# Tell me when it succeeds or fails, with the agent's summary, and leave its
-# session open so I can keep talking to the agent.
-agent-tasks edit weekly-deps-report --notify succeeded,failed --keep-open always
-agent-tasks edit nightly-cleanup --notify none   # never notify for this task
-agent-tasks edit nightly-cleanup --notify ""     # unset: inherit (profile, defaults, notifiers' events)
-```
-
-`--notify` replaces every notifier's `events` for that task's runs (events:
-`launched`, `succeeded`, `failed`, `timed_out`, `missed`, `blocked`), so list
-`failed` too if you still want failure alerts. A
-`succeeded` or `failed` notification carries the summary the agent passed to
-`agent-tasks finish` and, when the session was kept open, the
-`agent-tasks attach <run_ref>` to get back to it.
-
-The dashboard (`agent-tasks runner` on a terminal, or `agent-tasks top`)
-uses Vim keys: `j`/`k`, `gg`/`G`, `<C-d>`/`<C-u>`, `<Tab>` between panels,
-`<CR>` or `l` to open a run, `{`/`}` between its sections, `h`, `q` or
-`<Esc>` to go back, `a` attach, `r` retry, `R` run now, `p` pause or resume,
-`?` for the full list. Change them in `~/.config/agent-tasks/tui.toml` (see
-[examples/tui.example.toml](examples/tui.example.toml)); `runner --plain`
-prints one line per event instead.
-
-Every command takes `--json`. `agent-tasks help <command>` explains each one,
-with its filters (`agent-tasks list --status failed`, `agent-tasks runs --since 24h`,
-`agent-tasks log <run_ref> --raw`).
+Every command takes `--json`, and `agent-tasks help <command>` explains each
+one with its filters (`agent-tasks list --status failed`,
+`agent-tasks runs --since 24h`, `agent-tasks log <run_ref> --raw`).
 
 ```
 $ agent-tasks status
@@ -168,52 +264,175 @@ Upcoming
   Wed 06:00  inbox-triage        every day 06:00
 ```
 
+## The dashboard
+
+`agent-tasks runner` on a terminal shows a live dashboard (the screenshot at
+the top); `agent-tasks top` shows the same one without running the
+scheduler, from another tab or another machine. It has:
+
+- **Header**: the runner's health, when it ticked and ticks next, and
+  today's counts (succeeded, failed, missed, blocked).
+- **Running**: runs in progress, and which are blocked waiting for you.
+- **Next**: the next run of every task, with its schedule and machine.
+- **Recent**: recent results with the agent's summary. Open one (`<CR>`) to
+  read its summary, the file the agent passed to `--output-file`, its
+  attempts, events and the log captured from its session.
+- **Events**: the runner's log (`state/runner.log`).
+
+It uses Vim keys: `j`/`k`, `gg`/`G`, `<C-d>`/`<C-u>`, `<Tab>` between
+panels, `<CR>` or `l` to open a run, `{`/`}` between its sections, `h`, `q`
+or `<Esc>` to go back, `a` attach, `r` retry, `R` run now, `p` pause or
+resume, `?` for the full list. Change them in `~/.config/agent-tasks/tui.toml`
+(see [examples/tui.example.toml](examples/tui.example.toml)).
+`agent-tasks runner --plain` prints one line per event instead.
+
+## When a run ends
+
+| Status | Meaning |
+|---|---|
+| `succeeded` | The agent reported success with `agent-tasks finish`. |
+| `failed` | The agent reported failure, or its terminal closed without reporting. |
+| `timed_out` | It ran past the task's `timeout` (45m by default); its log was captured and it was stopped. |
+| `blocked` | The agent is waiting for a person (a question, a permission prompt). Use `agent-tasks attach <run_ref>`. Needs a launcher that reports agent state, like `herdr`. |
+| `missed` | Nobody launched it in time (`max_delay`), e.g. the runner was stopped or the machine asleep. |
+| `superseded` | A late slot replaced by a more recent one (`catch_up: latest`, the default: after a night off, a task runs once, not once per missed hour). |
+| `cancelled` | The task was paused or archived at that moment. |
+
+Per task, you choose what happens when it finishes:
+
+```sh
+# Tell me when it succeeds or fails, with the agent's summary, and leave its
+# session open so I can keep talking to the agent.
+agent-tasks edit weekly-deps-report --notify succeeded,failed --keep-open always
+agent-tasks edit nightly-cleanup --notify none   # never notify for this task
+agent-tasks edit nightly-cleanup --notify ""     # unset: inherit (profile, defaults, notifiers' events)
+agent-tasks edit nightly-cleanup --retries 2 --timeout 1h
+```
+
+- `--keep-open`: `on_failure` (default) keeps failed runs open, `always`
+  keeps every run open, `never` closes them all.
+- `--notify` replaces every notifier's `events` for that task's runs
+  (events: `launched`, `succeeded`, `failed`, `timed_out`, `missed`,
+  `blocked`), so list `failed` too if you still want failure alerts. A
+  `succeeded` or `failed` notification carries the summary the agent passed
+  to `agent-tasks finish` and, when the session was kept open, the
+  `agent-tasks attach <run_ref>` to get back to it.
+
+Notifications go to the `notifiers` in the config: a desktop notification by
+default, for `failed`, `timed_out` and `blocked`, or any command (e.g. one
+that sends a message to your phone). See
+[doc/roadmap/runner.md](doc/roadmap/runner.md#notifications-notifiers).
+
 ## Configuration
 
-Everything is optional. Start from
-[examples/config.example.json](examples/config.example.json) (what
-`agent-tasks init` copies) and the example tasks in [examples/](examples/).
+Everything is optional. `agent-tasks init` copies
+[examples/config.example.json](examples/config.example.json) to
+`~/.config/agent-tasks/config.json`:
+
+```json
+{
+  "timezone": "Europe/Madrid",
+  "runner": { "every": "5m" },
+  "launcher": { "preset": "herdr" },
+  "agent": { "command": "claude" },
+  "profiles": [
+    { "match": "~/Projects/work/**", "env": { "EXAMPLE_FLAG": "1" }, "instructions": ["work.md"] }
+  ],
+  "instructions": { "subagent": ["subagent.md"] },
+  "notifiers": [{ "type": "system", "events": ["failed", "timed_out", "blocked"] }],
+  "defaults": { "catch_up": "latest", "timeout": "45m", "keep_open": "on_failure" }
+}
+```
+
+- `profiles`: settings for the tasks whose folder matches (another agent
+  command, environment variables, extra instructions, timeouts…). The first
+  match wins; a task's own value wins over everything.
+- `instructions`: Markdown files in `~/.config/agent-tasks/instructions/`
+  that every sub-agent reads before its task. Check what one gets with
+  `agent-tasks config instructions subagent`.
+
 The full reference (precedence, profiles, instructions, templates, custom
-skills) is in [doc/roadmap/user-config.md](doc/roadmap/user-config.md), and
-the launcher commands and variables in
-[doc/roadmap/launcher.md](doc/roadmap/launcher.md).
+skills) is in [doc/roadmap/user-config.md](doc/roadmap/user-config.md), the
+launcher commands and variables in
+[doc/roadmap/launcher.md](doc/roadmap/launcher.md), and example tasks in
+[examples/](examples/).
 
-Each task has a `machine`, where it runs: this machine's name (`machine` in
-the config, `local` by default) unless `add --machine <name>` picks one of
-the `machines` in the config.
+## Multiple machines
 
-### Multiple machines
+Tasks can run on another machine: a laptop schedules work that runs on a
+desktop, or the other way round. Each task has a `machine`, where it runs:
+this machine's name (`machine` in the config, `local` by default) unless
+`add --machine <name>` picks one of the `machines` in the config.
 
-One machine is the hub: it holds the data and runs the only runner, and
+One machine is the **hub**: it holds the data and runs the only runner, and
 launches each task's sub-agent on the task's machine over SSH, where that
-machine's own launcher, agent and profiles are used. The others are clients
-(`hub` in their config): they keep no data and forward every command to the
-hub. To add a machine, install agent-tasks on it and run
-`agent-tasks init --join <hub-alias> --machine <name> --ssh <alias-the-hub-uses>`,
-then `agent-tasks doctor` on both. `attach` and `log --follow` work from any
-machine. It needs key-based SSH both ways; see
-[Multiple machines](RECIPE.md#multiple-machines) and
-[Client mode](doc/roadmap/user-config.md#client-mode).
+machine's own launcher, agent and profiles are used. The others are
+**clients** (`hub` in their config): they keep no data and forward every
+command to the hub, so `agent-tasks list`, `add`, `top`, `attach` and
+`log --follow` work the same from any of them.
 
-Notifications go to the `notifiers` in the config (a desktop notification by
-default, for `failed`, `timed_out` and `blocked`; or any command, e.g. one that
-sends a message to your phone). A task's `notify`, a profile's or
-`defaults.notify` picks which of a task's run events they send; see
-[doc/roadmap/runner.md](doc/roadmap/runner.md#notifications-notifiers).
+To add a machine, install agent-tasks on it and run
+
+```sh
+agent-tasks init --join <hub-alias> --machine <name> --ssh <alias-the-hub-uses>
+agent-tasks doctor   # on both machines
+```
+
+`agent-tasks machines list` and `agent-tasks machines check` show the
+machines and whether the hub reaches them. It needs key-based SSH both ways;
+see [Multiple machines](RECIPE.md#multiple-machines) and
+[Client mode](doc/roadmap/user-config.md#client-mode).
 
 ## Presets
 
 | Preset | Where each run goes | Notes |
 |---|---|---|
-| `herdr` | Its own Herdr tab, nested under the runner (without a runner terminal, as on a client machine: in an "Agent Tasks" space, see `space`) | Agent state (working, idle, blocked) from Herdr. Run the runner inside Herdr. |
+| `herdr` | Its own Herdr tab, nested under the runner (without a runner terminal, as on a client machine: in an "Agent Tasks" space, see `space`) | Agent state (working, idle, blocked) from Herdr. Run the runner inside Herdr. The most complete option. |
 | `rex` | Its own Rex window in the runner's session | **Untested against a real Rex.** Needs `rex` and `jq`. |
 | `tmux` | Its own tmux window | tmux has no agent status: blocked agents are only caught by the timeout. tmux 3.0+. |
-| `process` | A child process of the runner, output in the run's log | No terminal and no agent state, so the agent must run non-interactively (`claude --print`). What `init` picks outside a multiplexer; for tests and machines without one. |
+| `process` | A child process of the runner, output in the run's log | No terminal and no agent state, so the agent must run non-interactively (`claude --print`). What `init` picks outside a multiplexer; for servers and machines without one. |
 
 The interactive presets (`herdr`, `rex`, `tmux`) start a shell and type the
 agent command at its prompt, so shell aliases and functions work. For
 anything else (Orca, WezTerm, your own tool), write the commands yourself; see
 [RECIPE.md](RECIPE.md#3a-a-custom-launcher).
+
+## Troubleshooting
+
+Start with `agent-tasks doctor`: it checks the whole setup and says how to
+fix each problem. Then:
+
+- **Nothing runs.** The runner must be open: `agent-tasks runner status`.
+  `agent-tasks due` shows what it would launch right now.
+- **Runs show up as `missed`.** The runner was stopped or the machine was
+  asleep at that time (`runner_offline`). With `catch_up: latest`, the
+  latest late slot still runs if it's within `max_delay` when the runner
+  comes back; raise `--max-delay` for tasks that may run late.
+- **`agent-tasks: command not found`.** Add `~/.local/bin` to your `PATH`
+  (`export PATH="$HOME/.local/bin:$PATH"` in your shell profile). The runner
+  and the sub-agents need it too.
+- **A run is `blocked`.** The agent is asking something:
+  `agent-tasks attach <run_ref>` takes you to its tab. To avoid it, allow
+  what the task needs in the agent's `args` (e.g. `--allowedTools`) or say
+  in the instructions what to do instead of asking.
+- **A run failed.** `agent-tasks log <run_ref>` shows what happened and the
+  captured output; failed runs keep their tab open by default. Fix the
+  instructions with `agent-tasks edit` and `agent-tasks retry <run_ref>`.
+- **The task uses the wrong agent, launcher or folder settings.**
+  `agent-tasks config resolve <id>` shows where each setting comes from.
+
+## Updating and uninstalling
+
+```sh
+git -C ~/.local/share/agent-tasks-src pull
+cd ~/.local/share/agent-tasks-src && bun install
+```
+
+Restart the runner after updating. To uninstall, run
+`agent-tasks install --uninstall` (it removes only the links it created),
+then delete the checkout. Your config (`~/.config/agent-tasks/`) and data
+(`~/.local/share/agent-tasks/`) are left alone; delete them too if you
+don't want them.
 
 ## Development
 
