@@ -114,6 +114,11 @@ always run on the machine itself (a client never forwards them):
 | `close` | the same plus `handle` | `closed` (null without a `close` command), `error` |
 | `check-cwd` | `cwd` | `exists`, `path`, `cwd` (with `~`) |
 | `instructions` | `task` (`cwd`, `agent`) | `cwd`, `personal_instructions`, `missing_instructions` |
+| `ping` | nothing | `name`, `version`, `machine` (its own name), `hub` (its `hub.ssh`, or null on a hub), `launcher`, `launcher_problems` |
+
+`remote attach --payload <json>` is the interactive exception: the hub runs
+it with `ssh -tt`, the payload (as for `status`) goes as an argument because
+stdin is the terminal, and it exits with the launcher's `attach` exit code.
 
 The execution machine resolves the launcher, agent, profile (matched by the
 task's `cwd` there), skill, env, prompt template and personal instructions
@@ -160,7 +165,21 @@ through the client's forwarding (client mode). `task` asks the execution machine
   folder is an error; an unreachable machine saves the task with a warning
   (stderr, and `warnings` with `--json`). The `cwd` must be absolute or start
   with `~`.
-- `attach` and `log --follow` of remote sessions come later (t4).
+- **`attach`** to a session on another machine: the hub checks it is alive
+  (`status`) and runs `ssh -tt <alias> ~/.local/bin/agent-tasks remote
+  attach --payload …` with the terminal handed over; the machine runs its
+  own launcher's `attach`. From a client, `attach` first asks the hub where
+  the session runs (`attach <ref> --resolve --json`, hidden): when it runs on
+  the client itself, the client attaches locally (no client → hub → client
+  hop); otherwise the hub attaches as above. `--json` adds `machine`.
+- **`log --follow`** polls the session's screen with `read` (over SSH for a
+  remote session) and, at the end, the log the hub captured. From a client
+  the whole follow runs on the hub.
+- **Checks**: `ping` is what `machines add`, `machines check`, `doctor` and
+  `init --join` use. On the hub a registered machine must answer with the
+  same protocol, the same name as its registry key, have a `hub` (so its
+  sub-agents' `finish` reaches the hub) and a launcher whose commands are
+  found; an unreachable one is a warning.
 
 ## Notifications (notifiers)
 

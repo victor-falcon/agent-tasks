@@ -6,11 +6,14 @@ import { EDIT_OPTIONS } from "./commands/edit.ts";
 import { FINISH_OPTIONS } from "./commands/finish.ts";
 import { LIST_OPTIONS } from "./commands/list.ts";
 import { localMachine } from "./config.ts";
-import type { Context } from "./context.ts";
+import { type Context, output } from "./context.ts";
 import { AgentTasksError, HubUnreachableError, NotFoundError, UsageError } from "./errors.ts";
 import { parseJsonObject, readFileArg, readStdin, readStdinBytes } from "./input.ts";
 import { resolvePath } from "./paths.ts";
-import { COMMAND_NOT_FOUND_EXIT, REMOTE_CLI, remoteCliLine, runSshStreaming, SshSpawnError, sshArgv } from "./ssh.ts";
+import { attachHere } from "./remote.ts";
+import { isObject } from "./schema.ts";
+import { callHub, hubGlobals, isOldHubRejection, notInstalledOnHub, oldHubError } from "./hub.ts";
+import { COMMAND_NOT_FOUND_EXIT, remoteCliLine, runSshStreaming, SshSpawnError, sshArgv } from "./ssh.ts";
 import { displayPath, isMachineIndependentPath, normalizeTaskCwd } from "./task-flags.ts";
 
 // Client mode: a machine whose config has `hub` keeps no data. It forwards
@@ -48,6 +51,9 @@ export interface Forward {
   env?: Record<string, string>;
 }
 
+/** How long a forwarded command's first output is held back, to catch a hub too old for `--client-protocol`. */
+const EARLY_OUTPUT_MS = 300;
+
 /**
  * Runs a command on the hub and returns its exit code. `name` is the
  * command's full name and `args` its own arguments; `globals` are the global
@@ -57,21 +63,45 @@ export async function forwardToHub(ctx: Context, hubAlias: string, name: string,
   if (HUB_ONLY_COMMANDS.includes(name)) {
     throw new AgentTasksError("hub_only", `"${name}" runs on the hub ("${hubAlias}"), not on a client; run it there`);
   }
+  if (name === "attach") {
+    const code = await attachOnThisClient(ctx, hubAlias, args, globals);
+    if (code !== null) return code;
+  }
   const forward = await prepareForward(ctx, name, args);
-  const argv = sshArgv(hubAlias, remoteCliLine([...globals, ...name.split(" "), ...forward.args], forward.env), { tty: forward.tty });
+  const argv = sshArgv(hubAlias, remoteCliLine([...hubGlobals(globals), ...name.split(" "), ...forward.args], forward.env), { tty: forward.tty });
   let result;
   try {
-    result = await runSshStreaming(argv, { env: ctx.env, stdout: ctx.stdout, stderr: ctx.stderr, input: forward.input, inheritStdin: forward.inheritStdin });
+    result = await runSshStreaming(argv, {
+      env: ctx.env,
+      stdout: ctx.stdout,
+      stderr: ctx.stderr,
+      input: forward.input,
+      inheritStdin: forward.inheritStdin,
+      early: { ms: EARLY_OUTPUT_MS, swallow: isOldHubRejection },
+    });
   } catch (err) {
     if (err instanceof SshSpawnError) throw new HubUnreachableError(hubAlias, `could not run ssh: ${err.message}`);
     throw err;
   }
   if (result.connectError !== null) throw new HubUnreachableError(hubAlias, result.connectError);
-  if (result.code === COMMAND_NOT_FOUND_EXIT) {
-    throw new HubUnreachableError(
-      hubAlias,
-      `could not run ${REMOTE_CLI} there: install agent-tasks on the hub ("agent-tasks install") and make sure bun is in the PATH of non-interactive SSH sessions`,
-    );
+  if (result.swallowed) throw oldHubError(hubAlias);
+  if (result.code === COMMAND_NOT_FOUND_EXIT) throw notInstalledOnHub(hubAlias);
+  return result.code;
+}
+
+/**
+ * `attach` from a client: when the session runs on this client, attach here
+ * directly instead of through the hub and back (client → hub → client). The
+ * hub says where the run's session is (`attach --resolve`). Returns null when
+ * it runs elsewhere: then the hub attaches, over SSH to that machine if needed.
+ */
+async function attachOnThisClient(ctx: Context, hubAlias: string, args: string[], globals: string[]): Promise<number | null> {
+  const where = callHub(ctx, hubAlias, ["attach", ...args, "--resolve"], globals);
+  if (where.machine !== localMachine(ctx.config.config) || !isObject(where.payload)) return null;
+  const result = await attachHere(ctx, where.payload);
+  if (ctx.json) {
+    const { payload: _, ...about } = where;
+    output(ctx, { ...about, launcher: result.launcher, command: result.argv, exit_code: result.code }, "");
   }
   return result.code;
 }

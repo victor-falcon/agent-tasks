@@ -1,12 +1,15 @@
 import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type Check, fail, ok, warn } from "./checks.ts";
-import { BUILTIN_DEFAULTS, isHub, isKnownMachine, type LoadedConfig } from "./config.ts";
+import { callHub } from "./hub.ts";
+import { BUILTIN_DEFAULTS, isHub, isKnownMachine, type LoadedConfig, localMachine, type UserConfig } from "./config.ts";
 import { configChecks, configuredLaunchers, findExecutable, launcherNeedsTerminal } from "./config-check.ts";
 import type { Context } from "./context.ts";
 import { defaultMaxDelay, formatDuration, parseDuration } from "./duration.ts";
 import { CLI_BIN, type InstallDirs, installSources, linkStatus, samePath } from "./install.ts";
+import { AgentTasksError } from "./errors.ts";
 import { resolveLauncher } from "./launcher.ts";
+import { checkRegisteredMachine, hubCheck, pingMachine, sshMachines } from "./machines.ts";
 import { type Paths, REPO_ROOT, resolveConfigLocation, tildify } from "./paths.ts";
 import { listTasks, readTicks } from "./store.ts";
 
@@ -125,12 +128,44 @@ function heartbeatCheck(ctx: Context, paths: Paths, loaded: LoadedConfig | null)
   return ok("runner.heartbeat", `runner: last tick ${age > 0 ? `${formatDuration(age)} ago` : "just now"}`);
 }
 
+/**
+ * On a client: the hub answers over SSH with the same protocol, and it
+ * reaches this machine back (it runs the sessions of this machine's tasks).
+ */
+function hubChecks(ctx: Context, hubAlias: string): Check[] {
+  const self = localMachine(ctx.config.config);
+  const check = hubCheck(pingMachine({ machine: "hub", ssh: hubAlias }, ctx.env));
+  if (check.status !== "ok") return [check];
+  let back: Check;
+  try {
+    const answer = callHub(ctx, hubAlias, ["machines", "check", self]);
+    const found = Array.isArray(answer.checks) ? (answer.checks[0] as Check | undefined) : undefined;
+    back = found ? { ...found, id: "hub.reach_back", message: `hub → this machine: ${found.message}` } : fail("hub.reach_back", "the hub did not report whether it reaches this machine");
+  } catch (err) {
+    if (!(err instanceof AgentTasksError)) throw err;
+    back =
+      err.code === "not_found"
+        ? fail("hub.reach_back", `this machine ("${self}") is not in the hub's \`machines\``, `run agent-tasks init --join ${hubAlias} --machine ${self} --ssh <alias the hub reaches this machine with>`)
+        : fail("hub.reach_back", `the hub could not check this machine: ${err.message.split("\n")[0]}`);
+  }
+  return [check, back];
+}
+
+/** On the hub: every machine in `machines` answers. Unreachable ones are warnings: machines sleep. */
+function machineChecks(ctx: Context, config: UserConfig): Check[] {
+  return sshMachines(config).map((target) => checkRegisteredMachine(target, ctx.env).check);
+}
+
 export function doctorChecks(ctx: Context, dirs: InstallDirs): Check[] {
   const config = configChecks(ctx);
   const { loaded } = config;
   const checks = [bunCheck(ctx), cliOnPathCheck(ctx), ...config.checks];
-  if (loaded) checks.push(...dataChecks(ctx, ctx.paths), ...terminalChecks(ctx, loaded));
+  // A client keeps no data and runs no runner: those are the hub's.
+  const hub = loaded?.config.hub;
+  if (loaded && !hub) checks.push(...dataChecks(ctx, ctx.paths));
+  if (loaded) checks.push(...terminalChecks(ctx, loaded));
   checks.push(...skillChecks(ctx, loaded, dirs));
-  if (loaded) checks.push(heartbeatCheck(ctx, ctx.paths, loaded));
+  if (loaded && hub) checks.push(...hubChecks(ctx, hub.ssh));
+  if (loaded && !hub) checks.push(...machineChecks(ctx, loaded.config), heartbeatCheck(ctx, ctx.paths, loaded));
   return checks;
 }

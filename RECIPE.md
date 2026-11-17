@@ -74,6 +74,10 @@ agent-tasks init
   prints which one and why (`Launcher: herdr (found $HC_TERMINAL_ID)`). Run
   it in a terminal of the multiplexer where the runner will live, or pass
   `--launcher herdr|rex|tmux|process`.
+- If this machine is joining agent-tasks on another machine (the user
+  already runs it there and wants tasks to run here too), run
+  `agent-tasks init --join` instead of `agent-tasks init`: see
+  [Multiple machines](#multiple-machines).
 - If `agent-tasks` is not found after install, `~/.local/bin` is not on
   `PATH` (step 1). Until the user fixes it, call it as
   `~/.local/bin/agent-tasks`.
@@ -483,3 +487,98 @@ Tell the user, briefly:
 - how to use it from now on: keep the `agent-tasks runner` tab open; ask
   their agent to schedule work (the `schedule-agent-task` skill) or use
   `agent-tasks add`; check with `agent-tasks status`.
+
+## Multiple machines
+
+Optional: only when the user wants tasks to run on more than one machine
+(e.g. a Windows/WSL desktop and a Mac, each with repos the other doesn't
+have).
+
+One machine is the **hub**: it holds all the data (tasks, runs, heartbeat),
+its config has the time zone, notifiers and defaults, and it runs the only
+runner. Every other machine is a **client**: it keeps no data and forwards
+every data command (`add`, `list`, `finish`…) to the hub over SSH. Each task
+has a `machine` where it runs; when one is due, the hub's runner launches the
+sub-agent on that machine over SSH, and that machine opens it with its own
+launcher, agent, profiles and personal instructions. Sub-agents on a client
+call `agent-tasks task` and `agent-tasks finish` as usual: the client
+forwards them to the hub.
+
+### SSH requirements
+
+- Key-based, non-interactive SSH **both ways**: the client reaches the hub
+  (every command), and the hub reaches the client (to launch, watch, attach
+  and close its sessions). Check from each machine with
+  `ssh -o BatchMode=yes <alias> true`: it must not ask for anything. Use an
+  alias from `~/.ssh/config`; the two aliases are usually different (the
+  client's name for the hub, the hub's name for the client).
+- agent-tasks installed on both (step 2), so that
+  `~/.local/bin/agent-tasks` exists: that is the path the other machine
+  calls, because non-interactive SSH has no `~/.local/bin` in `PATH`.
+- `bun` reachable in a non-interactive SSH session: `ssh <alias> 'bun
+  --version'` must work. If it doesn't, link it where the system `PATH`
+  looks (e.g. `ln -s ~/.bun/bin/bun /usr/local/bin/bun`) or set `PATH` in
+  the file the remote shell reads for non-interactive sessions (`~/.zshenv`
+  for zsh, `~/.bashrc` before its interactive guard for bash).
+- Both machines on the same agent-tasks version (or at least the same
+  protocol): update with `git -C <checkout> pull` on both. A mismatch fails
+  with a message saying which machine to update.
+
+### The hub
+
+The machine the user already set up with steps 1 to 10. Give it a name:
+set `"machine"` in its config (e.g. `"wsl"`) before tasks exist there, or
+move existing tasks afterwards with `agent-tasks edit <id> --machine wsl`.
+Its config lists the other machines in `machines`, which `init --join`
+fills in for you:
+
+```json
+"machine": "wsl",
+"machines": { "mac": { "ssh": "mac" } }
+```
+
+`agent-tasks machines list`, `agent-tasks machines add <name> --ssh <alias>`
+and `agent-tasks machines rm <name>` change that list on the hub.
+
+### Joining a machine
+
+On the new machine:
+
+1. Steps 1 and 2, but run `agent-tasks init --join` instead of
+   `agent-tasks init`:
+   ```sh
+   agent-tasks init --join <alias-of-the-hub> --machine <name> --ssh <alias-the-hub-uses-for-this-machine>
+   ```
+   It checks that the hub answers over SSH with the same protocol, sets
+   `machine` and `hub` in this machine's config (creating it like `init`
+   when missing, and changing only those two keys otherwise), registers the
+   machine on the hub (`machines.<name> = { "ssh": "<alias>" }`) and checks
+   that the hub reaches this machine back. `--ssh` defaults to the machine's
+   name. If it can't edit the config safely, it prints the two lines to add
+   by hand; add them and run it again.
+2. Steps 3 to 7 on this machine as usual: the launcher, agent, profiles,
+   personal instructions and skills for the sessions that run **here**. The
+   time zone, notifiers and defaults in this config are not used: they are
+   the hub's.
+3. Check both machines:
+   ```sh
+   agent-tasks doctor
+   ```
+   On the client it checks that the hub answers with the same protocol and
+   reaches this machine back, and this machine's launcher. On the hub,
+   `agent-tasks doctor` (or `agent-tasks machines check`) checks each
+   machine in `machines`: reachable, same protocol, the name it gives itself
+   matches, it is a client, and its launcher is ready. An unreachable
+   machine is only a warning there: machines sleep. At the time of a run,
+   the hub retries an unreachable machine each tick until the task's
+   `max_delay`, then records the run as `missed` (reason
+   `machine_unreachable`).
+4. Never start `agent-tasks runner` on a client: there is only one runner,
+   on the hub (a client refuses it). If one was running here before the
+   join, stop it.
+5. Smoke test: from the client, add a one-off task as in step 9 (it runs on
+   this machine and in the current folder unless `--machine`/`--cwd` say
+   otherwise) and watch it from either machine with `agent-tasks log <run_ref>
+   --follow`. `agent-tasks attach <run_ref>` works from any machine: on the
+   machine that runs the session it attaches directly, elsewhere it goes
+   through the hub (`ssh -t`).

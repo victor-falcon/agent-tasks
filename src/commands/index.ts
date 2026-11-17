@@ -12,6 +12,7 @@ import init from "./init.ts";
 import install from "./install.ts";
 import list from "./list.ts";
 import log from "./log.ts";
+import { machinesCommands } from "./machines.ts";
 import pause from "./pause.ts";
 import { remoteCommands } from "./remote.ts";
 import resume from "./resume.ts";
@@ -52,6 +53,7 @@ export const commands: Command[] = [
   install,
   list,
   log,
+  ...machinesCommands,
   pause,
   ...remoteCommands,
   resume,

@@ -1,10 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { formatSource, type Resolution } from "./config.ts";
+import pkg from "../package.json" with { type: "json" };
+import { BUILTIN_DEFAULTS, formatSource, type LauncherConfig, localMachine, type Resolution } from "./config.ts";
+import { launcherChecks, launcherName } from "./config-check.ts";
 import type { Context } from "./context.ts";
 import { AgentTasksError } from "./errors.ts";
 import { attemptSessionInput } from "./execution.ts";
-import { type LauncherSpec, resolveLauncher, type SessionInput } from "./launcher.ts";
+import { commandEnv, handOverTerminal, LauncherError, type LauncherSpec, renderCommand, resolveLauncher, type SessionInput } from "./launcher.ts";
 import { homeDir, resolvePath, type Env } from "./paths.ts";
 import { REMOTE_PROTOCOL } from "./ssh.ts";
 import { type AgentSpec, Checker, checkAgent, isObject, TASK_ID_RE } from "./schema.ts";
@@ -188,4 +190,59 @@ export function remoteInstructions(ctx: Context, payload: Record<string, unknown
   const resolution = resolveHere(ctx, { cwd: task.cwd, agent: task.agent as AgentSpec | string | null });
   const { personal, missing } = loadPersonalInstructions(resolution.instructions);
   return answer({ cwd: resolvePath(task.cwd, ctx.env), personal_instructions: personal, missing_instructions: missing });
+}
+
+/**
+ * Who this machine is and whether its launcher is ready: what the hub checks
+ * when a machine joins and in `doctor`, and a client checks of its hub.
+ */
+export function remotePing(ctx: Context, payload: Record<string, unknown>): Record<string, unknown> {
+  checkProtocol(payload);
+  const config = ctx.config.config;
+  const problems = launcherChecks(ctx.config)
+    .filter((c) => c.status === "error")
+    .map((c) => c.message);
+  return answer({
+    name: pkg.name,
+    version: pkg.version,
+    machine: localMachine(config),
+    hub: config.hub?.ssh ?? null,
+    launcher: rootLauncherName(config.launcher ?? BUILTIN_DEFAULTS.launcher),
+    launcher_problems: problems,
+  });
+}
+
+/** The root launcher's name (the preset's, or `custom`); described as configured when it does not resolve. */
+function rootLauncherName(launcher: LauncherConfig): string {
+  try {
+    return resolveLauncher(launcher).name;
+  } catch {
+    return launcherName(launcher);
+  }
+}
+
+export interface AttachResult {
+  code: number;
+  /** The launcher's attach command, as run. */
+  argv: string[];
+  launcher: string;
+}
+
+/**
+ * Runs the launcher's `attach` for a session of this machine, resolved with
+ * this machine's own config, with the terminal handed over. Used by
+ * `remote attach` (the hub attaching over `ssh -t`) and by a client
+ * attaching to a session that runs on itself.
+ */
+export async function attachHere(ctx: Context, payload: Record<string, unknown>): Promise<AttachResult> {
+  const p = parseSessionPayload(payload, { needsHandle: true });
+  const { spec, input } = localSession(ctx, p);
+  if (!spec.attach) {
+    throw new LauncherError(
+      `the ${spec.name} launcher on machine "${localMachine(ctx.config.config)}" has no attach command; read the session's screen with "agent-tasks session read ${p.run_ref}" or follow it with "agent-tasks log ${p.run_ref} --follow"`,
+    );
+  }
+  const argv = renderCommand(spec.attach, input, "launcher.attach");
+  const code = await handOverTerminal(argv, { cwd: input.cwd, env: commandEnv(input) });
+  return { code, argv, launcher: spec.name };
 }

@@ -79,6 +79,15 @@ what failed and what was skipped. The interface is the CLI itself.
    `status`, `list`, `show`, `runs`, `log` and `attach` for the rest. Everything
    has `--json`, so a graphical panel could be built later in another repo
    without touching this one.
+10. **Multiple machines: one hub, many clients.** The hub holds all the data
+    and runs the only runner; each task has a `machine`, and the hub launches,
+    watches, attaches to and closes its session there over SSH
+    (`agent-tasks remote …`), where that machine's own launcher, agent and
+    profiles apply ([runner.md](runner.md#remote-machines)). Clients keep no
+    data and forward every command to the hub
+    ([user-config.md](user-config.md#client-mode)), with a protocol version
+    both sides check. `init --join` adds a machine; `doctor` and
+    `machines check` check the SSH links both ways.
 
 ## Documents
 
@@ -115,13 +124,14 @@ Phase 2 (details in [phase-2-cli-ui.md](phase-2-cli-ui.md))
 19. `attach` to answer a `blocked`.
 20. README with "Daily use".
 
+Multiple machines (implemented)
+21. Task `machine`, machine registry in the config, `--machine`.
+22. Client mode: forwarding commands to the hub over SSH.
+23. Remote execution: launch, watch and close sessions on the task's machine.
+24. Remote `attach` and `log --follow`, protocol check on forwarded commands,
+    `init --join`, `machines …`, multi-machine `doctor` checks.
+
 ## Out of scope for now
 
 - Dependencies between tasks, queues or priorities.
-- Multiple machines: in progress. Tasks carry a `machine` and the config has
-  `machine`, `machines` (on the hub) and `hub` (on clients); the hub
-  launches, watches and closes sessions on other machines over SSH
-  ([runner.md](runner.md#remote-machines)), and clients forward data commands
-  to the hub ([user-config.md](user-config.md#client-mode)). Remote `attach`/`log
-  --follow`, a protocol-version check and `init --join` come later.
 - Graphical interface (see [future-herdr-panel.md](future-herdr-panel.md)).

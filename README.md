@@ -170,10 +170,20 @@ the launcher commands and variables in
 
 Each task has a `machine`, where it runs: this machine's name (`machine` in
 the config, `local` by default) unless `add --machine <name>` picks one of
-the `machines` in the config. Running tasks on other machines is in
-progress. A machine with `hub` in its config is a client: it forwards every
-data command to the hub over SSH (see
-[Client mode](doc/roadmap/user-config.md#client-mode)).
+the `machines` in the config.
+
+### Multiple machines
+
+One machine is the hub: it holds the data and runs the only runner, and
+launches each task's sub-agent on the task's machine over SSH, where that
+machine's own launcher, agent and profiles are used. The others are clients
+(`hub` in their config): they keep no data and forward every command to the
+hub. To add a machine, install agent-tasks on it and run
+`agent-tasks init --join <hub-alias> --machine <name> --ssh <alias-the-hub-uses>`,
+then `agent-tasks doctor` on both. `attach` and `log --follow` work from any
+machine. It needs key-based SSH both ways; see
+[Multiple machines](RECIPE.md#multiple-machines) and
+[Client mode](doc/roadmap/user-config.md#client-mode).
 
 Notifications go to the `notifiers` in the config (a desktop notification by
 default, for `failed`, `timed_out` and `blocked`; or any command, e.g. one that
