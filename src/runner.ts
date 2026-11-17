@@ -23,6 +23,7 @@ import {
   type TodayCounts,
 } from "./runner-render.ts";
 import { colorEnabled, createStyle, type Style } from "./output/style.ts";
+import { clockTimeWithSeconds } from "./output/time.ts";
 import { lastTick } from "./runner-health.ts";
 import { listRuns, listTasks, readRunByRef, taskIdsWithRuns } from "./store.ts";
 import { tick, type TickResult } from "./tick.ts";
@@ -144,8 +145,13 @@ class RunnerOutput {
     this.stdout.write(`${JSON.stringify(json)}\n`);
   }
 
-  header(text: (style: Style) => string, json: unknown): void {
-    this.log(text(this.plainStyle));
+  /** In runner.log the header and the final line carry the time, like every other line. */
+  private stamped(at: Date, text: string): string {
+    return `${clockTimeWithSeconds(at, this.timezone)}  ${text}`;
+  }
+
+  header(at: Date, text: (style: Style) => string, json: unknown): void {
+    this.log(this.stamped(at, text(this.plainStyle)));
     if (this.mode.json) this.writeJson(json);
     else this.write(`${text(this.style)}\n`);
   }
@@ -173,9 +179,9 @@ class RunnerOutput {
   }
 
   /** The last status line, on the screen and in the log. */
-  final(info: StatusInfo, json: unknown): void {
+  final(at: Date, info: StatusInfo, json: unknown): void {
     const plain = formatStatus(info, this.timezone, this.plainStyle);
-    this.log(plain);
+    this.log(this.stamped(at, plain));
     if (this.mode.json) return this.writeJson(json);
     if (this.mode.quiet) return;
     this.write(this.tty ? `${formatStatusBlock(info, this.timezone, this.style, this.width)}\n` : `${plain}\n`);
@@ -292,7 +298,7 @@ class Runner {
     try {
       this.deps.onStarted?.();
       const header = { every: this.opts.every, ...setup, dataDir: tildify(this.paths.dataDir, this.base.env) };
-      this.out.header((style) => formatHeader(header, style), { type: "runner_started", pid: this.lock.pid, terminal: this.lock.terminal, started_at: this.lock.started_at, every: this.opts.every, ...setup, data_dir: this.paths.dataDir });
+      this.out.header(startedAt, (style) => formatHeader(header, style), { type: "runner_started", pid: this.lock.pid, terminal: this.lock.terminal, started_at: this.lock.started_at, every: this.opts.every, ...setup, data_dir: this.paths.dataDir });
       this.out.agent("idle", true);
       if (stale) this.warn(startedAt, `took over a stale lock from pid ${stale.pid} (started ${stale.started_at})`);
       // `--once` is for testing and for schedulers that call it at their own pace: no gap to report.
@@ -308,7 +314,8 @@ class Runner {
     } finally {
       releaseRunnerLock(this.paths, this.lock.pid);
       const final: StatusInfo = { ...this.status, health: this.opts.once ? this.status.health : "stopped", next_tick: null };
-      this.out.final(final, { type: "runner_stopped", at: this.stamp(this.deps.now()), ticks: this.ticks, last_tick: this.status.last_tick ? this.stamp(this.status.last_tick) : null, running: this.status.running, today: this.status.today });
+      const stoppedAt = this.deps.now();
+      this.out.final(stoppedAt, final, { type: "runner_stopped", at: this.stamp(stoppedAt), ticks: this.ticks, last_tick: this.status.last_tick ? this.stamp(this.status.last_tick) : null, running: this.status.running, today: this.status.today });
     }
     return exitCode;
   }

@@ -26,6 +26,9 @@ export const ACTIONS = {
   back: "Close the run (back to the panels)",
   next_section: "Next section of the run",
   prev_section: "Previous section of the run",
+  toggle_section: "Fold or open the selected section of the run",
+  open_sections: "Open every section of the run",
+  fold_sections: "Fold every section of the run",
   attach: "Attach to the run's session",
   retry: "Retry the run (failed, timed out or missed)",
   run_now: "Run the task now",
@@ -42,7 +45,7 @@ export type View = "list" | "detail";
 /** The actions each view listens to. In a run, `back` takes the place of `quit`. */
 export const VIEW_ACTIONS: Record<View, readonly Action[]> = {
   list: ["down", "up", "first", "last", "half_page_down", "half_page_up", "next_panel", "prev_panel", "open", "attach", "retry", "run_now", "toggle_pause", "refresh", "help", "quit"],
-  detail: ["down", "up", "first", "last", "half_page_down", "half_page_up", "back", "next_section", "prev_section", "attach", "retry", "run_now", "toggle_pause", "refresh", "help"],
+  detail: ["down", "up", "first", "last", "half_page_down", "half_page_up", "back", "next_section", "prev_section", "toggle_section", "open_sections", "fold_sections", "attach", "retry", "run_now", "toggle_pause", "refresh", "help"],
 };
 
 export const DEFAULT_KEYS: Record<Action, readonly string[]> = {
@@ -58,6 +61,9 @@ export const DEFAULT_KEYS: Record<Action, readonly string[]> = {
   back: ["<Esc>", "h", "q"],
   next_section: ["}"],
   prev_section: ["{"],
+  toggle_section: ["<CR>", "<Space>", "za"],
+  open_sections: ["zR"],
+  fold_sections: ["zM"],
   attach: ["a"],
   retry: ["r"],
   run_now: ["R"],

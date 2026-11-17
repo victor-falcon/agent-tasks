@@ -61,7 +61,8 @@ agent-tasks runner · every 5m · launcher: herdr (clc) · data: ~/.local/share/
   Each error line says which command to run to see more.
 - At the bottom, a fixed status line that is redrawn (only if the output is a
   terminal; otherwise, only the log).
-- The same lines go to `<data_dir>/state/runner.log`.
+- The same lines go to `<data_dir>/state/runner.log`, each with its time
+  (the header and the final status line too).
 
 Options: `--every 5m` (default, from the config), `--once` (a single tick and
 exit, for testing), `--quiet` (events only, no status line), `--plain` (this

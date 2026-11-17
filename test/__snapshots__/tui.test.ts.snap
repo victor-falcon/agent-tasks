@@ -28,8 +28,8 @@ exports[`frames the panels 1`] = `
   ■  Sun 08:04     worktree-cleanup    3m      removed 2 worktrees
   ■  Sun 06:04     inbox-triage        3m      inbox at zero
   ■  Sat 08:04     worktree-cleanup    3m      removed 2 worktrees
-── Events · runner.log ─────────────────────────────────────────────────────────────────────────────
-  09:55:01  ▶ sentry-summary/20261117T085500Z      launched in t45
+── Events ──────────────────────────────────────────────────────────────────────────────────────────
+  09:55:01  ▶ sentry-summary  launched in t45
 j/k move · <Tab> panel · <CR> open · a attach · r retry · R run · p pause · ? keys · q quit"
 `;
 
@@ -61,7 +61,7 @@ exports[`frames no tasks yet 1`] = `
 
 
 
-── Events · runner.log ─────────────────────────────────────────────────────────────────────────────
+── Events ──────────────────────────────────────────────────────────────────────────────────────────
   no events yet
 j/k move · <Tab> panel · <CR> open · a attach · r retry · R run · p pause · ? keys · q quit"
 `;

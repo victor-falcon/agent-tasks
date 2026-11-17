@@ -3,7 +3,7 @@ import { PENDING_MARK, RUN_MARKS, TASK_MARKS } from "../output/symbols.ts";
 import { renderTable } from "../output/table.ts";
 import { agendaTime, clockTime, formatSpan, relativeTime } from "../output/time.ts";
 import { runnerDownReason } from "../output/banner.ts";
-import type { RunDetail } from "./detail.ts";
+import { type DetailView, layoutDetail } from "./detail.ts";
 import { type Action, ACTIONS, type Keymap, keyHint, VIEW_ACTIONS, type View } from "./keys.ts";
 import type { Dashboard, DashNext, DashRun } from "./snapshot.ts";
 import { fit } from "./text.ts";
@@ -22,10 +22,7 @@ export interface ListState {
   offset: Record<PanelId, number>;
 }
 
-export interface DetailState {
-  detail: RunDetail;
-  scroll: number;
-}
+export type DetailState = DetailView;
 
 export interface ScreenState {
   view: View;
@@ -140,6 +137,7 @@ function footer({ state, style, keymap, width }: FrameInput): string {
     text = hints(keymap, [
       [["down", "up"], "scroll"],
       [["prev_section", "next_section"], "section"],
+      ["toggle_section", "fold/open"],
       ["attach", "attach"],
       ["retry", "retry"],
       ["back", "back"],
@@ -236,22 +234,103 @@ function recentCells(style: Style, recent: readonly DashRun[], { timezone, now }
   });
 }
 
-/** runner.log lines without the tick heartbeats, the time dimmed and the mark colored. */
-const LOG_MARKS: Record<string, Color> = { "▶": "cyan", "■": "green", "✕": "red", "□": "yellow", "!": "magenta", "⚠": "yellow", "↻": "yellow" };
+/** Colors of the marks runner.log uses. */
+const LOG_MARKS: Record<string, Color> = { "▶": "cyan", "■": "green", "✕": "red", "□": "yellow", "!": "magenta", "⚠": "yellow", "↻": "yellow", "●": "green", "○": "dim" };
 
-function eventRows(style: Style, events: readonly string[]): { plain: string[]; styled: string[] } {
-  const shown = events.filter((l) => !/^\S+ {2}tick {2}/.test(l)).slice(-50);
-  const styled = shown.map((line) => {
-    const m = /^(\S+)( {2})(\S)( .*)?$/.exec(line);
-    if (!m) return line;
-    return `${style.paint("dim", m[1]!)}${m[2]}${style.paint(LOG_MARKS[m[3]!], m[3]!)}${m[4] ?? ""}`;
-  });
-  return { plain: shown, styled };
+/** One line of runner.log, taken apart to be shown in columns. */
+export interface LogEvent {
+  /** `13:07:15`, or "" for lines written before runner.log carried the time on every line. */
+  time: string;
+  mark: string;
+  /** The task, for run events; null for the runner's own lines. */
+  task: string | null;
+  /** What happened: `succeeded in 15s`, `runner started · every 5m`… */
+  what: string;
+  /** The agent's summary or an error, when there is one. */
+  note: string;
 }
 
-/** Rows per panel: what each wants, shrunk (events first) until Recent has a few. */
+/** A runner.log line as columns, or null for the lines not worth showing (the tick heartbeats). */
+export function parseLogLine(line: string): LogEvent | null {
+  const timed = /^(\d\d:\d\d:\d\d) {2}(.*)$/.exec(line);
+  const time = timed ? timed[1]! : "";
+  const rest = timed ? timed[2]! : line;
+  if (rest.trim() === "" || /^tick {2}/.test(rest)) return null;
+  const header = /^agent-tasks runner · (.*)$/.exec(rest);
+  if (header) {
+    const parts = header[1]!.split(" · ").filter((p) => !p.startsWith("data: ")).map((p) => p.replace(/^launcher: /, ""));
+    return { time, mark: "●", task: null, what: ["runner started", ...parts].join(" · "), note: "" };
+  }
+  const final = /^● (.+?) · last tick /.exec(rest);
+  if (final) {
+    // `degraded (see ⚠ above)` → `degraded`: the screen's pointer means nothing here.
+    const health = final[1]!.split(" (")[0]!;
+    return { time, mark: "○", task: null, what: health === "stopped" ? "runner stopped" : health === "healthy" ? "runner exited" : `runner exited (${health})`, note: "" };
+  }
+  const event = /^(\S) (.*)$/.exec(rest);
+  if (!event) return { time, mark: " ", task: null, what: rest, note: "" };
+  const [, mark, body] = event as unknown as [string, string, string];
+  // Run events put the run ref (or a task id) first, padded so the details
+  // line up: a run ref, or a task id followed by the padding. Anything else
+  // (warnings, recoveries) is the runner's own text.
+  const ref = /^([\w.-]+\/\d{8}T\d{4,6}Z) +(.*)$/.exec(body) ?? /^([\w.-]+) {2,}(.*)$/.exec(body);
+  if (!ref) return { time, mark, task: null, what: body, note: "" };
+  const task = ref[1]!.split("/")[0]!;
+  // The command hints at the end are for the terminal; here the run is a key away.
+  const detail = ref[2]!.replace(/ · agent-tasks (log|attach) \S+$/, "");
+  const cut = detail.indexOf(" · ");
+  const what = cut === -1 ? detail : detail.slice(0, cut);
+  const note = cut === -1 ? "" : detail.slice(cut + 3).replace(/^"([\s\S]*)"$/, "$1");
+  return { time, mark, task, what, note };
+}
+
+/** Widest a column of the Events panel gets before it is cut. */
+const EVENT_TASK_WIDTH = 32;
+const EVENT_WHAT_WIDTH = 30;
+
+/** runner.log in columns: time, mark, task, what happened, and the summary dimmed. */
+function eventRows(style: Style, lines: readonly string[]): { plain: string[]; styled: string[] } {
+  const events: LogEvent[] = [];
+  for (const e of lines.map(parseLogLine)) {
+    if (e === null) continue;
+    // A stop right before a start is one restart.
+    const previous = events.at(-1);
+    if (e.mark === "●" && previous?.mark === "○" && previous.what === "runner stopped") {
+      events[events.length - 1] = { ...e, time: e.time || previous.time, what: e.what.replace("runner started", "runner restarted") };
+    } else events.push(e);
+  }
+  events.splice(0, Math.max(0, events.length - 50));
+  const width = (texts: string[], max: number) => Math.min(max, Math.max(0, ...texts.map((t) => Bun.stringWidth(t))));
+  const taskWidth = width(events.map((e) => e.task ?? ""), EVENT_TASK_WIDTH);
+  const whatWidth = width(events.filter((e) => e.task !== null).map((e) => e.what), EVENT_WHAT_WIDTH);
+  const row = (e: LogEvent, s: Style): string => {
+    const color = LOG_MARKS[e.mark];
+    const time = s.paint("dim", e.time.padEnd(8));
+    const mark = s.paint(color, e.mark);
+    if (e.task === null) return `${time}  ${mark} ${s.paint(e.mark === "●" || e.mark === "○" ? "dim" : color, e.what)}`;
+    const what = fit(e.what, whatWidth);
+    const outcome = e.mark === "■" || e.mark === "✕" || e.mark === "□" || e.mark === "!" ? s.paint(color, what) : what;
+    return `${time}  ${mark} ${fit(e.task, taskWidth)}  ${outcome}${e.note ? `  ${s.paint("dim", e.note.split("\n")[0]!)}` : ""}`.trimEnd();
+  };
+  return { plain: events.map((e) => row(e, PLAIN)), styled: events.map((e) => row(e, style)) };
+}
+
+/** Rows the Events panel always gets, when Recent has enough. */
+const EVENTS_MIN_ROWS = 6;
+
+/**
+ * Rows per panel: what each wants, shrunk (events first) until Recent has a
+ * few. Room that Recent does not need goes to the events.
+ */
 function layout(panels: Panel[], body: number): number[] {
   const sizes = panels.map((p) => Math.max(1, p.wanted));
+  const eventsIndex = panels.findIndex((p) => p.id === "events");
+  const recent = panels.find((p) => p.id === "recent");
+  if (eventsIndex >= 0 && recent) {
+    const others = sizes.reduce((sum, n, i) => (panels[i] === recent || i === eventsIndex ? sum : sum + n), 0) + panels.length;
+    const spare = body - others - Math.max(3, recent.plain.length);
+    sizes[eventsIndex] = Math.min(sizes[eventsIndex]!, Math.max(EVENTS_MIN_ROWS, spare));
+  }
   const recentIndex = panels.findIndex((p) => p.id === "recent");
   const fixed = () => sizes.reduce((sum, n, i) => (i === recentIndex ? sum : sum + n), 0) + panels.length;
   const shrinkOrder = ["events", "next", "running"];
@@ -280,7 +359,7 @@ function listBody(input: FrameInput, body: number): string[] {
     panel("recent", "Recent", rows((s) => recentCells(s, dash.recent, input, showMachine), style, PLAIN), "no runs yet", 0),
   ];
   const events = eventRows(style, dash.events);
-  panels.push(panel("events", "Events · runner.log", events, "no events yet", Math.min(Math.max(events.plain.length, 1), 6)));
+  panels.push(panel("events", "Events", events, "no events yet", events.plain.length));
   const sizes = layout(panels, body);
   const out: string[] = [];
   panels.forEach((p, i) => {
@@ -326,21 +405,22 @@ export function keepInView(offset: number, cursor: number, rows: number, count: 
 // The run
 // ---------------------------------------------------------------------------
 
-function detailTitle({ style, width, height }: FrameInput, { detail, scroll }: DetailState): string {
+function detailTitle({ style, width, height }: FrameInput, view: DetailState): string {
   const body = bodyHeight(height);
-  const total = detail.lines.length;
-  const where = total > body ? style.paint("dim", ` · ${Math.min(100, Math.round(((scroll + body) / total) * 100))}%`) : "";
-  return spread(style.paint("bold", detail.ref), `${detail.status}${where}`, width);
+  const total = layoutDetail(view, style).lines.length;
+  const where = total > body ? style.paint("dim", ` · ${Math.min(100, Math.round(((view.scroll + body) / total) * 100))}%`) : "";
+  return spread(style.paint("bold", view.detail.ref), `${view.detail.status}${where}`, width);
 }
 
 /** Highest scroll position: the last line at the bottom. */
-export function maxScroll(detail: RunDetail, body: number): number {
-  return Math.max(0, detail.lines.length - body);
+export function maxScroll(view: DetailState, style: Style, body: number): number {
+  return Math.max(0, layoutDetail(view, style).lines.length - body);
 }
 
-function detailBody(_input: FrameInput, state: DetailState, body: number): string[] {
-  state.scroll = Math.max(0, Math.min(state.scroll, maxScroll(state.detail, body)));
-  return state.detail.lines.slice(state.scroll, state.scroll + body);
+function detailBody({ style }: FrameInput, view: DetailState, body: number): string[] {
+  const { lines } = layoutDetail(view, style);
+  view.scroll = Math.max(0, Math.min(view.scroll, Math.max(0, lines.length - body)));
+  return lines.slice(view.scroll, view.scroll + body);
 }
 
 // ---------------------------------------------------------------------------
