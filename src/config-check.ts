@@ -57,6 +57,18 @@ export function launcherNeedsTerminal(spec: LauncherSpec): boolean {
   return launcherUses(spec, "runner_terminal") || launcherUses(spec, "runner_space");
 }
 
+/** The environment variables a launcher's commands read (`{{env.NAME}}`), sorted. */
+export function launcherEnvVariables(spec: LauncherSpec): string[] {
+  const re = /\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*?)(?:_quoted)?\s*\}\}/g;
+  const names = launcherCommands(spec).flatMap((c) => [...JSON.stringify(c).matchAll(re)].map((m) => m[1]!));
+  return [...new Set(names)].sort();
+}
+
+/** Whether a launcher opens runs in a Herdr space: the runner's, or the one named by its `space`. */
+export function launcherUsesHerdrSpace(spec: LauncherSpec): boolean {
+  return launcherUses(spec, "herdr_space");
+}
+
 /**
  * Whether a launcher types the agent command at an interactive shell's prompt
  * (`{{agent}}` in `then`, as the herdr, rex and tmux presets do) rather than

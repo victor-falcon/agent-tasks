@@ -56,10 +56,17 @@ requested) with `{{…}}` variables:
 Variables: `{{run_ref}}`, `{{task_id}}`, `{{title}}`, `{{cwd}}`,
 `{{session_name}}` (`task-<id>-<slot>`), `{{skill}}`, `{{prompt}}`
 (`/{{skill}} {{run_ref}}`), `{{agent}}` (the resolved agent command, e.g.
-`clc`), `{{handle}}`, `{{shell}}`, `{{path}}` (the runner's `PATH`), and the
-runner's own: `{{runner_terminal}}` (`$HC_TERMINAL_ID`), `{{runner_space}}`
-(its `herdr.space` label) and `{{new_tab_id}}` (`tb` + 32 random hex chars, one
-per launch). `{{env.NAME}}` is a variable of agent-tasks' own environment
+`clc`), `{{handle}}`, `{{shell}}` (`$SHELL`, else the user's login shell),
+`{{path}}` (the runner's `PATH`), and the runner's own: `{{runner_terminal}}`
+(`$HC_TERMINAL_ID`), `{{runner_space}}` (its `herdr.space` label) and
+`{{new_tab_id}}` (`tb` + 32 random hex chars, one per launch). For Herdr
+without a runner terminal (a client machine, a runner outside Herdr):
+`{{space}}` (the launcher's `space` field), `{{herdr_space}}` (the runner's
+space with `$HC_TERMINAL_ID`, else the id of this machine's space named
+`{{space}}`: the one `herdr-app ls` shows, else an id derived from the name),
+`{{herdr_space_name}}` (`{{space}}` without `$HC_TERMINAL_ID`, empty with it:
+the name to give the space) and the argv splat `{{herdr_parent_argv}}`
+(`--label herdr.parent=<runner terminal>`, or nothing). `{{env.NAME}}` is a variable of agent-tasks' own environment
 (the runner's for `tick`, the agent's for `finish`), e.g. `{{env.REX_SESSION}}`;
 an unset or empty one is an error, not an empty string. Add `_quoted` to any variable for a shell-quoted value. A `json:` handle
 path indexes arrays with numbers (`json:.block_ids.0`).
@@ -67,16 +74,20 @@ path indexes arrays with numbers (`json:.block_ids.0`).
 ### `herdr` preset (verified in Herdr on 2026-11-16)
 
 Each task goes in **its own tab, in the runner's space, nested under the
-runner** in the sidebar:
+runner** in the sidebar. Without a runner terminal (`$HC_TERMINAL_ID` unset:
+a client machine launched over SSH, or a runner outside Herdr), in the space
+named by `space` (default "Agent Tasks"), not nested; see "Without a runner
+terminal" below. Simplified (see `presets/herdr.json`):
 
 ```json
 "launcher": {
   "preset": "herdr",
+  "space": "Agent Tasks",
   "launch": ["hc", "run", "--bg", "--json", "--no-parent", "--no-notify", "--keep",
              "--name", "{{session_name}}", "--cwd", "{{cwd}}",
-             "--label", "herdr.space={{runner_space}}",
+             "--label", "herdr.space={{herdr_space}}",
              "--label", "herdr.tab={{new_tab_id}}",
-             "--label", "herdr.parent={{runner_terminal}}",
+             "{{herdr_parent_argv}}",
              "--label", "agent-tasks.run={{run_ref}}",
              "--", "/usr/bin/env", "PATH={{path}}", "{{shell}}", "-ic", "{{agent}} {{prompt_quoted}}"],
   "handle": "json:.address",
@@ -111,6 +122,19 @@ What was verified, with test terminals in the "Agent Tasks" space:
   in the screenshot. The runner emits it on startup (`idle`) and updates it
   (e.g. `working` while tasks are running).
 - **Closing**: `hc kill <handle>` ends the terminal and Herdr closes its tab.
+- **Without a runner terminal** (verified on herdr-app 0.1.16, hc 0.1.21): a
+  space is a place in the window's layout, not something `hc` knows. A
+  terminal labeled with a space id Herdr doesn't know creates that space,
+  unnamed (called after its first terminal's folder), and Herdr closes the
+  space with its last tab, name included. So for each launch the preset
+  looks for a space called `space` in `herdr-app ls` (this machine's, not a
+  remote one); if there is none it uses an id derived from the name
+  (`sp` + 32 hex of a SHA-1), so later runs land in the same space while it
+  lives. A `then` step names it with `herdr-app do space.rename`, retried for
+  up to 5 s because the space exists only once the window has adopted the
+  terminal (the rename fails with `no space "sp…"` right after `hc run`).
+  Without the window or `herdr-app` it skips that and the run still starts.
+  `herdr-app do space.new` is not used: it always starts a terminal of its own.
 - **`hc get --json` fields**: `address` (`t17g`), `state` (`live` /
   `finished`), `status` (`null` or `{app, state}` with `idle`, `working`,
   `done`, `blocked`, `error`), `exit_code`, `labels`, `parent`.
@@ -204,9 +228,14 @@ command by hand, which is the way to go for Orca or any other environment.
 On a task that runs on another machine, every launcher command runs there,
 with that machine's own `launcher`, `agent`, `profiles`, `skill` and
 `templates/prompt.md` (see [runner.md](runner.md#remote-machines)). Its
-environment is that of a non-interactive SSH session plus `~/.local/bin` in
-`PATH`, so launchers that need `$HC_TERMINAL_ID` (`herdr` with
-`runner_terminal`) do not fit there; `process` or `tmux` do.
+environment is that of a non-interactive SSH session, with `PATH` from the
+user's login shell (`$SHELL -lc env`) plus `~/.local/bin`, and `SHELL` from
+the system when SSH leaves it unset. There is no `$HC_TERMINAL_ID`: the
+`herdr` preset opens runs in its `space` there, `tmux` in its detached
+`agent-tasks` session, and launchers that use `{{runner_terminal}}`,
+`{{runner_space}}` or a variable of the runner's environment
+(`{{env.REX_SESSION}}` in `rex`) fail; `doctor` on the client warns about
+them.
 
 ## Steps
 

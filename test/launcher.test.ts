@@ -127,7 +127,7 @@ describe("presets", () => {
       error = err as LauncherError;
     }
     expect(error?.details).toEqual([
-      "lanch: unknown field (allowed: preset, description, launch, then, background, handle, close, status, status_map, read, attach)",
+      "lanch: unknown field (allowed: preset, description, launch, then, background, handle, close, status, status_map, read, attach, space)",
       "launch: is required",
       "close: must be a non-empty array of strings (argv) or a shell command string",
       'handle: must be "json:.<path>" or "regex:<pattern>"',

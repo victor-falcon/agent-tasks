@@ -1,16 +1,24 @@
 {
-  "description": "Each run in its own Herdr tab, in the runner's space and nested under it. Starts an interactive shell and types the agent command into it, so shell aliases loaded at the first prompt (such as clc) work. The shell exits with the agent, so a terminal whose agent quit without finish is detected.",
+  "description": "Each run in its own Herdr tab. Inside a Herdr terminal ($HC_TERMINAL_ID, the runner's), in the runner's space and nested under it; elsewhere (a client machine reached over SSH, a runner outside Herdr), in this machine's space named after \"space\" (default \"Agent Tasks\"), created when missing. Starts an interactive shell and types the agent command into it, so shell aliases loaded at the first prompt (such as clc) work. The shell exits with the agent, so a terminal whose agent quit without finish is detected.",
+  "space": "Agent Tasks",
   "launch": [
     "hc", "run", "--bg", "--json", "--no-parent", "--no-notify", "--keep",
     "--name", "{{session_name}}", "--cwd", "{{cwd}}",
-    "--label", "herdr.space={{runner_space}}",
+    "--label", "herdr.space={{herdr_space}}",
     "--label", "herdr.tab={{new_tab_id}}",
-    "--label", "herdr.parent={{runner_terminal}}",
+    "{{herdr_parent_argv}}",
     "--label", "agent-tasks.run={{run_ref}}",
     "--", "/usr/bin/env", "PATH={{path}}", "{{env_argv}}", "{{shell}}", "-i"
   ],
   "handle": "json:.address",
-  "then": [["hc", "send", "{{handle}}", " {{agent}} {{prompt_quoted}}; exit"]],
+  "then": [
+    ["hc", "send", "{{handle}}", " {{agent}} {{prompt_quoted}}; exit"],
+    [
+      "/bin/sh", "-c",
+      "[ -n \"$2\" ] && command -v herdr-app >/dev/null 2>&1 || exit 0; i=0; while [ $i -lt 25 ]; do herdr-app do space.rename --id \"$1\" --name \"$2\" >/dev/null 2>&1 && exit 0; i=$((i+1)); sleep 0.2; done; exit 0",
+      "agent-tasks-herdr", "{{herdr_space}}", "{{herdr_space_name}}"
+    ]
+  ],
   "close": ["hc", "kill", "{{handle}}"],
   "status": ["hc", "get", "{{handle}}", "--json"],
   "status_map": "herdr",

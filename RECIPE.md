@@ -97,7 +97,7 @@ echo "HC_TERMINAL_ID=$HC_TERMINAL_ID REX_SESSION=$REX_SESSION TMUX=$TMUX"
 
 | Found | Launcher | Notes |
 |---|---|---|
-| `$HC_TERMINAL_ID` set | `{ "preset": "herdr" }` | Each run in its own Herdr tab, nested under the runner. Needs `hc` on `PATH`. |
+| `$HC_TERMINAL_ID` set | `{ "preset": "herdr" }` | Each run in its own Herdr tab, nested under the runner. Needs `hc` on `PATH`. A runner outside a Herdr terminal opens runs in an "Agent Tasks" space instead (see "The launcher on a client"). |
 | `$REX_SESSION` set | `{ "preset": "rex" }` | Each run in its own Rex window. **Untested against a real Rex**: tell the user, and test each command of `presets/rex.json` by hand as described in 3a. Needs `rex` and `jq` on `PATH`. |
 | `$TMUX` set | `{ "preset": "tmux" }` | Each run in its own tmux window. tmux has no agent state, so a blocked agent is not detected (only the timeout catches it). Needs tmux 3.0+. |
 | none of them | ask the user | Ask which terminal or multiplexer they use. If they have none, or for a first try, use `{ "preset": "process" }`: the agent runs as a child process of the runner with its output in the run's log. It has no terminal, so the agent command must run without one; `init` writes `claude` in print mode for it (see step 4). |
@@ -559,7 +559,9 @@ On the new machine:
 2. Steps 3 to 7 on this machine as usual: the launcher, agent, profiles,
    personal instructions and skills for the sessions that run **here**. The
    time zone, notifiers and defaults in this config are not used: they are
-   the hub's.
+   the hub's. Pick the launcher for how runs are started here: by the hub,
+   over SSH, with no runner on this machine (see "The launcher on a
+   client" below).
 3. Check both machines:
    ```sh
    agent-tasks doctor
@@ -582,3 +584,39 @@ On the new machine:
    --follow`. `agent-tasks attach <run_ref>` works from any machine: on the
    machine that runs the session it attaches directly, elsewhere it goes
    through the hub (`ssh -t`).
+
+### The launcher on a client
+
+A client runs no runner: the hub starts each run with
+`ssh <client> ~/.local/bin/agent-tasks remote launch`, and this machine's
+launcher opens it. That SSH command is not inside any terminal of a
+multiplexer, so:
+
+- **herdr**: there is no runner terminal (`$HC_TERMINAL_ID`) to nest under.
+  Each run opens in its own tab in this machine's Herdr space called
+  "Agent Tasks", created on the first run if Herdr doesn't show one with
+  that name (and closed by Herdr with its last tab). Pick another space with
+  `"space"`:
+  ```json
+  "launcher": { "preset": "herdr", "space": "Agent Tasks" }
+  ```
+  The space is found and named with `herdr-app` (it comes with the Herdr
+  app; it must be in `~/.local/bin` or on the SSH `PATH`). If the window is
+  not open, the run still starts, in a space Herdr names after the task's
+  folder. On the hub, inside a Herdr terminal, nothing changes: runs open in
+  the runner's space, nested under it.
+- **tmux**: works as is; runs open in a detached `agent-tasks` tmux session
+  (`tmux attach -t agent-tasks`).
+- **rex**: needs `$REX_SESSION`, which SSH commands don't have; use another
+  launcher on a client, or make SSH commands get it.
+- **process**: works as is.
+
+`agent-tasks doctor` on the client says where runs will open (`herdr.space`)
+and warns about a launcher that needs something SSH commands don't have.
+
+The environment of a launch over SSH is not the one of a terminal: SSH gives
+a minimal `PATH` and may leave `SHELL` unset. agent-tasks uses the `PATH`
+of the user's login shell (`$SHELL -lc env`) plus `~/.local/bin`, and the
+login shell from the system when `SHELL` is unset. The herdr, tmux and rex
+presets then start an interactive shell (`{{shell}} -i`) and type the agent
+command into it, so aliases from the shell's rc files (such as `clc`) work.
