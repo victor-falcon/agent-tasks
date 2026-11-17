@@ -27,8 +27,9 @@ machine).
 Keys (Vim style; press ? inside for the full list):
   j/k  move        gg/G  first/last       <C-d>/<C-u>  half a page
   <Tab>/<S-Tab>  next/previous panel      <CR> or l    open the run
-  {/}  previous/next section of a run     <CR>, <Space> or za  fold/open it
-  zR/zM  open/fold every section          h, q or <Esc> back
+  In a run, j/k move between its sections (and scroll a long open one),
+  <CR>, <Space> or za open/fold the selected one, zR/zM all of them,
+  {/} jump to the previous/next section, h, q or <Esc> go back
   a  attach to the session   r  retry   R  run the task now   p  pause/resume
   ?  keys    q  quit
 

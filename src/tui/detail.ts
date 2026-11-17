@@ -171,7 +171,8 @@ export function isOpen(view: DetailView, section: Section): boolean {
 function heading(style: Style, section: Section, open: boolean, selected: boolean, width: number): string {
   const head = `${open ? "▾" : "▸"} ${section.name}${section.extra ? ` · ${section.extra}` : ""} `;
   const rule = fit(head + "─".repeat(Math.max(0, width - Bun.stringWidth(head))), width).trimEnd();
-  return selected ? style.paint("bold", style.paint("cyan", rule)) : open ? style.paint("bold", rule) : rule;
+  // The selected one stands out like the selected row of a panel.
+  return selected ? style.paint("inverse", fit(rule, width)) : open ? style.paint("bold", rule) : rule;
 }
 
 /** The lines to scroll through, and the line each section's heading is on. */

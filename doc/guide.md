@@ -193,7 +193,8 @@ another tab or another machine. It has:
 - **Recent**: recent results with the agent's summary. Open one (`<CR>`) to
   read its result first: the summary and the file the agent passed to
   `--output-file`. Its details, attempts, events and the log captured from
-  its session are folded below; `{`/`}` select one and `<CR>` opens it
+  its session are folded below: `j`/`k` move between sections (scrolling
+  through a long open one) and `<CR>` opens or folds the selected one
   (`zR` opens them all, `zM` folds them all). A run with no result yet
   opens on its log.
 - **Events**: what the runner did (`state/runner.log`): launches, results
@@ -201,8 +202,8 @@ another tab or another machine. It has:
   not need.
 
 It uses Vim keys: `j`/`k`, `gg`/`G`, `<C-d>`/`<C-u>`, `<Tab>` between
-panels, `<CR>` or `l` to open a run, `{`/`}` between its sections and
-`<CR>` to fold or open one, `h`, `q`
+panels, `<CR>` or `l` to open a run, `j`/`k` between its sections and
+`<CR>` to open or fold one, `h`, `q`
 or `<Esc>` to go back, `a` attach, `r` retry, `R` run now, `p` pause or
 resume, `?` for the full list. Change them in `~/.config/agent-tasks/tui.toml`
 (see [examples/tui.example.toml](../examples/tui.example.toml)).

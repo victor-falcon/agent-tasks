@@ -135,9 +135,8 @@ function footer({ state, style, keymap, width }: FrameInput): string {
   if (state.help) text = "any key to close";
   else if (state.view === "detail") {
     text = hints(keymap, [
-      [["down", "up"], "scroll"],
-      [["prev_section", "next_section"], "section"],
-      ["toggle_section", "fold/open"],
+      [["down", "up"], "move"],
+      ["toggle_section", "open/fold"],
       ["attach", "attach"],
       ["retry", "retry"],
       ["back", "back"],
