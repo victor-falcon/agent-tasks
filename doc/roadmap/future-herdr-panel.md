@@ -76,8 +76,9 @@ agent-tasks status --json [--runs 20] [--since 7d]   # from the CLI, in this rep
 ```
 
 `data_dir` also comes in the response (`"data_dir": "…"`) so the UI knows
-what to watch. Refresh: `watchFolder(data_dir)` triggers a new `status`; plus
-a 60 s timer for relative times and the runner state.
+what to watch (`top --json` already carries it). Refresh:
+`watchFolder(data_dir)` triggers a new `status`; plus a 60 s timer for
+relative times and the runner state.
 
 All of the panel's actions are calls to the CLI (`run`, `pause`, `resume`,
 `retry`, `runner install`). The mod does not write JSON.

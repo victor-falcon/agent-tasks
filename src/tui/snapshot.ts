@@ -51,6 +51,8 @@ export interface DashNext {
 
 export interface Dashboard {
   now: string;
+  /** The resolved data folder: what a UI watches to know when to ask again. */
+  data_dir: string;
   runner: RunnerHealth;
   running: DashRun[];
   next: DashNext[];
@@ -145,6 +147,7 @@ export function buildDashboard(ctx: Context): Dashboard {
 
   return {
     now: ctx.now.toISOString(),
+    data_dir: ctx.paths.dataDir,
     runner: contextRunnerHealth(ctx),
     running,
     next,

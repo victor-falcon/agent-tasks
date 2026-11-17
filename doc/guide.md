@@ -208,6 +208,9 @@ or `<Esc>` to go back, `a` attach, `r` retry, `R` run now, `p` pause or
 resume, `?` for the full list. Change them in `~/.config/agent-tasks/tui.toml`
 (see [examples/tui.example.toml](../examples/tui.example.toml)).
 `agent-tasks runner --plain` prints one line per event instead.
+`agent-tasks top --json` prints the dashboard's data once, including
+`data_dir`, the data folder a UI can watch to know when to ask again. On a
+client, `top` runs on the hub, so that path is the hub's.
 
 ## When a run ends
 
