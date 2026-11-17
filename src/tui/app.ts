@@ -312,19 +312,16 @@ export class Tui {
     list.cursor[list.focus] = Math.max(0, Math.min(count - 1, by === -Infinity ? 0 : by === Infinity ? count - 1 : current + by));
   }
 
-  /** After scrolling, a selected section whose heading went off screen gives way to the one being read. */
+  /**
+   * Scrolling selects the section being read: the one the top line is in.
+   * When everything fits on the screen nothing scrolls, and the selection
+   * stays where { and } put it.
+   */
   private followScroll(): void {
     const d = this.state.detail;
-    if (!d) return;
+    if (!d || maxScroll(d, this.style, this.body) === 0) return;
     const { starts } = layoutDetail(d, this.style);
-    const top = d.scroll;
-    const bottom = d.scroll + this.body;
-    const at = starts[d.selected] ?? 0;
-    if (at >= top && at < bottom) return;
-    // The last section that starts on screen or above it.
-    const visible = starts.findIndex((l) => l >= top && l < bottom);
-    const above = starts.filter((l) => l <= top).length - 1;
-    d.selected = Math.max(0, at < top ? (visible >= 0 ? visible : above) : above);
+    d.selected = Math.max(0, starts.filter((line) => line <= d.scroll).length - 1);
   }
 
   private jumpSection(direction: 1 | -1): void {

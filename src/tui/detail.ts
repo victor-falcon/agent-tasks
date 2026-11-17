@@ -72,6 +72,7 @@ export function buildRunDetail(ctx: Context, style: Style, ref: string, width: n
   const last = run.attempts.at(-1);
   const took = attemptDuration(run, ctx.now);
   const inProgress = isInProgress(run.status);
+  const log = capturedLog(ctx, run, last);
 
   // The result: how it ended and what the agent said.
   const result: string[] = [];
@@ -79,14 +80,19 @@ export function buildRunDetail(ctx: Context, style: Style, ref: string, width: n
     `${statusLabel(style, run.status)}${run.reason ? ` (${run.reason})` : ""}`,
     slotLabel(run, tz, ctx.now),
     ...(took !== null ? [`${inProgress ? "running for" : "took"} ${formatSpan(took)}`] : []),
-    ...(run.attempts.length > 1 ? [`attempt ${run.attempts.length}${task ? ` of ${(task.retries ?? 0) + 1}` : ""}`] : []),
+    // A manual retry can go past the task's retries: no "of N" here (Details has it).
+    ...(run.attempts.length > 1 ? [`attempt ${run.attempts.length}`] : []),
   ];
   result.push(facts.join(style.paint("dim", " · ")), "");
   const summary = last?.summary;
+  const hasResult = Boolean(summary || last?.output);
+  const note = (content: string) => result.push(...wrap(content, width).map((l) => style.paint("dim", l)));
   if (summary) result.push(...text(summary));
-  else if (neverStarted(run.status)) result.push(style.paint("dim", "It never started, so there is no output or log."));
-  else if (inProgress) result.push(style.paint("dim", "Still in progress: the agent reports its result when it finishes. Its log is below."));
-  else result.push(style.paint("dim", "The agent reported no summary. Its log is below."));
+  else if (neverStarted(run.status)) note("It never started, so there is no output or log.");
+  else {
+    const below = log ? " Its log is below." : "";
+    note(inProgress ? `Still in progress: the agent reports its result when it finishes.${below}` : `The agent reported no summary.${below}`);
+  }
   sections.push({ id: "result", name: "Result", extra: "", lines: result, open: true });
 
   // The file passed to `finish --output-file`: part of the result.
@@ -126,14 +132,19 @@ export function buildRunDetail(ctx: Context, style: Style, ref: string, width: n
   sections.push({ id: "events", name: "Events", extra: lastEvent ? `${plural(run.events.length, "event")} · last: ${lastEvent.event}` : "none", lines: events, open: false });
 
   // The output captured from the latest attempt's session
-  const log = capturedLog(ctx, run, last);
   if (log) {
-    const shown = log.exists ? fileLines(log.path) : [];
-    const empty = shown.every((l) => l.trim() === "");
-    const lines = !log.exists ? [style.paint("dim", inProgress ? "(not captured yet: it is still in progress)" : "(nothing captured)")] : empty ? [style.paint("dim", "(empty)")] : shown;
-    const extra = `${log.exists && !empty ? `${plural(shown.length, "line")} · ` : ""}${tildify(log.path, ctx.env)}`;
+    const shown = log.exists ? readShown(log.path) : null;
+    const content = shown ? sanitize(shown.text).trimEnd() : "";
+    let lines: string[];
+    let extra = tildify(log.path, ctx.env);
+    if (!shown) lines = [style.paint("dim", inProgress ? "(not captured yet: it is still in progress)" : "(nothing captured)")];
+    else if (content.trim() === "") lines = [style.paint("dim", "(empty)")];
+    else {
+      lines = [...(shown.cut ? [style.paint("dim", `(only the last ${MAX_FILE_BYTES / 1024} KiB)`)] : []), ...wrap(content, width)];
+      extra = `${plural(content.split("\n").length, "line")} · ${extra}`;
+    }
     // Without a result to read, the log is the next best thing.
-    sections.push({ id: "log", name: "Log", extra, lines, open: !summary && !last?.output && !neverStarted(run.status) });
+    sections.push({ id: "log", name: "Log", extra, lines, open: !hasResult && !neverStarted(run.status) });
   }
 
   const status = `${statusLabel(style, run.status)}${took !== null ? ` · ${formatSpan(took)}${inProgress ? " so far" : ""}` : ""}`;

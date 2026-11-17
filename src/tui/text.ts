@@ -33,7 +33,7 @@ export function wrap(text: string, width: number): string[] {
       continue;
     }
     // Continuation lines keep the line's indentation when that leaves room.
-    const indent = /^ */.exec(line)![0];
+    const indent = /^ */.exec(line)![0].slice(0, w - 1);
     const hang = indent.length < w / 2 ? indent : "";
     let current = indent;
     const flush = () => {

@@ -262,14 +262,19 @@ export function parseLogLine(line: string): LogEvent | null {
     return { time, mark: "●", task: null, what: ["runner started", ...parts].join(" · "), note: "" };
   }
   const final = /^● (.+?) · last tick /.exec(rest);
-  if (final) return { time, mark: "○", task: null, what: final[1] === "stopped" ? "runner stopped" : `runner exited (${final[1]})`, note: "" };
+  if (final) {
+    // `degraded (see ⚠ above)` → `degraded`: the screen's pointer means nothing here.
+    const health = final[1]!.split(" (")[0]!;
+    return { time, mark: "○", task: null, what: health === "stopped" ? "runner stopped" : health === "healthy" ? "runner exited" : `runner exited (${health})`, note: "" };
+  }
   const event = /^(\S) (.*)$/.exec(rest);
   if (!event) return { time, mark: " ", task: null, what: rest, note: "" };
   const [, mark, body] = event as unknown as [string, string, string];
-  // Run events put the run ref first, padded so the details line up.
-  const ref = /^(\S+?)(?: {2,}| (?=\S))(.*)$/.exec(body);
-  const isRef = ref !== null && (ref[1]!.includes("/") || / {2}/.test(body.slice(ref[1]!.length, ref[1]!.length + 2)));
-  if (!ref || !isRef) return { time, mark, task: null, what: body, note: "" };
+  // Run events put the run ref (or a task id) first, padded so the details
+  // line up: a run ref, or a task id followed by the padding. Anything else
+  // (warnings, recoveries) is the runner's own text.
+  const ref = /^([\w.-]+\/\d{8}T\d{4,6}Z) +(.*)$/.exec(body) ?? /^([\w.-]+) {2,}(.*)$/.exec(body);
+  if (!ref) return { time, mark, task: null, what: body, note: "" };
   const task = ref[1]!.split("/")[0]!;
   // The command hints at the end are for the terminal; here the run is a key away.
   const detail = ref[2]!.replace(/ · agent-tasks (log|attach) \S+$/, "");

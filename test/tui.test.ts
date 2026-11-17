@@ -10,7 +10,7 @@ import { runnerLogPath } from "../src/runner-lock.ts";
 import { writeRun } from "../src/store.ts";
 import { type CommandRunner, Tui, type TuiTerminal } from "../src/tui/app.ts";
 import { buildKeymap, decodeKeys, DEFAULT_KEYS, KeyMatcher, loadKeymap, parseKeys } from "../src/tui/keys.ts";
-import { initialState, renderFrame } from "../src/tui/render.ts";
+import { initialState, parseLogLine, renderFrame } from "../src/tui/render.ts";
 import { buildDashboard } from "../src/tui/snapshot.ts";
 import { fit, sanitize, wrap } from "../src/tui/text.ts";
 import { FIXTURE_NOW, FIXTURE_TZ, scheduledRun, writeFixture } from "./fixtures/views.ts";
@@ -125,6 +125,17 @@ describe("text", () => {
     expect(fit("abcdef", 4)).toBe("abc…");
     const styled = createStyle(true).paint("red", "abcdef");
     expect(fit(styled, 4)).toBe("\x1b[31mabc…\x1b[0m");
+  });
+});
+
+describe("runner.log lines", () => {
+  test("run events, task events and the runner's own lines", () => {
+    expect(parseLogLine("13:07:15  tick  1 due · 1 running")).toBeNull();
+    expect(parseLogLine("13:07:15  ⚠ demo                                 anomaly text")).toMatchObject({ task: "demo", what: "anomaly text" });
+    expect(parseLogLine("13:07:15  ⚠ ~/x/y is not readable")).toMatchObject({ task: null, what: "~/x/y is not readable" });
+    expect(parseLogLine("13:07:15  ⚠ took over a stale lock from pid 3")).toMatchObject({ task: null });
+    expect(parseLogLine("13:07:15  ● degraded (see ⚠ above) · last tick 13:02:15 · running 0 · today ■0 ✕0 □0 !0")).toMatchObject({ what: "runner exited (degraded)" });
+    expect(parseLogLine("13:07:15  ▶ a-very-long-task-id-that-fills-it/20261117T120700Z launched in t6q")).toMatchObject({ mark: "▶", task: "a-very-long-task-id-that-fills-it", what: "launched in t6q" });
   });
 });
 

@@ -23,10 +23,10 @@ import {
   type TodayCounts,
 } from "./runner-render.ts";
 import { colorEnabled, createStyle, type Style } from "./output/style.ts";
+import { clockTimeWithSeconds } from "./output/time.ts";
 import { lastTick } from "./runner-health.ts";
 import { listRuns, listTasks, readRunByRef, taskIdsWithRuns } from "./store.ts";
 import { tick, type TickResult } from "./tick.ts";
-import { clockTimeWithSeconds } from "./output/time.ts";
 import { formatInZone, systemTimezone } from "./time.ts";
 
 // `agent-tasks runner`: a plain long-lived process (doc/roadmap/runner.md).
