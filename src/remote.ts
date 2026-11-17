@@ -63,17 +63,16 @@ function resolveHere(ctx: Context, task: { cwd: string; agent?: AgentSpec | stri
 /**
  * The environment of the launcher here. SSH runs commands in a non-interactive
  * shell: PATH is minimal (often without ~/.local/bin, which the agent needs to
- * call agent-tasks) and SHELL may be unset. For a launch, PATH is the one of
- * the user's login shell (what a new terminal tab would have), so the agent
- * and its tools are found; then ~/.local/bin is added if missing.
+ * call agent-tasks) and SHELL may be unset. PATH gets the folders the user's
+ * login shell adds (its profile, e.g. Homebrew's), so the launcher's programs
+ * (hc, tmux…) and the agent are found; then ~/.local/bin if missing. The
+ * interactive shell the presets start adds what its rc files set.
  */
-export function remoteEnv(env: Env, { login = false }: { login?: boolean } = {}): Env {
+export function remoteEnv(env: Env): Env {
   const shell = shellOf(env);
-  let path = env.PATH ?? "";
-  if (login) path = mergePaths(loginShellPath(env, shell), path);
+  const path = mergePaths(loginShellPath(env, shell), env.PATH ?? "");
   const bin = join(homeDir(env), ".local", "bin");
-  if (!path.split(":").includes(bin)) path = path ? `${bin}:${path}` : bin;
-  return { ...env, PATH: path, SHELL: shell };
+  return { ...env, PATH: path.split(":").includes(bin) ? path : path ? `${bin}:${path}` : bin, SHELL: shell };
 }
 
 /** PATH as the user's login shell sets it, or "" when it can't be read. */
@@ -101,7 +100,7 @@ interface Local {
   input: SessionInput;
 }
 
-function localSession(ctx: Context, p: RemoteSessionPayload, { login = false }: { login?: boolean } = {}): Local {
+function localSession(ctx: Context, p: RemoteSessionPayload): Local {
   const resolution = resolveHere(ctx, p.task);
   const spec = resolveLauncher(resolution.launcher);
   const input = attemptSessionInput(
@@ -117,7 +116,7 @@ function localSession(ctx: Context, p: RemoteSessionPayload, { login = false }: 
       handle: p.handle,
     },
     resolution,
-    remoteEnv(ctx.env, { login }),
+    remoteEnv(ctx.env),
   );
   return { resolution, spec, input };
 }
@@ -131,7 +130,7 @@ const answer = (data: Record<string, unknown>) => ({ protocol: REMOTE_PROTOCOL, 
  * answer is returned again (with `reused: true`) instead of a second agent.
  */
 export function remoteLaunch(ctx: Context, payload: Record<string, unknown>): Record<string, unknown> {
-  const { resolution, spec, input } = localSession(ctx, parseSessionPayload(payload, { needsHandle: false }), { login: true });
+  const { resolution, spec, input } = localSession(ctx, parseSessionPayload(payload, { needsHandle: false }));
   const recordFile = input.logPath.replace(/\.log$/, ".launch.json");
   const previous = readLaunchRecord(recordFile);
   if (previous && stillAlive(spec, { ...input, handle: previous.handle as string })) return answer({ ...previous, reused: true });

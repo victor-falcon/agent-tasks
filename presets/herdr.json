@@ -16,7 +16,7 @@
     [
       "/bin/sh", "-c",
       "[ -n \"$2\" ] && command -v herdr-app >/dev/null 2>&1 || exit 0; i=0; while [ $i -lt 25 ]; do herdr-app do space.rename --id \"$1\" --name \"$2\" >/dev/null 2>&1 && exit 0; i=$((i+1)); sleep 0.2; done; exit 0",
-      "agent-tasks-herdr", "{{herdr_space}}", "{{herdr_space_name}}"
+      "agent-tasks-herdr", "{{herdr_space}}", "{{herdr_new_space_name}}"
     ]
   ],
   "close": ["hc", "kill", "{{handle}}"],

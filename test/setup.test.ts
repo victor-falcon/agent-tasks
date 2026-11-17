@@ -360,6 +360,9 @@ describe("doctor", () => {
 
     writeFileSync(join(home.root, "hc", "spaces.json"), JSON.stringify({ spaces: [{ id: "sp-at", name: "Agent Tasks", machine: null }] }));
     expect((await doctor()).stdout).toContain('runs open in the Herdr space "Agent Tasks" (found: sp-at)');
+
+    writeFileSync(join(home.root, "hc", "app-down"), "");
+    expect((await doctor()).stdout).toContain("the Herdr window is not open, so whether it exists is unknown");
   });
 
   test("a custom launcher that needs the runner's terminal warns without $HC_TERMINAL_ID", async () => {

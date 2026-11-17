@@ -219,7 +219,9 @@ describe("a run on another machine with the herdr preset", () => {
   test("without SHELL over SSH, the user's login shell from the system is used", () => {
     const env = remoteEnv({ HOME: mac.home, PATH: "/usr/bin:/bin" });
     expect(env.SHELL).toBe(userInfo().shell || "/bin/sh");
-    expect(env.PATH).toBe(`${join(mac.home, ".local", "bin")}:/usr/bin:/bin`);
+    const path = env.PATH!.split(":");
+    expect(path[0]).toBe(join(mac.home, ".local", "bin"));
+    expect(path).toContain("/usr/bin");
   });
 });
 

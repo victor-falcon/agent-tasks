@@ -204,11 +204,20 @@ describe("herdr preset without $HC_TERMINAL_ID", () => {
     expect(home.run(DEMO_REF).status).toBe("running");
   });
 
-  test("reuses a space the window already shows with that name", async () => {
+  test("reuses a space the window already shows with that name, without renaming it", async () => {
     writeFileSync(join(home.hcDir, "spaces.json"), JSON.stringify({ spaces: [{ id: "sp-other", name: "Agent Tasks", machine: "vps" }, { id: "sp-mine", name: "Agent Tasks", machine: null }] }));
     execTask(home, "succeed");
     await home.tick(1);
     expect(labelsOf(calls("run")[0]!)[0]).toBe("herdr.space=sp-mine");
+    expect(appCalls()).toEqual([["ls"]]);
+  });
+
+  test("keeps the name the user gave the space an earlier run made", async () => {
+    writeFileSync(join(home.hcDir, "spaces.json"), JSON.stringify({ spaces: [{ id: AGENT_TASKS, name: "Night shift", machine: null }] }));
+    execTask(home, "succeed");
+    await home.tick(1);
+    expect(labelsOf(calls("run")[0]!)[0]).toBe(`herdr.space=${AGENT_TASKS}`);
+    expect(appCalls()).toEqual([["ls"]]);
   });
 
   test("launcher.space picks another space", async () => {
@@ -226,6 +235,7 @@ describe("herdr preset without $HC_TERMINAL_ID", () => {
     expect(events).toEqual([expect.objectContaining({ type: "launched", handle: "t2" })]);
     expect(labelsOf(calls("run")[0]!)[0]).toBe(`herdr.space=${AGENT_TASKS}`);
     expect(home.run(DEMO_REF).status).toBe("running");
+    expect(appCalls()).toEqual([["ls"]]); // no rename retries without a window
   });
 
   test("status, read and close need no runner terminal", async () => {

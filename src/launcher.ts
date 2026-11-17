@@ -215,48 +215,52 @@ export function herdrSpaceId(name: string): string {
   return `sp${createHash("sha1").update(`agent-tasks/${name}`).digest("hex").slice(0, 32)}`;
 }
 
+/** This machine's Herdr space for runs, and whether the window shows it. */
+export interface HerdrSpace {
+  id: string;
+  /** `found`: the window shows it; `missing`: it does not (the launch creates it); `unknown`: no window or no `herdr-app`. */
+  state: "found" | "missing" | "unknown";
+}
+
 /**
- * The id of this machine's Herdr space called `name`: the one the window
- * shows (`herdr-app ls`), else the id derived from the name. Herdr creates a
- * space for an id it does not know when a terminal labeled with it starts;
- * the herdr preset then names it. Without the window (or `herdr-app`), the
- * derived id is used.
+ * This machine's Herdr space called `name`, as the window shows it
+ * (`herdr-app ls`): by name, else the one an earlier run made from the name
+ * (even if renamed since). When there is none, the id derived from the name:
+ * Herdr creates a space for an id it does not know when a terminal labeled
+ * with it starts, and the herdr preset names it.
  */
-export function namedHerdrSpace(env: Env, name: string): string {
+export function namedHerdrSpace(env: Env, name: string): HerdrSpace {
+  const derived = herdrSpaceId(name);
   const result = exec(["herdr-app", "ls"], { env, timeoutMs: 10_000 });
-  if (result.code === 0) {
-    try {
-      const spaces = (JSON.parse(result.stdout) as { spaces?: unknown }).spaces;
-      if (Array.isArray(spaces)) {
-        const found = spaces.find((s) => isObject(s) && s.name === name && (s.machine ?? null) === null && typeof s.id === "string");
-        if (found) return (found as { id: string }).id;
-      }
-    } catch {
-      // Not the JSON we know: fall back to the derived id.
-    }
+  let spaces: unknown;
+  try {
+    spaces = result.code === 0 ? (JSON.parse(result.stdout) as { spaces?: unknown }).spaces : undefined;
+  } catch {
+    spaces = undefined;
   }
-  return herdrSpaceId(name);
+  if (!Array.isArray(spaces)) return { id: derived, state: "unknown" };
+  const local = spaces.filter((s): s is { id: string; name?: unknown } => isObject(s) && typeof s.id === "string" && (s.machine ?? null) === null);
+  const found = local.find((s) => s.name === name) ?? local.find((s) => s.id === derived);
+  return found ? { id: found.id, state: "found" } : { id: derived, state: "missing" };
 }
+
+/** Launcher settings that variables read (the launcher's `space`). */
+export type LauncherVarsSpec = Pick<LauncherSpec, "space">;
 
 /**
- * Launcher settings that variables read (the launcher's `space`), and values
- * shared by the commands of one launch (`launch` and its `then` steps render
- * separately, but must agree on the space).
+ * What the commands of one launch share: `launch` and its `then` steps
+ * render separately, but must agree on the space.
  */
-export type LauncherVarsSpec = Pick<LauncherSpec, "space"> & { shared?: Map<string, string> };
-
-function sharedValue(shared: Map<string, string> | undefined, key: string, compute: () => string): string {
-  if (!shared) return compute();
-  const value = shared.get(key) ?? compute();
-  shared.set(key, value);
-  return value;
+export interface LaunchShared {
+  herdrSpace?: HerdrSpace;
 }
 
-export function sessionVars(input: SessionInput, spec: LauncherVarsSpec = { space: null }): Vars {
+export function sessionVars(input: SessionInput, spec: LauncherVarsSpec, shared: LaunchShared = {}): Vars {
   const { env } = input;
   const terminal = env.HC_TERMINAL_ID || undefined;
   const space = spec.space ?? undefined;
   const runnerSpaceId = terminal ? once(() => runnerSpace(env, terminal)) : undefined;
+  const named = space === undefined ? undefined : () => (shared.herdrSpace ??= namedHerdrSpace(env, space));
   return {
     values: {
       run_ref: input.runRef,
@@ -277,8 +281,8 @@ export function sessionVars(input: SessionInput, spec: LauncherVarsSpec = { spac
       runner_terminal: terminal,
       runner_space: runnerSpaceId,
       space,
-      herdr_space: runnerSpaceId ?? (space === undefined ? undefined : once(() => sharedValue(spec.shared, "herdr_space", () => namedHerdrSpace(env, space)))),
-      herdr_space_name: terminal ? "" : space,
+      herdr_space: runnerSpaceId ?? (named && (() => named().id)),
+      herdr_new_space_name: terminal ? "" : named && (() => (named().state === "missing" ? space! : "")),
       new_tab_id: once(() => `tb${randomBytes(16).toString("hex")}`),
     },
     env,
@@ -289,7 +293,7 @@ export function sessionVars(input: SessionInput, spec: LauncherVarsSpec = { spac
       runner_space: "$HC_TERMINAL_ID is not set; run agent-tasks inside a Herdr terminal to use this launcher",
       space: 'the launcher has no "space"',
       herdr_space: '$HC_TERMINAL_ID is not set and the launcher has no "space" to open runs in',
-      herdr_space_name: '$HC_TERMINAL_ID is not set and the launcher has no "space" to open runs in',
+      herdr_new_space_name: '$HC_TERMINAL_ID is not set and the launcher has no "space" to open runs in',
     },
   };
 }
@@ -306,8 +310,8 @@ export function commandEnv(input: SessionInput): Env {
  * prompt; `KEY=value` pairs; `--label herdr.parent=<runner's terminal>`, or
  * nothing outside a Herdr terminal).
  */
-export function renderCommand(cmd: CommandSpec, input: SessionInput, where: string, spec?: LauncherVarsSpec): string[] {
-  const vars = sessionVars(input, spec);
+export function renderCommand(cmd: CommandSpec, input: SessionInput, where: string, spec: LauncherVarsSpec, shared?: LaunchShared): string[] {
+  const vars = sessionVars(input, spec, shared);
   if (typeof cmd === "string") return ["/bin/sh", "-c", render(cmd, vars, where)];
   return cmd.flatMap((arg) => {
     const splat = /^\{\{\s*([a-z_]+)\s*\}\}$/.exec(arg)?.[1];
@@ -421,8 +425,8 @@ export interface LaunchResult {
 /** Runs `launch` (and the `then` steps). Throws LauncherError when no session was started. */
 export function launch(spec: LauncherSpec, input: SessionInput): LaunchResult {
   const env = commandEnv(input);
-  const vars = { space: spec.space, shared: new Map<string, string>() };
-  const argv = renderCommand(spec.launch, input, "launcher.launch", vars);
+  const shared: LaunchShared = {};
+  const argv = renderCommand(spec.launch, input, "launcher.launch", spec, shared);
   let handle: string;
   let pid: number | null = null;
   if (spec.background) {
@@ -447,7 +451,7 @@ export function launch(spec: LauncherSpec, input: SessionInput): LaunchResult {
   for (const [i, step] of spec.then.entries()) {
     let result: ExecResult;
     try {
-      result = exec(renderCommand(step, withHandle, `launcher.then[${i}]`, vars), { env, cwd: input.cwd });
+      result = exec(renderCommand(step, withHandle, `launcher.then[${i}]`, spec, shared), { env, cwd: input.cwd });
     } catch (err) {
       return { handle, pid, delivered: false, error: (err as Error).message };
     }

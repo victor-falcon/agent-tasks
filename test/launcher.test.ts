@@ -43,13 +43,13 @@ describe("templates and quoting", () => {
 
   test("{{env.NAME}} reads the runner's environment and says when it is not set", () => {
     const env = { PATH: "/usr/bin:/bin", REX_SESSION: "my session" };
-    expect(renderCommand(["rex", "-s", "{{env.REX_SESSION}}"], input({ env }), "t")).toEqual(["rex", "-s", "my session"]);
-    expect(renderCommand("rex -s {{env.REX_SESSION_quoted}}", input({ env }), "t")).toEqual(["/bin/sh", "-c", "rex -s 'my session'"]);
-    expect(() => renderCommand(["{{env.REX_SESSION}}"], input(), "launcher.launch")).toThrow("variable {{env.REX_SESSION}} in launcher.launch is not available: $REX_SESSION is not set");
+    expect(renderCommand(["rex", "-s", "{{env.REX_SESSION}}"], input({ env }), "t", { space: null })).toEqual(["rex", "-s", "my session"]);
+    expect(renderCommand("rex -s {{env.REX_SESSION_quoted}}", input({ env }), "t", { space: null })).toEqual(["/bin/sh", "-c", "rex -s 'my session'"]);
+    expect(() => renderCommand(["{{env.REX_SESSION}}"], input(), "launcher.launch", { space: null })).toThrow("variable {{env.REX_SESSION}} in launcher.launch is not available: $REX_SESSION is not set");
   });
 
   test("a variable that is not available says why", () => {
-    const argv = () => renderCommand(["x", "{{runner_terminal}}"], input(), "launcher.launch");
+    const argv = () => renderCommand(["x", "{{runner_terminal}}"], input(), "launcher.launch", { space: null });
     expect(argv).toThrow("$HC_TERMINAL_ID is not set");
   });
 });
@@ -59,11 +59,11 @@ describe("commands", () => {
     expect(agentArgv(input())).toEqual(["claude", "/run-agent-task demo/20261117T080000Z"]);
     const shell = input({ agent: { command: "clc", args: ["--model", "a b"], shell: true } });
     expect(agentArgv(shell)).toEqual(["/bin/zsh", "-ic", `clc --model 'a b' '/run-agent-task demo/20261117T080000Z'`]);
-    expect(renderCommand(["env", "{{env_argv}}", "{{agent_argv}}"], input(), "t")).toEqual(["env", "FOO=1", "claude", "/run-agent-task demo/20261117T080000Z"]);
+    expect(renderCommand(["env", "{{env_argv}}", "{{agent_argv}}"], input(), "t", { space: null })).toEqual(["env", "FOO=1", "claude", "/run-agent-task demo/20261117T080000Z"]);
   });
 
   test("a string command runs through sh -c", () => {
-    expect(renderCommand("echo {{task_id}}", input(), "t")).toEqual(["/bin/sh", "-c", "echo demo"]);
+    expect(renderCommand("echo {{task_id}}", input(), "t", { space: null })).toEqual(["/bin/sh", "-c", "echo demo"]);
   });
 
   test("handles come from JSON, a regex or the first line", () => {

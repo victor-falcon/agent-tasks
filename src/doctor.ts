@@ -114,14 +114,14 @@ function terminalChecks(ctx: Context, loaded: LoadedConfig): Check[] {
       checks.push(fail("herdr.space", `${where}: ${why} and the launcher has no "space" to open runs in`, 'set "space" in the launcher, e.g. { "preset": "herdr", "space": "Agent Tasks" }'));
       continue;
     }
-    const id = namedHerdrSpace(ctx.env, space);
-    const found = id !== herdrSpaceId(space);
     const label = `${where}: ${why}, so runs open in the Herdr space "${space}"`;
     if (!app) {
-      checks.push(warn("herdr.space", `${label} (${id}), but herdr-app is not on PATH: the space can't be found by name or named`, "add Herdr's herdr-app to PATH (it comes with the Herdr app)"));
-    } else {
-      checks.push(ok("herdr.space", `${label} (${found ? `found: ${id}` : "created on the first run"})`));
+      checks.push(warn("herdr.space", `${label} (${herdrSpaceId(space)}), but herdr-app is not on PATH: the space can't be found by name or named`, "add Herdr's herdr-app to PATH (it comes with the Herdr app)"));
+      continue;
     }
+    const found = namedHerdrSpace(ctx.env, space);
+    const state = { found: `found: ${found.id}`, missing: "created on the first run", unknown: `${found.id}; the Herdr window is not open, so whether it exists is unknown` }[found.state];
+    checks.push(ok("herdr.space", `${label} (${state})`));
   }
   return checks;
 }
