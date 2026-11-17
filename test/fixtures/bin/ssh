@@ -1,0 +1,3 @@
+#!/bin/sh
+# Fake `ssh` for tests; see ../fake-ssh.ts.
+exec bun "$(dirname "$0")/../fake-ssh.ts" "$@"

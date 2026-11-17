@@ -57,3 +57,10 @@ export class SessionGoneError extends AgentTasksError {
     super("session_gone", message);
   }
 }
+
+/** A client could not reach the hub over SSH (or the hub has no agent-tasks). */
+export class HubUnreachableError extends AgentTasksError {
+  constructor(alias: string, reason: string) {
+    super("hub_unreachable", `cannot reach the hub "${alias}" over SSH: ${reason}`);
+  }
+}

@@ -171,6 +171,18 @@ describe("--machine", () => {
     expect(invalid.json().error.details).toEqual(['machine: must be a machine name: lowercase letters, digits and dashes, starting with a letter (got "My Mac")']);
   });
 
+  test("the cwd of a task on another machine is that machine's: absolute or ~, not checked here", async () => {
+    home.writeConfig(HUB_CONFIG);
+    const there = await runCli(["add", "--title", "There", ...addFlags, "--machine", "mac", "--cwd", "~/only/on/mac", "--json", NOW], home, project);
+    expect(there.code).toBe(0);
+    expect(there.json().task.cwd).toBe("~/only/on/mac");
+    const relative = await runCli(["add", "--title", "Rel", ...addFlags, "--machine", "mac", "--cwd", "sub", "--json", NOW], home, project);
+    expect(relative.code).toBe(1);
+    expect(relative.json().error).toMatchObject({ code: "invalid_cwd", message: 'cwd must be absolute or start with ~ for a task on machine "mac" (got "sub"): it is a folder on that machine' });
+    const moved = await runCli(["edit", "there", "--cwd", "/srv/elsewhere", "--json", NOW], home);
+    expect(moved.json().task.cwd).toBe("/srv/elsewhere");
+  });
+
   test("edit --machine moves a task; an unknown machine is rejected", async () => {
     home.writeConfig(HUB_CONFIG);
     home.writeTask(makeTask({ machine: "linux" }));

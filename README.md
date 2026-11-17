@@ -171,7 +171,9 @@ the launcher commands and variables in
 Each task has a `machine`, where it runs: this machine's name (`machine` in
 the config, `local` by default) unless `add --machine <name>` picks one of
 the `machines` in the config. Running tasks on other machines is in
-progress; see [doc/roadmap/user-config.md](doc/roadmap/user-config.md).
+progress. A machine with `hub` in its config is a client: it forwards every
+data command to the hub over SSH (see
+[Client mode](doc/roadmap/user-config.md#client-mode)).
 
 Notifications go to the `notifiers` in the config (a desktop notification by
 default, for `failed`, `timed_out` and `blocked`; or any command, e.g. one that

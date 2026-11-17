@@ -1,6 +1,6 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { isKnownMachine, knownMachines } from "./config.ts";
+import { isKnownMachine, knownMachines, localMachine } from "./config.ts";
 import type { Context } from "./context.ts";
 import { AgentTasksError, UsageError } from "./errors.ts";
 import { parseCount, readFileArg } from "./input.ts";
@@ -67,6 +67,34 @@ export function normalizeTaskCwd(ctx: Context, cwd: unknown): string {
   }
   return displayPath(ctx, abs);
 }
+
+/**
+ * The cwd of a task that runs on `machine`. On this machine it is resolved,
+ * checked and stored with `~` (see `normalizeTaskCwd`). On another machine the
+ * folder is that machine's: it must be absolute or start with `~` (relative
+ * paths and this machine's home mean nothing there) and is stored as given.
+ */
+export function normalizeTaskCwdFor(ctx: Context, cwd: unknown, machine: string): string {
+  if (machine === localMachine(ctx.config.config)) return normalizeTaskCwd(ctx, cwd);
+  if (typeof cwd !== "string" || cwd.trim() === "") throw new AgentTasksError("invalid_cwd", "cwd must be a non-empty string");
+  if (!isMachineIndependentPath(cwd)) {
+    throw new AgentTasksError("invalid_cwd", `cwd must be absolute or start with ~ for a task on machine "${machine}" (got "${cwd}"): it is a folder on that machine`);
+  }
+  checkRemoteCwd(ctx, machine, cwd);
+  return cwd;
+}
+
+/** A path that means the same from any folder: absolute, `~` or `~/…`. */
+export function isMachineIndependentPath(path: string): boolean {
+  return path.startsWith("/") || path === "~" || path.startsWith("~/");
+}
+
+/**
+ * Checks that a task's folder exists on another machine.
+ * TODO(multi-machine t3): check it over SSH with `agent-tasks remote …` on
+ * that machine, and save with a warning when the machine is unreachable.
+ */
+export function checkRemoteCwd(_ctx: Context, _machine: string, _cwd: string): void {}
 
 /**
  * An existing folder with the home replaced by `~`. Symlinks are resolved on

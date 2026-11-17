@@ -134,6 +134,8 @@ function isInside(path: string, folder: string): boolean {
   return path === folder || path.startsWith(folder.endsWith("/") ? folder : `${folder}/`);
 }
 
+export const LIST_OPTIONS = { status: { type: "string" }, cwd: { type: "string" }, machine: { type: "string" }, all: { type: "boolean" } } as const;
+
 const list: Command = {
   name: "list",
   summary: "List tasks with their next run and recent results",
@@ -157,7 +159,7 @@ Options:
   --machine <name>    Only tasks that run on this machine
   --all               Include finished and archived tasks`,
   run(ctx, args) {
-    const { values } = parseCommandArgs(args, { status: { type: "string" }, cwd: { type: "string" }, machine: { type: "string" }, all: { type: "boolean" } }, { maxPositionals: 0 });
+    const { values } = parseCommandArgs(args, LIST_OPTIONS, { maxPositionals: 0 });
     const filters = values.status === undefined ? [] : parseEnumList("--status", values.status, STATUS_FILTERS);
     const results = filters.filter((f): f is ResultFilter => (RESULT_FILTERS as readonly string[]).includes(f));
     const chosenStates = filters.filter((f): f is TaskState => (TASK_STATES as readonly string[]).includes(f));

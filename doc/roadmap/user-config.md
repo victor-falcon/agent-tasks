@@ -84,7 +84,8 @@ example if it doesn't exist.
   already record their machine, but the runner still launches every task
   here.
 - `hub`: only on a client machine, `{ "ssh": "<host alias>" }` to reach the
-  hub. A config with `hub` is a client and has no `machines`. Not used yet.
+  hub. A config with `hub` is a client and has no `machines`; see
+  [Client mode](#client-mode).
 - `runner`: how often it ticks. See [runner.md](runner.md).
 - `launcher`: the commands that launch, watch and close each subagent
   (create the sub-tab in Herdr, etc.). A preset from the repo, partly
@@ -221,3 +222,29 @@ each value comes from, so you can debug without guessing.
 | C6 | Personal instructions (level 1) and templates (level 2) with `config check` | the subagent follows `instructions/subagent.md` |
 | C7 | Custom skill (level 3) | a profile with another skill uses it on launch |
 | C8 | `agent-tasks init` creates `instructions/subagent.md` with commented examples | guided first install |
+
+## Client mode
+
+A machine whose config has `hub` is a client: it keeps no tasks or runs.
+Every data command (`add`, `list`, `show`, `edit`, `log`, `finish`, `task`…)
+runs on the hub over SSH, as `ssh -o BatchMode=yes -o ConnectTimeout=10
+<hub> ~/.local/bin/agent-tasks <args>`, with its output, `--json` and exit
+code passed through. The hub needs agent-tasks installed (`agent-tasks
+install` links it at `~/.local/bin`) and the client a key-based SSH alias
+for the hub. The client must set `machine`, and the hub must list that name
+in its `machines` (e.g. `"mac": { "ssh": "mac" }`). If the hub can't be
+reached, the command fails with `hub_unreachable`; nothing is queued.
+
+- Always local: `help`, `version`, `init`, `install`, `doctor`, `config …`
+  (they describe this machine) and `remote …` (what the hub runs on this
+  machine).
+- Refused: `runner` and `tick`, which only the hub runs. `runner status`
+  and `due` only read the hub's state, so they are forwarded.
+- `add` from a client defaults `--machine` to the client's `machine` and
+  `--cwd` to the current folder, checked on the client and written with
+  `~` for the client's home. A task for another machine needs `--cwd`. `edit --cwd`, `list --cwd`, a task JSON or
+  patch on stdin or in a file, `--instructions-file` and
+  `finish --output-file` are read on the client and sent to the hub.
+
+On the hub, the cwd of a task that runs on another machine must be absolute
+or start with `~`, and is stored as given (that machine checks it exists).

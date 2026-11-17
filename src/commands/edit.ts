@@ -4,7 +4,7 @@ import { UsageError, ValidationError } from "../errors.ts";
 import { parseJsonObject, readFileArg } from "../input.ts";
 import { isObject, orderTaskKeys, type Task, TASK_FIELDS, taskErrors } from "../schema.ts";
 import { writeTask } from "../store.ts";
-import { applyTaskFlags, checkTaskMachine, normalizeTaskCwd, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE } from "../task-flags.ts";
+import { applyTaskFlags, checkTaskMachine, normalizeTaskCwdFor, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE } from "../task-flags.ts";
 import { describeNext, nowIso, readActiveTask, taskOverview } from "../task-info.ts";
 import type { Command } from "./types.ts";
 
@@ -29,6 +29,8 @@ export function applyPatch(task: Task, patch: Record<string, unknown>): Task {
   return next as unknown as Task;
 }
 
+export const EDIT_OPTIONS = { ...TASK_FLAG_OPTIONS, file: { type: "string" } } as const;
+
 const edit: Command = {
   name: "edit",
   summary: "Change a task's fields",
@@ -50,7 +52,7 @@ Options:
 ${TASK_FLAGS_USAGE}
   --file <path>               JSON patch from a file ("-" for stdin)`,
   async run(ctx, args) {
-    const { values, positionals } = parseCommandArgs(args, { ...TASK_FLAG_OPTIONS, file: { type: "string" } }, { minPositionals: 1, maxPositionals: 2 });
+    const { values, positionals } = parseCommandArgs(args, EDIT_OPTIONS, { minPositionals: 1, maxPositionals: 2 });
     if (positionals[1] !== undefined && positionals[1] !== "-") throw new UsageError(`unexpected argument "${positionals[1]}"`);
     if (positionals[1] === "-" && values.file !== undefined) throw new UsageError('use either --file or "-", not both');
     const patchFile = values.file ?? positionals[1];
@@ -65,7 +67,7 @@ ${TASK_FLAGS_USAGE}
     const errors = taskErrors(task);
     if (errors.length > 0) throw new ValidationError("task", errors);
     if (task.machine !== old.machine) checkTaskMachine(ctx, task.machine);
-    if (task.cwd !== old.cwd) task.cwd = normalizeTaskCwd(ctx, task.cwd);
+    if (task.cwd !== old.cwd) task.cwd = normalizeTaskCwdFor(ctx, task.cwd, task.machine);
 
     const changed = EDITABLE.filter((k) => !Bun.deepEquals(task[k as keyof Task], old[k as keyof Task]));
     if (changed.length === 0) {
