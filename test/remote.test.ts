@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { userInfo } from "node:os";
-import { herdrSpaceId } from "../src/launcher.ts";
+import { exec, herdrSpaceId, systemLoginShell } from "../src/launcher.ts";
 import { remoteEnv } from "../src/remote.ts";
 import type { Run } from "../src/schema.ts";
 import { DEMO_REF, type ExecHome, execTask, FAKE_AGENT, FAKE_BIN, makeExecHome, pidAlive, REPO, settled, waitFor } from "./exec-helpers.ts";
@@ -218,7 +218,10 @@ describe("a run on another machine with the herdr preset", () => {
 
   test("without SHELL over SSH, the user's login shell from the system is used", () => {
     const env = remoteEnv({ HOME: mac.home, PATH: "/usr/bin:/bin" });
-    expect(env.SHELL).toBe(userInfo().shell || "/bin/sh");
+    const passwd = exec(["getent", "passwd", userInfo().username], { env: { PATH: "/usr/bin:/bin" } });
+    const expected = passwd.code === 0 ? passwd.stdout.trim().split(":")[6] : systemLoginShell();
+    expect(env.SHELL).toBe(expected || "/bin/sh");
+    expect(env.SHELL).toStartWith("/");
     const path = env.PATH!.split(":");
     expect(path[0]).toBe(join(mac.home, ".local", "bin"));
     expect(path).toContain("/usr/bin");

@@ -182,12 +182,35 @@ export function agentCommandLine(agent: ResolvedAgent): string {
 
 /** `$SHELL`, else the user's login shell (SSH commands may run without `$SHELL`), else `/bin/sh`. */
 export function shellOf(env: Env): string {
-  if (env.SHELL) return env.SHELL;
+  return env.SHELL || systemLoginShell() || "/bin/sh";
+}
+
+let loginShellCache: string | null | undefined;
+
+/**
+ * The user's login shell from the system's user database: `getent passwd`
+ * (Linux), else `dscl` (macOS). Not `os.userInfo().shell`: Bun takes it from
+ * `$SHELL` and says "unknown" without it.
+ */
+export function systemLoginShell(): string | null {
+  if (loginShellCache !== undefined) return loginShellCache;
+  let user: string;
   try {
-    return userInfo().shell || "/bin/sh";
+    user = userInfo().username;
   } catch {
-    return "/bin/sh";
+    return (loginShellCache = null);
   }
+  const env = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" };
+  const lookups: [string[], (out: string) => string | undefined][] = [
+    [["getent", "passwd", user], (out) => out.trim().split("\n")[0]?.split(":")[6]],
+    [["dscl", ".", "-read", `/Users/${user}`, "UserShell"], (out) => /^UserShell:\s*(\S+)/m.exec(out)?.[1]],
+  ];
+  for (const [argv, parse] of lookups) {
+    const result = exec(argv, { env, timeoutMs: 5_000 });
+    const shell = result.code === 0 ? parse(result.stdout)?.trim() : undefined;
+    if (shell?.startsWith("/")) return (loginShellCache = shell);
+  }
+  return (loginShellCache = null);
 }
 
 /** The agent with its prompt, as an argv: through `<shell> -ic` when `agent.shell` is set (aliases). */
