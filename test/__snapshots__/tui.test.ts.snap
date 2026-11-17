@@ -1,0 +1,204 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`render wide: Recent, Upcoming and Tasks on the left, the selected run's detail on the right 1`] = `
+" agent-tasks · runner ● alive · every 5m · last tick 2m ago · next in 3m · running 2 · today ■4 ✕1 □1 !1                
+┌ Recent ──────────────────────────────────────────────────┐┌ Detail ──────────────────────────────────────────────────┐
+│▸ 09:30      ◐ running    worktree-cleanup             44m││ worktree-cleanup/20261117T083000Z                        │
+│  09:00      ✕ failed     sentry-summary                3m││ ◐ running · started 09:31 · 44m · attempt 1              │
+│  08:00      ■ ok         sentry-summary                6m││ slot   Nov 17 09:30                                      │
+│  04:00      □ missed     sentry-summary                 —││ cwd    ~/Projects/foo                                    │
+│  03:12      ! blocked    review-pr-123              7h02m││ agent  clc · launcher herdr (t14)                        │
+│  Mon 23:00  ■ ok         backup-notes                  2m││                                                          │
+│                                                          ││ Summary                                                  │
+│                                                          ││   —                                                      │
+│                                                          ││                                                          │
+│                                                          ││ Events                                                   │
+│                                                          ││   09:30:59 claimed                                       │
+│                                                          ││   09:31:00 launched handle=t14                           │
+│                                                          ││                                                          │
+│                                                          ││ ⏎ full log                                               │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+├ Upcoming ────────────────────────────────────────────────┤│                                                          │
+│  10:30  in 15m   worktree-cleanup       every hour at :30││                                                          │
+│  11:00  in 45m   sentry-summary                every hour││                                                          │
+│  12:00  in 2h    sentry-summary                every hour││                                                          │
+├ Tasks ───────────────────────────────────────────────────┤│                                                          │
+│  ⏸  backup-notes      ■                            paused││                                                          │
+│  ✕  sentry-summary    □■✕                          in 45m││                                                          │
+│  ◐  worktree-cleanup  ◐                           running││                                                          │
+└──────────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────────┘
+ j/k move  tab panel  l detail  ⏎ log  / filter  ? help  q quit                                                         "
+`;
+
+exports[`render a task's detail: definition, next runs, recent runs, instructions 1`] = `
+" agent-tasks · runner ● alive · every 5m · last tick 2m ago · next in 3m · running 2 · today ■4 ✕1 □1 !1                
+┌ Recent ──────────────────────────────────────────────────┐┌ Detail ──────────────────────────────────────────────────┐
+│  09:30      ◐ running    worktree-cleanup             44m││ sentry-summary                                           │
+│  09:00      ✕ failed     sentry-summary                3m││ Sentry summary                                           │
+│  08:00      ■ ok         sentry-summary                6m││ ✕ active · every hour (cron "0 * * * *" in Europe/Madrid)│
+│  04:00      □ missed     sentry-summary                 —││ cwd      ~/Projects/foo                                  │
+│  03:12      ! blocked    review-pr-123              7h02m││ agent    clc · launcher herdr                            │
+│  Mon 23:00  ■ ok         backup-notes                  2m││ timeout  45m · retries 1 · catch up latest               │
+│                                                          ││                                                          │
+│                                                          ││ Next runs (Europe/Madrid)                                │
+│                                                          ││   Nov 17 11:00  in 45m                                   │
+│                                                          ││   Nov 17 12:00  in 2h                                    │
+│                                                          ││                                                          │
+│                                                          ││ Recent runs                                              │
+│                                                          ││   Nov 17 09:00  ✕ failed     3m     sentry-cli has no au…│
+│                                                          ││   Nov 17 08:00  ■ ok         6m     3 new issues in note…│
+│                                                          ││   Nov 17 04:00  □ missed     —      runner_offline       │
+│                                                          ││                                                          │
+│                                                          ││ Instructions                                             │
+│                                                          ││   Write the report.                                      │
+├ Upcoming ────────────────────────────────────────────────┤│                                                          │
+│  10:30  in 15m   worktree-cleanup       every hour at :30││                                                          │
+│  11:00  in 45m   sentry-summary                every hour││                                                          │
+│  12:00  in 2h    sentry-summary                every hour││                                                          │
+├ Tasks ───────────────────────────────────────────────────┤│                                                          │
+│  ⏸  backup-notes      ■                            paused││                                                          │
+│▸ ✕  sentry-summary    □■✕                          in 45m││                                                          │
+│  ◐  worktree-cleanup  ◐                           running││                                                          │
+└──────────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────────┘
+ j/k move  tab panel  l detail  ⏎ log  / filter  ? help  q quit                                                         "
+`;
+
+exports[`render an upcoming slot's detail 1`] = `
+" agent-tasks · runner ● alive · every 5m · last tick 2m ago · next in 3m · running 2 · today ■4 ✕1 □1 !1      
+┌ Recent ─────────────────────────────────────────────┐┌ Detail ─────────────────────────────────────────────┐
+│  09:30      ◐ running    worktree-cleanup        44m││ Upcoming Nov 17 10:30 (in 15m)                      │
+│  09:00      ✕ failed     sentry-summary           3m││                                                     │
+│  08:00      ■ ok         sentry-summary           6m││ worktree-cleanup                                    │
+│  04:00      □ missed     sentry-summary            —││ Worktree cleanup                                    │
+│  03:12      ! blocked    review-pr-123         7h02m││ ◐ active · every hour (cron "30 * * * *" in Europe/…│
+│  Mon 23:00  ■ ok         backup-notes             2m││ cwd      ~/Projects/foo                             │
+│                                                     ││ agent    clc · launcher herdr                       │
+│                                                     ││ timeout  45m · retries 0 · catch up latest          │
+│                                                     ││                                                     │
+│                                                     ││ Next runs (Europe/Madrid)                           │
+│                                                     ││   Nov 17 10:30  in 15m                              │
+│                                                     ││                                                     │
+├ Upcoming ───────────────────────────────────────────┤│ Recent runs                                         │
+│▸ 10:30  in 15m   worktree-cleanup  every hour at :30││   Nov 17 09:30  ◐ running    44m                    │
+│  11:00  in 45m   sentry-summary           every hour││                                                     │
+│  12:00  in 2h    sentry-summary           every hour││ Instructions                                        │
+├ Tasks ──────────────────────────────────────────────┤│   Write the report.                                 │
+│  ⏸  backup-notes      ■                       paused││                                                     │
+│  ✕  sentry-summary    □■✕                     in 45m││                                                     │
+│  ◐  worktree-cleanup  ◐                      running││                                                     │
+└─────────────────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
+ j/k move  tab panel  l detail  ⏎ log  / filter  ? help  q quit                                               "
+`;
+
+exports[`render narrow: the lists alone; l shows the detail alone 1`] = `
+" agent-tasks · runner ● alive · every 5m · last tick 2m ago · next in…
+┌ Recent ────────────────────────────────────────────────────────────┐
+│▸ 09:30      ◐ running    worktree-cleanup                       44m│
+│  09:00      ✕ failed     sentry-summary                          3m│
+│  08:00      ■ ok         sentry-summary                          6m│
+│  04:00      □ missed     sentry-summary                           —│
+│  03:12      ! blocked    review-pr-123                        7h02m│
+│  Mon 23:00  ■ ok         backup-notes                            2m│
+│                                                                    │
+│                                                                    │
+│                                                                    │
+│                                                                    │
+│                                                                    │
+│                                                                    │
+├ Upcoming ──────────────────────────────────────────────────────────┤
+│  10:30  in 15m   worktree-cleanup                 every hour at :30│
+│  11:00  in 45m   sentry-summary                          every hour│
+│  12:00  in 2h    sentry-summary                          every hour│
+├ Tasks ─────────────────────────────────────────────────────────────┤
+│  ⏸  backup-notes      ■                                      paused│
+│  ✕  sentry-summary    □■✕                                    in 45m│
+│  ◐  worktree-cleanup  ◐                                     running│
+└────────────────────────────────────────────────────────────────────┘
+ j/k move  tab panel  l detail  ⏎ log  / filter  ? help  q quit       "
+`;
+
+exports[`render narrow: the lists alone; l shows the detail alone 2`] = `
+" agent-tasks · runner ● alive · every 5m · last tick 2m ago · next in…
+┌ Detail ────────────────────────────────────────────────────────────┐
+│ worktree-cleanup/20261117T083000Z                                  │
+│ ◐ running · started 09:31 · 44m · attempt 1                        │
+│ slot   Nov 17 09:30                                                │
+│ cwd    ~/Projects/foo                                              │
+│ agent  clc · launcher herdr (t14)                                  │
+│                                                                    │
+│ Summary                                                            │
+│   —                                                                │
+│                                                                    │
+│ Events                                                             │
+│   09:30:59 claimed                                                 │
+│   09:31:00 launched handle=t14                                     │
+│                                                                    │
+│ ⏎ full log                                                         │
+│                                                                    │
+│                                                                    │
+│                                                                    │
+│                                                                    │
+│                                                                    │
+│                                                                    │
+└────────────────────────────────────────────────────────────────────┘
+ j/k scroll  h back  ⏎ log  ? help  q quit                            "
+`;
+
+exports[`render short: only the selected panel 1`] = `
+" agent-tasks · runner ● alive · every 5m · last tick 2m ago…
+┌ Upcoming ────────────────────────────────────────────────┐
+│▸ 10:30  in 15m   worktree-cleanup       every hour at :30│
+│  11:00  in 45m   sentry-summary                every hour│
+│  12:00  in 2h    sentry-summary                every hour│
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+ j/k move  tab panel  l detail  ⏎ log  / filter  ? help  q …"
+`;
+
+exports[`render help, log and filter screens 1`] = `
+" agent-tasks · runner ● alive · every 5m · last tick 2m ago · next in 3m · running 2 · today ■4 ✕1 …
+┌ Help ────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                                                                                  │
+│  j / k, ↓ / ↑     move the selection (or scroll the detail)                                      │
+│  gg / G           first / last row                                                               │
+│  Ctrl-d / Ctrl-u  half a page down / up                                                          │
+│  Tab / Shift-Tab  next / previous panel                                                          │
+│  1 2 3            Recent, Upcoming, Tasks                                                        │
+│  l / h            focus the detail / back to the list                                            │
+│  Enter            open the run's log (follows it while it runs)                                  │
+│  /                filter by task id, then n / N for the next / previous match                    │
+│  Esc              clear the filter, leave the detail                                             │
+│  ?                this help                                                                      │
+│  q                back from the log or help; on the main screen, stop the runner                 │
+│  Ctrl-c           stop the runner after the current tick (twice: at once)                        │
+│                                                                                                  │
+│  Marks: ■ ok  ✕ failed/timed out  ◐ running  □ missed  ! blocked  - superseded/cancelled  · pend…│
+│  Tasks: ● fine  ✕ failing  ◐ running  ! blocked  ⏸ paused  ○ one-off to run                      │
+│                                                                                                  │
+│  Every event is also appended to state/runner.log. Use --plain for line output.                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+ q back                                                                                             "
+`;
+
+exports[`render help, log and filter screens 2`] = `
+" agent-tasks · runner ● alive · every 5m · last tick 2m ago · next in 3m · runn…
+┌ Log · worktree-cleanup/20261117T083000Z · following ────────────────── 32/32 ┐
+│step 21                                                                       │
+│step 22                                                                       │
+│step 23                                                                       │
+│step 24                                                                       │
+│step 25                                                                       │
+│step 26                                                                       │
+│step 27                                                                       │
+│step 28                                                                       │
+│step 29                                                                       │
+│step 30                                                                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+ j/k scroll  gg/G top/bottom  q back                                            "
+`;

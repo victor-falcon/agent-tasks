@@ -2,8 +2,8 @@
 
 Goal: know from the terminal whether everything is fine, what ran, what
 failed and what was missed (and why), without opening JSON by hand. There is
-no graphical panel: the runner's tab shows live events
-([runner.md](runner.md)) and, for everything else, a few commands with good output are enough.
+no graphical panel: the runner's tab shows a live, keyboard-driven view
+([runner.md](runner.md#agent-tasks-runner)) and, for everything else, a few commands with good output are enough.
 
 A panel in Herdr or another environment stays as a future idea, in a separate repo
 ([future-herdr-panel.md](future-herdr-panel.md)). To make that possible

@@ -42,6 +42,21 @@ export interface RunnerOptions {
 /** Where the screen output goes. `isTTY` turns on colors, the status line and the Herdr escapes. */
 export type RunnerStdout = Writer & { isTTY?: boolean; columns?: number };
 
+/**
+ * A full-screen view of the runner (the TUI, src/tui/screen.ts). When given,
+ * it replaces the line output on the screen; runner.log and the Herdr
+ * escapes are written as usual.
+ */
+export interface RunnerView {
+  start(): void;
+  /** Every line the plain output would print, tick lines included. */
+  line(line: RunnerLine): void;
+  /** The status after each tick. */
+  updateStatus(info: StatusInfo): void;
+  /** Gives the terminal back (before the last status line is printed). */
+  close(): void;
+}
+
 export interface RunnerDeps {
   /** The clock (the real time, shifted by `--now`). */
   now(): Date;
@@ -57,6 +72,8 @@ export interface RunnerDeps {
   tick?(ctx: Context): TickResult;
   notifierDeps?: NotifierDeps;
   pidAlive?(pid: number): boolean;
+  /** The full-screen view, on a terminal (not with --plain, --quiet, --json or --once). */
+  view?: RunnerView;
 }
 
 /** Waits `ms` or until `signal` aborts, whichever comes first. */
@@ -112,6 +129,7 @@ class RunnerOutput {
     private readonly timezone: string,
     env: Record<string, string | undefined>,
     private readonly mode: { json: boolean; quiet: boolean },
+    private readonly view: RunnerView | null = null,
   ) {
     this.tty = stdout.isTTY === true && !mode.json;
     this.style = createStyle(this.tty && colorEnabled(stdout, env));
@@ -140,13 +158,15 @@ class RunnerOutput {
 
   header(text: (style: Style) => string, json: unknown): void {
     this.log(text(this.plainStyle));
-    if (this.mode.json) this.writeJson(json);
+    if (this.view) this.view.start();
+    else if (this.mode.json) this.writeJson(json);
     else this.write(`${text(this.style)}\n`);
   }
 
   /** A line in runner.log and on the screen; with --json, `json` (if any) instead of the text. */
   emit(line: RunnerLine, json?: unknown): void {
     this.log(formatLine(line, this.timezone, this.plainStyle));
+    if (this.view) return this.view.line(line);
     if (this.mode.json) {
       if (json !== undefined) this.writeJson(json);
       return;
@@ -161,6 +181,7 @@ class RunnerOutput {
 
   /** The status line, redrawn in place on a terminal only. */
   status(info: StatusInfo): void {
+    if (this.view) return this.view.updateStatus(info);
     if (!this.tty || this.mode.quiet) return;
     this.write(formatStatusBlock(info, this.timezone, this.style, this.width));
     this.statusShown = true;
@@ -170,6 +191,7 @@ class RunnerOutput {
   final(info: StatusInfo, json: unknown): void {
     const plain = formatStatus(info, this.timezone, this.plainStyle);
     this.log(plain);
+    this.view?.close();
     if (this.mode.json) return this.writeJson(json);
     if (this.mode.quiet) return;
     this.write(this.tty ? `${formatStatusBlock(info, this.timezone, this.style, this.width)}\n` : `${plain}\n`);
@@ -277,7 +299,7 @@ class Runner {
     const { startedAt } = this;
     // Read before the first tick appends its heartbeat.
     const previousTick = lastTick(this.paths);
-    this.out = new RunnerOutput(this.deps.stdout, runnerLogPath(this.paths), this.timezone, this.base.env, { json: this.base.json, quiet: this.opts.quiet });
+    this.out = new RunnerOutput(this.deps.stdout, runnerLogPath(this.paths), this.timezone, this.base.env, { json: this.base.json, quiet: this.opts.quiet }, this.deps.view ?? null);
     this.notifierDeps = this.deps.notifierDeps ?? defaultNotifierDeps(this.base.env);
     const setup = describeSetup(this.base);
     const { stale } = acquireRunnerLock(this.paths, this.lock, this.deps.pidAlive ?? pidAlive);

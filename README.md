@@ -24,8 +24,10 @@ sub-agent  "/run-agent-task <run_ref>"
 
 - **The runner** (`agent-tasks runner`) is a normal process you leave open
   in a tab. Each tick it records a heartbeat, works out which slots are due,
-  watches running sessions and launches new ones. It shows every launch,
-  success and failure live, and can send desktop notifications.
+  watches running sessions and launches new ones. On a terminal it shows a
+  full-screen view you move around with vim keys (recent runs, upcoming
+  slots, tasks, the detail of each and a run's live log); piped or with
+  `--plain`, one line per event. It can send desktop notifications.
 - **One sub-agent per run**, started by a **launcher**: a few commands in your
   config (`launch`, `close`, `status`, `read`, `attach`), from a preset or
   written by hand. The core knows nothing about any multiplexer.
@@ -97,6 +99,12 @@ agent-tasks config check
 agent-tasks doctor
 agent-tasks runner        # in its own tab; leave it open
 ```
+
+The runner's view: `j`/`k` move, `Tab` or `1`/`2`/`3` switch between Recent,
+Upcoming and Tasks, `l` shows the selected item's detail, `Enter` opens the
+run's log (followed while it runs), `/` filters by task id, `?` lists every
+key, `q` stops the runner. `agent-tasks runner --plain` prints one line per
+event instead, as it does when piped.
 
 ## Daily use
 

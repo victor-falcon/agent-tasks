@@ -9,7 +9,7 @@ import type { NotifierDeps } from "../src/notifiers/index.ts";
 import { acquireRunnerLock, readRunnerLock, RunnerLockedError, runnerLockPath, runnerLogPath } from "../src/runner-lock.ts";
 import { contextRunnerHealth } from "../src/runner-health.ts";
 import { oscAgentState, oscTitle } from "../src/runner-render.ts";
-import { type RunnerDeps, runRunner } from "../src/runner.ts";
+import { type RunnerDeps, type RunnerView, runRunner } from "../src/runner.ts";
 import type { RunStatus } from "../src/schema.ts";
 import { appendTick, claimRun, readTicks, writeRun } from "../src/store.ts";
 import { tick as realTick, type TickResult } from "../src/tick.ts";
@@ -42,7 +42,10 @@ interface Harness {
  * Drives `runRunner` with a fake clock: `sleep` moves the clock forward
  * instead of waiting, and aborts after `stopAfter` sleeps.
  */
-function harness(home: TempHome, opts: { tty?: boolean; env?: Record<string, string>; stopAfter?: number; tick?: (ctx: Context, i: number) => TickResult; exec?: NotifierDeps["exec"] } = {}): Harness {
+function harness(
+  home: TempHome,
+  opts: { tty?: boolean; env?: Record<string, string>; stopAfter?: number; tick?: (ctx: Context, i: number) => TickResult; exec?: NotifierDeps["exec"]; view?: RunnerView } = {},
+): Harness {
   let clock = Date.parse(START);
   let text = "";
   const sleeps: number[] = [];
@@ -64,6 +67,7 @@ function harness(home: TempHome, opts: { tty?: boolean; env?: Record<string, str
     stdout,
     pid: process.pid,
     tick: opts.tick ? (ctx) => opts.tick!(ctx, i++) : undefined,
+    view: opts.view,
     notifierDeps: {
       env,
       platform: "darwin",
@@ -512,5 +516,38 @@ describe("command notifier through a real command", () => {
     h.deps.notifierDeps!.env.PATH = `${bin}:${process.env.PATH}`;
     await h.run({ once: true });
     expect(readFileSync(out, "utf8").split("\n")).toEqual(["blocked", "demo", "Demo task blocked", "demo/20261117T080000Z", "demo/20261117T080000Z", ""]);
+  });
+});
+
+describe("with a full-screen view", () => {
+  test("the view gets every line and the status; runner.log and the Herdr escapes stay; the last status line comes after the view closes", async () => {
+    const calls: string[] = [];
+    const view: RunnerView = {
+      start: () => void calls.push("start"),
+      line: (line) => void calls.push(`line:${line.kind}`),
+      updateStatus: (info) => void calls.push(`status:${info.health}`),
+      close: () => void calls.push("close"),
+    };
+    putRun(home, "running");
+    const h = harness(home, {
+      tty: true,
+      stopAfter: 2,
+      view,
+      tick: (ctx) => ({ ...emptyTick(ctx), events: [{ type: "missed", run_ref: "demo/20261117T080000Z", task_id: "demo", reason: "runner_offline" }] }),
+    });
+    expect(await h.run()).toBe(0);
+    expect(calls).toEqual(["start", "line:tick", "line:event", "status:healthy", "line:tick", "line:event", "status:healthy", "close"]);
+    // The screen gets only the escapes and the final status line: no event lines.
+    const screen = h.output();
+    expect(screen).toContain(oscTitle("agent-tasks runner"));
+    expect(screen).toContain(oscAgentState("working"));
+    expect(screen).not.toContain("tick  ");
+    expect(screen).not.toContain("missed (runner_offline)");
+    expect(screen.trimEnd().split("\n").at(-1)).toContain("stopped · last tick 09:05:00");
+    const log = readFileSync(runnerLogPath(home.paths), "utf8");
+    expect(log).toContain("agent-tasks runner · every 5m");
+    expect(log.match(/tick {2}0 due/g)).toHaveLength(2);
+    expect(log).toContain("□ demo/20261117T080000Z");
+    expect(log.trimEnd().split("\n").at(-1)).toContain("● stopped");
   });
 });

@@ -2,82 +2,23 @@ import { parseCommandArgs } from "../args.ts";
 import { type Context, output } from "../context.ts";
 import { parseEnumList } from "../input.ts";
 import { resolvePath } from "../paths.ts";
-import type { RunStatus, Task } from "../schema.ts";
+import type { Task } from "../schema.ts";
 import { listArchivedTasks, listTasks } from "../store.ts";
 import { runnerBanner } from "../output/banner.ts";
 import { scheduleText } from "../output/schedule-text.ts";
 import { stdoutStyle, type Style } from "../output/style.ts";
-import { paintMark, PENDING_MARK, RUN_MARKS, TASK_MARKS, type TaskMarkKind, taskMarkKind } from "../output/symbols.ts";
+import { paintMark, TASK_MARKS } from "../output/symbols.ts";
 import { renderTable } from "../output/table.ts";
-import { DAY, formatSpan, whenTime } from "../output/time.ts";
-import { isDecisive, isFailure, isInProgress } from "../run-info.ts";
-import { describeSchedule, displayTimezone, TASK_STATES, type TaskState, taskOverview, warnCorrupt } from "../task-info.ts";
+import { formatSpan, whenTime } from "../output/time.ts";
+import { displayTimezone, TASK_STATES, type TaskState, warnCorrupt } from "../task-info.ts";
+import { HISTORY, historyStrip, type TaskRow, taskRow } from "../task-row.ts";
 import type { Command } from "./types.ts";
 
-const WEEK_MS = 7 * DAY;
 const DEFAULT_STATES: readonly TaskState[] = ["active", "paused"];
 /** `--status` values about results rather than the task state. */
 const RESULT_FILTERS = ["failed", "running", "blocked"] as const;
 type ResultFilter = (typeof RESULT_FILTERS)[number];
 const STATUS_FILTERS = [...TASK_STATES, ...RESULT_FILTERS] as const;
-
-const HISTORY = 10;
-
-export interface TaskRow {
-  id: string;
-  title: string;
-  cwd: string;
-  state: TaskState;
-  /** The task at a glance: ok, running, blocked, failing, paused, once_pending, finished, archived. */
-  indicator: TaskMarkKind;
-  schedule: string;
-  /** In the task's time zone. */
-  next_run: string | null;
-  last_status: RunStatus | null;
-  last_slot: string | null;
-  /** Statuses of the last ${HISTORY} occurrences, oldest first. */
-  history: RunStatus[];
-  /** Status and start of the latest attempt in progress (running or blocked), if any. */
-  in_progress: RunStatus | null;
-  active_since: string | null;
-  /** Whether the latest decisive result (ok, failed, timed out) is a failure. */
-  failing: boolean;
-  /** `failed` + `timed_out` occurrences whose slot is in the last 7 days. */
-  failed_7d: number;
-  missed_7d: number;
-}
-
-function taskRow(ctx: Context, task: Task, archived: boolean): { row: TaskRow; errors: Error[] } {
-  const overview = taskOverview(ctx, task, { archived, nextCount: 1 });
-  const runs = overview.runs.map((r) => r.run); // oldest first
-  const weekAgo = ctx.now.getTime() - WEEK_MS;
-  const recent = runs.filter((r) => Date.parse(r.slot) >= weekAgo && Date.parse(r.slot) <= ctx.now.getTime());
-  const count = (...statuses: RunStatus[]) => recent.filter((r) => statuses.includes(r.status)).length;
-  const last = runs.at(-1);
-  const statuses = runs.map((r) => r.status);
-  const inProgress = runs.filter((r) => isInProgress(r.status)).at(-1);
-  const decisive = runs.filter((r) => isDecisive(r.status)).at(-1);
-  return {
-    row: {
-      id: task.id,
-      title: task.title,
-      cwd: task.cwd,
-      state: overview.state,
-      indicator: taskMarkKind(overview.state, task.schedule.type === "once", statuses),
-      schedule: describeSchedule(task),
-      next_run: overview.next[0] ?? null,
-      last_status: last?.status ?? null,
-      last_slot: last?.slot ?? null,
-      history: statuses.slice(-HISTORY),
-      in_progress: inProgress?.status ?? null,
-      active_since: inProgress?.attempts.at(-1)?.started_at ?? null,
-      failing: decisive !== undefined && isFailure(decisive.status),
-      failed_7d: count("failed", "timed_out"),
-      missed_7d: count("missed"),
-    },
-    errors: overview.errors,
-  };
-}
 
 interface ListItem {
   row: TaskRow;
@@ -95,11 +36,6 @@ function nextCell(style: Style, { row }: ListItem, now: Date, timezone: string):
   return row.next_run ? whenTime(new Date(row.next_run), timezone, now) : "—";
 }
 
-function historyCell(style: Style, { row }: ListItem): string {
-  if (row.history.length === 0) return row.state === "active" ? paintMark(style, PENDING_MARK) : style.paint("dim", "—");
-  return row.history.map((s) => paintMark(style, RUN_MARKS[s])).join("");
-}
-
 /** The task table: mark, id, schedule, next, last ${HISTORY} occurrences, folder. */
 export function renderTaskList(items: readonly ListItem[], { style, now, timezone }: { style: Style; now: Date; timezone: string }): string {
   if (items.length === 0) return "No tasks. Create one with: agent-tasks add --title … --cron … --instructions …";
@@ -111,7 +47,7 @@ export function renderTaskList(items: readonly ListItem[], { style, now, timezon
         item.row.id,
         scheduleText(item.task.schedule, timezone, now),
         nextCell(style, item, now, timezone),
-        historyCell(style, item),
+        historyStrip(style, item.row),
         item.row.cwd,
       ]),
     ],

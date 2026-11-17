@@ -41,8 +41,65 @@ preset in [launcher.md](launcher.md).
 
 ## `agent-tasks runner`
 
+On a terminal (stdin and stdout are both a TTY) the runner takes the whole
+screen and draws a view that is navigated with vim keys:
+
 ```
-$ agent-tasks runner
+ agent-tasks · runner ● alive · every 5m · last tick 2m ago · next in 3m · running 1 · today ■4 ✕1 □1 !1
+┌ Recent ────────────────────────────────┐┌ Detail ──────────────────────────────────┐
+│▸ 09:00  ✕ failed   sentry-summary   3m ││ sentry-summary/20261117T090000Z          │
+│  08:30  ◐ running  worktree-cleanup 4m ││ ✕ failed · started 09:12 · 3m · att. 2/2 │
+│  08:00  ■ ok       sentry-summary   6m ││ cwd    ~/Projects/foo                    │
+│  04:00  □ missed   sentry-summary   —  ││ agent  clc · launcher herdr (t14)        │
+│  03:12  ! blocked  review-pr-123    —  ││                                          │
+├ Upcoming ──────────────────────────────┤│ Summary                                  │
+│  10:00  in 12m  sentry-summary  hourly ││   sentry-cli has no auth                 │
+│  23:00  in 13h  backup-notes    daily  ││ Events                                   │
+├ Tasks ─────────────────────────────────┤│   09:12:03 claimed                       │
+│  ●  weekly-deps   ■■■■■■■□■■           ││   09:12:04 launched handle=t14           │
+│  ✕  sentry-summ.  ■■□□□■✕              ││   09:15:10 finish status=failed          │
+│  ⏸  backup-notes  ■■■■                 ││                                          │
+└────────────────────────────────────────┘└──────────────────────────────────────────┘
+ 09:15:10  ✕ sentry-summary/20261117T090000Z failed  ·  j/k move  tab panel  ⏎ log  / filter  ? help  q quit
+```
+
+- **Header**: the runner's state (alive, degraded, last tick failed,
+  stopping), its interval, when it last ticked and ticks next, how many runs
+  are in progress and today's results.
+- **Recent**: the latest occurrences, newest slot first: slot time, status
+  (■ ok, ✕ failed or timed out, ◐ running, □ missed, ! blocked), task id and
+  how long the latest attempt took.
+- **Upcoming**: the next slots of the active tasks: time, how far away, task
+  id and schedule.
+- **Tasks**: each task's mark and its last 10 results, with the same marks as
+  `agent-tasks list`.
+- **Detail** of the selected row: for a run, its ref, status, start,
+  duration, attempt, folder, agent, launcher and handle, summary and events;
+  for an upcoming slot or a task, the task's definition, next runs, recent
+  runs and instructions.
+- **Bottom line**: the latest runner event for a few seconds, then the key
+  hints. There is no repeated status line.
+
+The view is redrawn every second (relative times), re-reads the data folder
+after each tick and every few seconds (runs that finish between ticks), and
+redraws on resize. Below 96 columns the Detail panel replaces the lists
+when focused (`l`); on a short terminal only the selected panel is shown.
+
+Keys: `j`/`k` move, `gg`/`G` first/last row, `Ctrl-d`/`Ctrl-u` half a page,
+`Tab`/`Shift-Tab` or `1`/`2`/`3` switch between Recent, Upcoming and Tasks,
+`l`/`h` focus the detail and back (in the detail, `j`/`k` scroll it), `Enter`
+opens the run's log full screen (for a task or upcoming slot, its latest run;
+a run in progress is followed like `log --follow`), `q`/`Esc` go back from
+the log or the help, `/` filters by task id and `n`/`N` jump to the
+next/previous match, `?` shows the help, and `q` on the main screen stops the
+runner after the current tick, like Ctrl-C (a second Ctrl-C exits at once).
+The terminal is restored on exit, on a signal and on a crash.
+
+When the output is not a terminal, or with `--plain`, `--quiet`, `--json` or
+`--once`, the runner prints one line per event instead:
+
+```
+$ agent-tasks runner --plain
 agent-tasks runner · every 5m · launcher: herdr (clc) · data: ~/.local/share/agent-tasks
 10:00:02  tick  1 due · 0 running
 10:00:03  ▶ sentry-summary/20261117T090000Z      launched in t45
@@ -61,10 +118,12 @@ agent-tasks runner · every 5m · launcher: herdr (clc) · data: ~/.local/share/
   Each error line says which command to run to see more.
 - At the bottom, a fixed status line that is redrawn (only if the output is a
   terminal; otherwise, only the log).
-- The same lines go to `<data_dir>/state/runner.log`.
+- The same lines go to `<data_dir>/state/runner.log`, in the full-screen view
+  too.
 
 Options: `--every 5m` (default, from the config), `--once` (a single tick and
-exit, for testing), `--quiet` (events only, no status line).
+exit, for testing), `--quiet` (events only, no status line), `--plain` (line
+output even on a terminal).
 
 ### Staying alive
 
@@ -160,3 +219,4 @@ less than 15 min.
 | R4 | Runner title (OSC 2) and agent state (OSC 7501) | tasks hang from the runner in the Herdr sidebar |
 | R5 | `system` and `command` notifiers, grouped and not repeated | one failure produces a single notification |
 | R6 | Optional supervisor + `supervise-tasks` skill | a `blocked` launches a supervisor that summarizes it |
+| R7 | Full-screen view on a terminal (read-only), `--plain` for lines | recent runs, upcoming slots, tasks and a run's live log are a few keys away |
