@@ -51,7 +51,14 @@ export interface Bounds {
   logLines: number;
 }
 
-export type Effect = { type: "quit" } | { type: "open-log"; ref: string } | { type: "close-log" };
+export type Effect =
+  | { type: "quit" }
+  | { type: "open-log"; ref: string }
+  | { type: "close-log" }
+  /** Redraw the whole screen (Ctrl-L). */
+  | { type: "redraw" }
+  /** A short message on the bottom line. */
+  | { type: "notice"; text: string };
 
 export interface Update {
   model: Model;
@@ -82,9 +89,9 @@ function maxScroll(lines: number, height: number): number {
 
 /** The rows of the current panel whose task id contains the query. */
 export function matches(model: Model, bounds: Bounds, panel: Panel = model.panel): number[] {
-  const query = model.search?.query;
+  const query = model.search?.query.toLowerCase();
   if (!query) return [];
-  return bounds.rows[panel].flatMap((row, i) => (row.task_id.includes(query) ? [i] : []));
+  return bounds.rows[panel].flatMap((row, i) => (row.task_id.toLowerCase().includes(query) ? [i] : []));
 }
 
 export function selectedRow(model: Model, bounds: Bounds): RowRef | null {
@@ -98,19 +105,13 @@ function select(model: Model, panel: Panel, index: number, bounds: Bounds): Mode
   return { ...model, panel, cursor, detailScroll: moved ? 0 : model.detailScroll };
 }
 
-/** Jumps to a match from the cursor: `dir` 1 next, -1 previous, 0 the cursor itself or the next one. Other panels are tried when the current one has none. */
+/** Jumps to a match in the current panel: `dir` 1 next, -1 previous, 0 the cursor itself or the next one. Wraps around. */
 function jumpToMatch(model: Model, bounds: Bounds, dir: 1 | -1 | 0): Model {
-  const order = [model.panel, ...PANELS.filter((p) => p !== model.panel)];
-  for (const panel of order) {
-    const found = matches(model, bounds, panel);
-    if (found.length === 0) continue;
-    if (panel !== model.panel) return { ...select(model, panel, found[0]!, bounds), focus: "list" };
-    const at = model.cursor[panel];
-    const next =
-      dir === -1 ? (found.filter((i) => i < at).at(-1) ?? found.at(-1)!) : (found.find((i) => (dir === 0 ? i >= at : i > at)) ?? found[0]!);
-    return { ...select(model, panel, next, bounds), focus: "list" };
-  }
-  return model;
+  const found = matches(model, bounds);
+  if (found.length === 0) return model;
+  const at = model.cursor[model.panel];
+  const next = dir === -1 ? (found.filter((i) => i < at).at(-1) ?? found.at(-1)!) : (found.find((i) => (dir === 0 ? i >= at : i > at)) ?? found[0]!);
+  return { ...select(model, model.panel, next, bounds), focus: "list" };
 }
 
 /** Moves the selection (list focus) or the detail scroll (detail focus) by `delta` rows. */
@@ -230,7 +231,7 @@ function mainKey(model: Model, key: Key, bounds: Bounds): Update {
       return done({ ...model, focus: "list" });
     case "enter": {
       const ref = selectedRow(model, bounds)?.ref;
-      if (!ref) return done(model);
+      if (!ref) return { model: { ...model, pending: null }, effects: [{ type: "notice", text: "no run to open yet" }] };
       return { model: { ...model, screen: "log", log: { ref, scroll: 0, follow: false }, pending: null }, effects: [{ type: "open-log", ref }] };
     }
     case "/":
@@ -254,6 +255,7 @@ function mainKey(model: Model, key: Key, bounds: Bounds): Update {
 
 /** A key on any screen. Ctrl-C always quits (a second one, handled by the caller, exits at once). */
 export function update(model: Model, key: Key, bounds: Bounds): Update {
+  if (key === "ctrl-l") return { model, effects: [{ type: "redraw" }] };
   if (key === "ctrl-c") return { model: { ...model, stopping: true, pending: null }, effects: [{ type: "quit" }] };
   if (model.screen === "help") {
     if (key === "q" || key === "esc" || key === "?") return { model: { ...model, screen: model.log ? "log" : "main" }, effects: [] };
@@ -262,6 +264,11 @@ export function update(model: Model, key: Key, bounds: Bounds): Update {
   if (model.screen === "log" && model.log) return logKey(model, key, bounds);
   if (model.search?.typing) return searchKey(model, key, bounds);
   return mainKey(model, key, bounds);
+}
+
+/** The opened log is of a run in progress: show its latest output and stick to it. */
+export function followLog(model: Model): Model {
+  return model.log ? { ...model, log: { ...model.log, follow: true } } : model;
 }
 
 /** Shows a runner event on the bottom line for a few seconds. */

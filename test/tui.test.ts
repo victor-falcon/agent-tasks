@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { commands } from "../src/commands/index.ts";
+import { wantsFullScreen } from "../src/commands/runner.ts";
 import { createContext } from "../src/context.ts";
 import { createStyle } from "../src/output/style.ts";
 import type { StatusInfo } from "../src/runner-render.ts";
 import type { Run, RunStatus, Task } from "../src/schema.ts";
 import { writeRun } from "../src/store.ts";
-import { fit, sanitize, width, wrap } from "../src/tui/ansi.ts";
+import { ENTER_SCREEN, fit, hardWrap, LEAVE_SCREEN, sanitize, width, wrap } from "../src/tui/ansi.ts";
+import { RunnerTui } from "../src/tui/screen.ts";
 import { loadData, type TuiData } from "../src/tui/data.ts";
 import { parseKeys } from "../src/tui/keys.ts";
 import { type Bounds, flash, initialModel, type Model, reanchor, update } from "../src/tui/model.ts";
@@ -111,6 +113,7 @@ function fixture(): TuiData {
     ],
     errors: [],
     timezone: TZ,
+    in_progress: 2,
     loaded: true,
   };
 }
@@ -160,6 +163,12 @@ describe("text helpers", () => {
     expect(width(cut)).toBe(4);
     expect(cut).toContain("\x1b[0m");
     expect(width(fit("■■✕◐日本語", 6))).toBe(6);
+  });
+
+  test("hardWrap cuts long lines and carries the colors over", () => {
+    expect(hardWrap("abcdefg", 3)).toEqual(["abc", "def", "g"]);
+    const pieces = hardWrap(color.paint("red", "abcdef"), 4);
+    expect(pieces).toEqual(["\x1b[31mabcd\x1b[0m", "\x1b[31mef\x1b[39m"]);
   });
 
   test("wrap breaks on words", () => {
@@ -260,10 +269,20 @@ describe("model", () => {
     expect(model.search).toBeNull();
   });
 
-  test("a query with no match in the panel moves to a panel that has one", () => {
-    const { model } = press(initialModel(), ["3", "/", "r", "e", "v"]);
-    expect(model.panel).toBe("recent");
+  test("the filter stays in the current panel, ignores case, and says when nothing matches", () => {
+    let { model } = press(initialModel(), ["3", "/", "R", "e", "v"]);
+    expect(model.panel).toBe("tasks");
+    expect(model.cursor.tasks).toBe(2); // "re" matched worktree-cleanup; "rev" matches nothing, so the cursor stays
+    ({ model } = press(model, ["enter"]));
+    expect(render(input(model)).at(-1)).toStartWith(" /Rev no match");
+    ({ model } = press(model, ["1", "n"]));
     expect(model.cursor.recent).toBe(4);
+  });
+
+  test("Enter on a row without a run says so; Ctrl-L asks for a full redraw", () => {
+    const data = { ...fixture(), tasks: fixture().tasks.map((t) => ({ ...t, recent: [] })) };
+    expect(update(press(initialModel(), ["3"]).model, "enter", viewBounds(input(initialModel(), { data }))).effects).toEqual([{ type: "notice", text: "no run to open yet" }]);
+    expect(update(initialModel(), "ctrl-l", viewBounds(input(initialModel()))).effects).toEqual([{ type: "redraw" }]);
   });
 
   test("? opens the help and q closes it; q on the main screen quits once; Ctrl-c always quits", () => {
@@ -323,6 +342,9 @@ describe("render", () => {
     const log = { lines: ["◐ running  worktree-cleanup/20261117T083000Z", "", ...Array.from({ length: 30 }, (_, i) => `step ${i + 1}`)], following: true };
     const logModel: Model = { ...initialModel(), screen: "log", log: { ref: "worktree-cleanup/20261117T083000Z", scroll: 0, follow: true } };
     expect(screen(input(logModel, { log, size: { width: 80, height: 14 } }))).toMatchSnapshot();
+    const long = { lines: ["x".repeat(100)], following: false };
+    const top: Model = { ...logModel, log: { ...logModel.log!, follow: false } };
+    expect(render(input(top, { log: long, size: { width: 80, height: 14 } })).slice(2, 4).map((l) => l.replace(/[│ ]/g, "").length)).toEqual([78, 22]);
     const typing = press(initialModel(), ["/", "s", "e", "n"]).model;
     expect(render(input(typing)).at(-1)).toBe(" /sen▏  ⏎ keep  esc clear".padEnd(120));
     const kept = press(typing, ["enter"]).model;
@@ -338,7 +360,7 @@ describe("render", () => {
   test("the header: health, interval, last and next tick, running, today", () => {
     expect(render(input(initialModel()))[0]).toBe(" agent-tasks · runner ● alive · every 5m · last tick 2m ago · next in 3m · running 2 · today ■4 ✕1 □1 !1".padEnd(120));
     expect(render(input(initialModel(), { runner: { every: "30s", status: { ...STATUS, last_tick: new Date(NOW.getTime() - 12_000), next_tick: new Date(NOW.getTime() + 18_000) } } }))[0]).toContain("last tick 12s ago · next in 18s");
-    expect(render(input({ ...initialModel(), stopping: true }))[0]).toContain("● stopping after this tick…");
+    expect(render(input({ ...initialModel(), stopping: true }))[0]).toContain("● stopping…");
     expect(render(input(initialModel(), { runner: { every: "5m", status: { ...STATUS, last_tick: null } } }))[0]).toContain("● starting…");
   });
 
@@ -359,7 +381,7 @@ describe("render", () => {
   });
 
   test("empty data: the panels say so", () => {
-    const empty: TuiData = { recent: [], upcoming: [], tasks: [], errors: [], timezone: TZ, loaded: true };
+    const empty: TuiData = { recent: [], upcoming: [], tasks: [], errors: [], timezone: TZ, in_progress: 0, loaded: true };
     const text = screen(input(initialModel(), { data: empty, size: { width: 100, height: 20 } }));
     expect(text).toContain("no runs yet");
     expect(text).toContain("nothing scheduled");
@@ -398,5 +420,87 @@ describe("loadData", () => {
       ["paused-one", "paused", "paused", ""],
     ]);
     expect(data.tasks[0]!.recent.map((r) => r.ref)).toEqual(["hourly/20261117T080000Z", "hourly/20261117T070000Z"]);
+  });
+});
+
+describe("when the runner uses the full-screen view", () => {
+  const tty = { stdinTTY: true, stdoutTTY: true, json: false, once: false, quiet: false, plain: false };
+  test("only on a terminal on both ends, without --json, --once, --quiet or --plain", () => {
+    expect(wantsFullScreen(tty)).toBe(true);
+    for (const key of ["json", "once", "quiet", "plain"] as const) expect(wantsFullScreen({ ...tty, [key]: true })).toBe(false);
+    expect(wantsFullScreen({ ...tty, term: "dumb" })).toBe(false);
+    expect(wantsFullScreen({ ...tty, stdinTTY: false })).toBe(false);
+    expect(wantsFullScreen({ ...tty, stdoutTTY: false })).toBe(false);
+  });
+});
+
+describe("the screen (IO layer)", () => {
+  let home: TempHome;
+  beforeEach(() => {
+    home = makeTempHome();
+    home.writeConfig({ timezone: TZ, notifiers: [] });
+    home.writeTask(makeTask({ id: "hourly", schedule: { type: "cron", cron: "0 * * * *", timezone: TZ, starts_at: null, until: null } }));
+    writeRun(home.paths, run("hourly", "2026-11-17T08:00:00Z", "succeeded", { summary: "all good" }));
+  });
+  afterEach(() => home.cleanup());
+
+  function terminal() {
+    let out = "";
+    let err = "";
+    const listeners: ((chunk: string) => void)[] = [];
+    const raw: boolean[] = [];
+    const quits: number[] = [];
+    const stdin = {
+      isTTY: true,
+      setRawMode: (m: boolean) => void raw.push(m),
+      on: (_: "data", l: (chunk: Buffer | string) => void) => void listeners.push(l as (c: string) => void),
+      off: (_: "data", l: (chunk: Buffer | string) => void) => void listeners.splice(listeners.indexOf(l as (c: string) => void), 1),
+      resume() {},
+      pause() {},
+    };
+    const ctx = (now: Date) => createContext({ now, json: false, env: home.env, cwd: home.root, stdout: { write() {} }, stderr: { write() {} }, commands });
+    const tui = new RunnerTui({
+      stdin,
+      stdout: { write: (t: string) => void (out += t), isTTY: true, columns: 100, rows: 24 },
+      stderr: { write: (t: string) => void (err += t) },
+      env: { NO_COLOR: "1" },
+      every: "5m",
+      now: () => NOW,
+      context: ctx,
+      onQuit: () => void quits.push(1),
+    });
+    return { tui, type: (keys: string) => listeners.forEach((l) => l(keys)), out: () => out, err: () => err, raw, quits, listeners };
+  }
+
+  test("enters the alternate screen in raw mode, draws the data, and gives everything back on close", () => {
+    const t = terminal();
+    t.tui.start();
+    expect(t.raw).toEqual([true]);
+    expect(t.out()).toContain(ENTER_SCREEN);
+    expect(t.out()).toContain("hourly");
+    expect(t.out()).toContain("all good");
+    t.type("?");
+    expect(t.out()).toContain("┌ Help");
+    t.type("qq");
+    expect(t.quits).toEqual([1]);
+    t.tui.close();
+    expect(t.raw).toEqual([true, false]);
+    expect(t.out().endsWith(LEAVE_SCREEN)).toBe(true);
+    expect(t.listeners).toHaveLength(0);
+    t.tui.close(); // twice is fine
+    expect(t.out().split(LEAVE_SCREEN)).toHaveLength(2);
+  });
+
+  test("a crash in the view restores the terminal and is reported, without throwing into the runner", () => {
+    const t = terminal();
+    t.tui.start();
+    (t.tui as unknown as { draw: () => void }).draw = () => {
+      throw new Error("render bug");
+    };
+    expect(() => t.type("j")).not.toThrow();
+    expect(t.out().endsWith(LEAVE_SCREEN)).toBe(true);
+    expect(t.raw).toEqual([true, false]);
+    expect(t.err()).toContain("render bug");
+    expect(t.err()).toContain("The runner keeps going");
   });
 });

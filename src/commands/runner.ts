@@ -11,6 +11,11 @@ import type { Command } from "./types.ts";
 /** Ctrl-C, kill, and the terminal tab closing. */
 const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 
+/** The full-screen view needs a terminal on both ends; every option about the output asks for lines instead. */
+export function wantsFullScreen(o: { stdinTTY: boolean; stdoutTTY: boolean; term?: string; json: boolean; once: boolean; quiet: boolean; plain: boolean }): boolean {
+  return o.stdinTTY && o.stdoutTTY && o.term !== "dumb" && !o.json && !o.once && !o.quiet && !o.plain;
+}
+
 const runner: Command = {
   name: "runner",
   summary: "Keep ticking every few minutes and show what runs (leave it open in a tab)",
@@ -68,9 +73,8 @@ Options:
     const context = (at: Date) => createContext({ now: at, json: ctx.json, env: ctx.env, cwd: ctx.cwd, stdout: ctx.stdout, stderr: ctx.stderr, commands: ctx.commands });
     const once = values.once ?? false;
     const quiet = values.quiet ?? false;
-    const fullScreen = process.stdin.isTTY === true && ctx.stdout.isTTY === true && !ctx.json && !once && !quiet && values.plain !== true;
-    view = fullScreen
-      ? new RunnerTui({ stdin: process.stdin, stdout: process.stdout, env: ctx.env, every, now, context, onQuit: stop })
+    view = wantsFullScreen({ stdinTTY: process.stdin.isTTY === true, stdoutTTY: ctx.stdout.isTTY === true, term: ctx.env.TERM, json: ctx.json, once, quiet, plain: values.plain === true })
+      ? new RunnerTui({ stdin: process.stdin, stdout: process.stdout, stderr: ctx.stderr, env: ctx.env, every, now, context, onQuit: stop })
       : undefined;
     try {
       return await runRunner(

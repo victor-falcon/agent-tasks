@@ -58,9 +58,14 @@ function renderEvents(run: Run, tz: string, now: Date): string {
   return `Events\n${renderTable(rows, { header: false, indent: "  " })}`;
 }
 
+/** The command line an attempt ran: `clc --flag`. */
+export function agentCommand(agent: Record<string, unknown>): string {
+  return [agent.command, ...(Array.isArray(agent.args) ? agent.args : [])].filter((x) => x !== undefined).join(" ");
+}
+
 export function agentText(agent: Record<string, unknown> | null): string {
   if (!agent) return "—";
-  const command = [agent.command, ...(Array.isArray(agent.args) ? agent.args : [])].filter((x) => x !== undefined).join(" ");
+  const command = agentCommand(agent);
   const shell = agent.shell === true ? " (shell)" : "";
   const from = typeof agent.from === "string" ? `  ← ${agent.from}` : "";
   const rest = pairs(agent, ["command", "args", "shell", "from"]);

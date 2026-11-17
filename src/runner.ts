@@ -131,6 +131,7 @@ class RunnerOutput {
     private readonly mode: { json: boolean; quiet: boolean },
     private readonly view: RunnerView | null = null,
   ) {
+    if (view && (mode.json || mode.quiet)) throw new Error("the full-screen view can't be combined with --json or --quiet");
     this.tty = stdout.isTTY === true && !mode.json;
     this.style = createStyle(this.tty && colorEnabled(stdout, env));
   }
@@ -158,8 +159,8 @@ class RunnerOutput {
 
   header(text: (style: Style) => string, json: unknown): void {
     this.log(text(this.plainStyle));
-    if (this.view) this.view.start();
-    else if (this.mode.json) this.writeJson(json);
+    if (this.view) return; // the view has its own header
+    if (this.mode.json) this.writeJson(json);
     else this.write(`${text(this.style)}\n`);
   }
 
@@ -308,6 +309,7 @@ class Runner {
     try {
       const header = { every: this.opts.every, ...setup, dataDir: tildify(this.paths.dataDir, this.base.env) };
       this.out.header((style) => formatHeader(header, style), { type: "runner_started", pid: this.lock.pid, terminal: this.lock.terminal, started_at: this.lock.started_at, every: this.opts.every, ...setup, data_dir: this.paths.dataDir });
+      this.deps.view?.start();
       this.out.agent("idle", true);
       if (stale) this.warn(startedAt, `took over a stale lock from pid ${stale.pid} (started ${stale.started_at})`);
       // `--once` is for testing and for schedulers that call it at their own pace: no gap to report.

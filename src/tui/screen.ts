@@ -2,14 +2,14 @@ import { writeSync } from "node:fs";
 import type { Context, Writer } from "../context.ts";
 import { abortableSleep, followRun } from "../follow.ts";
 import { capturedLog, renderRunLog } from "../output/run-log.ts";
-import { createStyle, type Style } from "../output/style.ts";
+import { colorEnabled, createStyle, type Style } from "../output/style.ts";
 import { isInProgress } from "../run-info.ts";
 import { formatLine, type RunnerLine, type StatusInfo } from "../runner-render.ts";
 import { readRunByRef } from "../store.ts";
 import { ENTER_SCREEN, LEAVE_SCREEN, lineAt, sanitize } from "./ansi.ts";
-import { emptyData, loadData, type TuiData } from "./data.ts";
+import { dataStamp, emptyData, loadData, type TuiData } from "./data.ts";
 import { parseKeys } from "./keys.ts";
-import { type Effect, flash, initialModel, type Model, reanchor, update } from "./model.ts";
+import { type Effect, flash, followLog, initialModel, type Model, reanchor, update } from "./model.ts";
 import { type LogContent, render, rowRefs, type ViewInput, viewBounds } from "./render.ts";
 
 // The IO around the pure model and renderer: raw keys from stdin, the
@@ -19,8 +19,12 @@ import { type LogContent, render, rowRefs, type ViewInput, viewBounds } from "./
 
 /** Redraws this often, so relative times and the bottom line stay current. */
 const REDRAW_MS = 1_000;
-/** Re-reads the data folder this often, to show runs that finished between ticks. */
-const RELOAD_MS = 5_000;
+/** Lines the log view keeps while following a long run (the oldest are dropped). */
+const LOG_MAX_LINES = 20_000;
+/** Checks this often whether the data folder changed (runs that finished between ticks). */
+const CHECK_MS = 2_000;
+/** Re-reads the data folder at least this often, so upcoming slots that passed drop off. */
+const RELOAD_MS = 60_000;
 
 export interface TerminalIn {
   isTTY?: boolean;
@@ -37,6 +41,8 @@ export type TerminalOut = Writer & { columns?: number; rows?: number; fd?: numbe
 export interface RunnerTuiOptions {
   stdin: TerminalIn;
   stdout: TerminalOut;
+  /** Where a crash of the view is reported (after the screen is restored). */
+  stderr: Writer;
   env: Record<string, string | undefined>;
   every: string;
   now(): Date;
@@ -46,6 +52,10 @@ export interface RunnerTuiOptions {
   onQuit(): void;
 }
 
+function emptyStatus(): StatusInfo {
+  return { health: "healthy", last_tick: null, next_tick: null, running: 0, today: { succeeded: 0, failed: 0, missed: 0, blocked: 0 } };
+}
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -53,7 +63,9 @@ function errorMessage(err: unknown): string {
 export class RunnerTui {
   private model: Model = initialModel();
   private data: TuiData = emptyData();
-  private status: StatusInfo = { health: "healthy", last_tick: null, next_tick: null, running: 0, today: { succeeded: 0, failed: 0, missed: 0, blocked: 0 } };
+  private status: StatusInfo = emptyStatus();
+  private stamp = "";
+  private loadedAt = 0;
   private log: (LogContent & { lines: string[] }) | null = null;
   private logStop: AbortController | null = null;
   private previous: string[] = [];
@@ -63,13 +75,13 @@ export class RunnerTui {
   private readonly style: Style;
 
   constructor(private readonly opts: RunnerTuiOptions) {
-    this.style = createStyle(opts.env.NO_COLOR === undefined || opts.env.NO_COLOR === "");
+    this.style = createStyle(colorEnabled(opts.stdout, opts.env));
   }
 
-  private readonly onData = (chunk: Buffer | string) => {
+  private readonly onData = (chunk: Buffer | string) => this.guard(() => {
     for (const key of parseKeys(chunk.toString())) this.key(key);
-  };
-  private readonly onResize = () => this.draw(true);
+  });
+  private readonly onResize = () => this.guard(() => this.draw(true));
   private readonly onExit = () => this.restore();
 
   start(): void {
@@ -83,10 +95,28 @@ export class RunnerTui {
     process.on("SIGWINCH", this.onResize);
     process.on("exit", this.onExit);
     this.opts.stdout.write(ENTER_SCREEN);
-    this.reload();
-    this.timers.push(setInterval(() => this.draw(), REDRAW_MS), setInterval(() => this.reload(), RELOAD_MS));
-    for (const t of this.timers) (t as { unref?: () => void }).unref?.();
-    this.draw(true);
+    this.guard(() => this.reload());
+    this.timers.push(
+      setInterval(() => this.guard(() => this.draw()), REDRAW_MS),
+      setInterval(() => this.guard(() => this.reloadIfChanged()), CHECK_MS),
+    );
+    for (const t of this.timers) t.unref();
+    this.guard(() => this.draw(true));
+  }
+
+  /**
+   * Runs a piece of the view. A bug in it must not take the scheduler down:
+   * the view closes, says why on stderr, and the runner carries on (its
+   * events still go to state/runner.log).
+   */
+  private guard(fn: () => void): void {
+    if (!this.active) return;
+    try {
+      fn();
+    } catch (err) {
+      this.close();
+      this.opts.stderr.write(`agent-tasks: the runner's view stopped: ${(err as Error)?.stack ?? err}\nThe runner keeps going; its events are in state/runner.log. Restart it with --plain for line output.\n`);
+    }
   }
 
   /** A runner line (tick, event, warning): events show on the bottom line for a while. */
@@ -96,14 +126,13 @@ export class RunnerTui {
       const text = formatLine(line, this.data.timezone, this.style).replace(/ {3,}/g, "  ");
       this.model = flash(this.model, text, this.opts.now().getTime());
     }
-    this.draw();
+    this.guard(() => this.draw());
   }
 
   /** After each tick: the runner's state for the header, and fresh data. */
   updateStatus(info: StatusInfo): void {
     this.status = { ...info, today: { ...info.today } };
-    if (!this.active) return;
-    this.reload();
+    this.guard(() => this.reloadIfChanged(true));
   }
 
   /** Leaves the alternate screen and gives the terminal back. Safe to call twice. */
@@ -129,11 +158,13 @@ export class RunnerTui {
     } catch {
       // stdin may already be closed.
     }
-    const fd = this.opts.stdout.fd ?? 1;
+    // Written straight to the file descriptor when there is one: an `exit` handler can't wait for a stream.
+    const { fd } = this.opts.stdout;
     try {
-      writeSync(fd, LEAVE_SCREEN);
+      if (fd === undefined) this.opts.stdout.write(LEAVE_SCREEN);
+      else writeSync(fd, LEAVE_SCREEN);
     } catch {
-      this.opts.stdout.write(LEAVE_SCREEN);
+      // The terminal is gone.
     }
   }
 
@@ -150,10 +181,28 @@ export class RunnerTui {
     };
   }
 
+  /** Re-reads the data when a run or task changed, or the last read is old. `redraw`: draw anyway (the header changed). */
+  private reloadIfChanged(redraw = false): void {
+    const now = this.opts.now();
+    try {
+      const stamp = dataStamp(this.opts.context(now).paths);
+      if (stamp === this.stamp && now.getTime() - this.loadedAt < RELOAD_MS) {
+        if (redraw) this.draw();
+        return;
+      }
+    } catch {
+      // Let reload() report it.
+    }
+    this.reload();
+  }
+
   private reload(): void {
     const now = this.opts.now();
     try {
-      const data = loadData(this.opts.context(now));
+      const ctx = this.opts.context(now);
+      this.stamp = dataStamp(ctx.paths);
+      this.loadedAt = now.getTime();
+      const data = loadData(ctx);
       this.model = reanchor(this.model, rowRefs(this.data), rowRefs(data));
       this.data = data;
     } catch (err) {
@@ -170,9 +219,19 @@ export class RunnerTui {
   }
 
   private apply(effect: Effect): void {
-    if (effect.type === "quit") this.opts.onQuit();
-    else if (effect.type === "open-log") this.openLog(effect.ref);
-    else this.closeLog();
+    switch (effect.type) {
+      case "quit":
+        return this.opts.onQuit();
+      case "open-log":
+        return this.openLog(effect.ref);
+      case "close-log":
+        return this.closeLog();
+      case "redraw":
+        return this.draw(true);
+      case "notice":
+        this.model = flash(this.model, effect.text, this.opts.now().getTime());
+        return;
+    }
   }
 
   private openLog(ref: string): void {
@@ -188,8 +247,7 @@ export class RunnerTui {
     const captured = capturedLog(ctx, run, run.attempts.at(-1));
     this.log = { lines: sanitize(renderRunLog(ctx, this.style, run, run.attempts, captured)), following: isInProgress(run.status) };
     if (!this.log.following) return;
-    // A run in progress opens at its latest output and sticks to it.
-    if (this.model.log) this.model = { ...this.model, log: { ...this.model.log, follow: true } };
+    this.model = followLog(this.model);
 
     // Live output: the same polling as `log --follow`, printed into the view instead of stdout.
     const controller = (this.logStop = new AbortController());
@@ -206,6 +264,7 @@ export class RunnerTui {
 
   private appendLog(log: { lines: string[] }, text: string): void {
     log.lines.push(...sanitize(text.replace(/\n$/, "")));
+    if (log.lines.length > LOG_MAX_LINES) log.lines.splice(0, log.lines.length - LOG_MAX_LINES);
     if (this.log === log) this.draw();
   }
 

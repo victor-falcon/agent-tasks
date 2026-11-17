@@ -71,6 +71,35 @@ export function spread(left: string, right: string, cols: number): string {
   return fit(left, cols - rw - 1) + " " + right;
 }
 
+/**
+ * A line cut into pieces of at most `cols` columns, colors kept: each piece
+ * ends with a reset and the next one starts with the colors still open.
+ */
+export function hardWrap(text: string, cols: number): string[] {
+  if (cols <= 0 || width(text) <= cols) return [text];
+  const out: string[] = [];
+  let line = "";
+  let used = 0;
+  let open = ""; // SGR codes in effect, replayed at the start of the next piece
+  for (const t of tokens(text)) {
+    if (t.startsWith(ESC)) {
+      line += t;
+      open = t === RESET || t === `${ESC}[m` ? "" : open + t;
+      continue;
+    }
+    const tw = width(t);
+    if (used + tw > cols) {
+      out.push(open ? line + RESET : line);
+      line = open;
+      used = 0;
+    }
+    line += t;
+    used += tw;
+  }
+  out.push(line);
+  return out;
+}
+
 /** Words wrapped to `cols` columns (no colors expected). Long words are cut. */
 export function wrap(text: string, cols: number): string[] {
   const out: string[] = [];

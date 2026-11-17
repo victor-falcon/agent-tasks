@@ -1,12 +1,12 @@
-import { eventTime, pairs } from "../output/run-log.ts";
+import { agentCommand, eventTime, pairs } from "../output/run-log.ts";
 import type { Style } from "../output/style.ts";
 import { paintMark, RUN_MARKS, TASK_MARKS } from "../output/symbols.ts";
 import { absoluteTime, agendaTime, formatSpan, MINUTE, relativeTime, timeNear, whenTime } from "../output/time.ts";
-import { attemptDuration, isFailure, isInProgress, runSummary } from "../run-info.ts";
+import { attemptDuration, isFailure, runSummary } from "../run-info.ts";
 import type { StatusInfo } from "../runner-render.ts";
 import type { RunStatus } from "../schema.ts";
 import { historyStrip } from "../task-row.ts";
-import { fit, spread, width, wrap } from "./ansi.ts";
+import { fit, hardWrap, spread, width, wrap } from "./ansi.ts";
 import type { RecentItem, TaskItem, TuiData, UpcomingItem } from "./data.ts";
 import { type Bounds, type Model, matches, PANEL_TITLES, PANELS, type Panel, type RowRef } from "./model.ts";
 
@@ -172,15 +172,12 @@ function panelRows(panel: Panel, data: TuiData, cols: number, ctx: RowContext): 
 
 /** The keys' view of each list: stable keys, task ids and the run Enter opens. */
 export function rowRefs(data: TuiData): Bounds["rows"] {
+  const latest = new Map(data.tasks.map((t) => [t.task.id, t.recent[0]?.ref ?? null]));
   return {
     recent: data.recent.map((r): RowRef => ({ key: r.ref, task_id: r.task_id, ref: r.ref })),
-    upcoming: data.upcoming.map((u): RowRef => ({ key: `${u.task_id}@${u.at}`, task_id: u.task_id, ref: latestRef(data, u.task_id) })),
+    upcoming: data.upcoming.map((u): RowRef => ({ key: `${u.task_id}@${u.at}`, task_id: u.task_id, ref: latest.get(u.task_id) ?? null })),
     tasks: data.tasks.map((t): RowRef => ({ key: t.task.id, task_id: t.task.id, ref: t.recent[0]?.ref ?? null })),
   };
-}
-
-function latestRef(data: TuiData, taskId: string): string | null {
-  return data.tasks.find((t) => t.task.id === taskId)?.recent[0]?.ref ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,7 +200,7 @@ function runDetail(item: RecentItem, cols: number, ctx: RowContext): string[] {
   const attempt = used === 0 ? null : max !== null && max > 1 && (used > 1 || isFailure(run.status)) ? `attempt ${used}/${max}` : `attempt ${used}`;
   const start = first ? `started ${timeNear(new Date(first.started_at), slot, tz, now)}` : "not started";
   const facts = [statusText(style, run.status), start, ...(duration === null ? [] : [formatSpan(duration)]), ...(attempt ? [attempt] : [])];
-  const agent = last?.agent ? [last.agent.command, ...(Array.isArray(last.agent.args) ? last.agent.args : [])].join(" ") : null;
+  const agent = last?.agent ? agentCommand(last.agent) : null;
   const session = last?.session ? `${last.session.launcher}${last.session.handle ? ` (${last.session.handle})` : ""}` : null;
   const summary = runSummary(run);
   const lines = [
@@ -220,7 +217,10 @@ function runDetail(item: RecentItem, cols: number, ctx: RowContext): string[] {
     heading(style, "Events"),
     ...(run.events.length === 0
       ? [style.paint("dim", "  none")]
-      : run.events.map((e) => `  ${style.paint("dim", eventTime(e.at, run, tz, now))} ${e.event}${pairs(e, ["at", "event", "notified"]) ? ` ${style.paint("dim", pairs(e, ["at", "event", "notified"]))}` : ""}`)),
+      : run.events.map((e) => {
+          const fields = pairs(e, ["at", "event", "notified"]);
+          return `  ${style.paint("dim", eventTime(e.at, run, tz, now))} ${e.event}${fields ? ` ${style.paint("dim", fields)}` : ""}`;
+        })),
   ];
   if (used > 0) lines.push("", style.paint("dim", "⏎ full log"));
   return lines;
@@ -315,8 +315,8 @@ function sinceOrUntil(date: Date, now: Date): string {
 function header({ runner, model, data, now, style, size }: ViewInput): string {
   const s = runner.status;
   // Runs that finished since the last tick are already in the data: count from it, not from the tick.
-  const running = data.loaded ? data.recent.filter((r) => isInProgress(r.run.status)).length : s.running;
-  const health = model.stopping ? { text: "stopping after this tick…", color: "yellow" as const } : s.last_tick ? HEALTH[s.health] : { text: "starting…", color: "dim" as const };
+  const running = data.loaded ? data.in_progress : s.running;
+  const health = model.stopping ? { text: "stopping…", color: "yellow" as const } : s.last_tick ? HEALTH[s.health] : { text: "starting…", color: "dim" as const };
   const t = s.today;
   const today = [
     [RUN_MARKS.succeeded, t.succeeded],
@@ -381,6 +381,11 @@ function helpLines(style: Style): string[] {
   ];
 }
 
+/** The log's lines as drawn: long ones wrapped to the view's width. */
+function logRows(log: LogContent | null, size: Size): string[] {
+  return (log?.lines ?? []).flatMap((line) => hardWrap(line, size.width - 2));
+}
+
 /** The scroll offset of the log view (the bottom while following). */
 function logScroll(model: Model, lines: number, rows: number): number {
   const max = Math.max(0, lines - rows);
@@ -408,7 +413,7 @@ export function viewBounds(input: ViewInput): Bounds {
     detailHeight: Math.max(0, l.body - 2),
     detailLines: detailLinesCount,
     logHeight: Math.max(0, l.body - 2),
-    logLines: input.log?.lines.length ?? 0,
+    logLines: input.model.screen === "log" ? logRows(input.log, input.size).length : 0,
   };
 }
 
@@ -466,7 +471,7 @@ export function render(input: ViewInput): string[] {
   if (model.screen === "help") {
     body = box(style, "Help", helpLines(style), size.width, l.body, true);
   } else if (model.screen === "log" && model.log) {
-    const lines = input.log?.lines ?? [];
+    const lines = logRows(input.log, size);
     const rows = l.body - 2;
     const scroll = logScroll(model, lines.length, rows);
     const state = input.log?.following ? "following" : "";

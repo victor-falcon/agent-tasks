@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parseCommandArgs } from "../args.ts";
-import { formatSource, type LauncherConfig, type Resolution, type Source } from "../config.ts";
+import { formatSource, type Resolution, type Source } from "../config.ts";
+import { formatAgent, formatLauncher } from "../output/settings-text.ts";
 import { type Context, output } from "../context.ts";
 import { runnerBanner } from "../output/banner.ts";
 import { renderRunsTable } from "../output/runs-table.ts";
@@ -16,17 +17,6 @@ import { describeSchedule, displayTimezone, findTask, runView, type TaskOverview
 import type { Command } from "./types.ts";
 
 const RECENT = 10;
-
-export function formatAgent(agent: Resolution["agent"]): string {
-  return [agent.command, ...agent.args].join(" ") + (agent.shell ? " (shell)" : "");
-}
-
-/** `herdr`, `herdr (launch, close overridden)`, or `custom (launch, close)`. */
-export function formatLauncher(launcher: LauncherConfig): string {
-  const commands = Object.keys(launcher).filter((k) => k !== "preset");
-  if (launcher.preset === undefined) return `custom (${commands.join(", ") || "no commands"})`;
-  return commands.length === 0 ? launcher.preset : `${launcher.preset} (${commands.join(", ")} overridden)`;
-}
 
 /** The personal instruction files, each with where it was configured. */
 export interface PersonalInstructions {

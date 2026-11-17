@@ -1,7 +1,11 @@
-import { formatAgent, formatLauncher } from "../commands/show.ts";
 import type { Context } from "../context.ts";
 import { scheduleText } from "../output/schedule-text.ts";
+import { formatAgent, formatLauncher } from "../output/settings-text.ts";
+import { isInProgress } from "../run-info.ts";
 import type { Run, Task } from "../schema.ts";
+import { statSync } from "node:fs";
+import { join } from "node:path";
+import type { DataPaths } from "../paths.ts";
 import { listRuns, listTasks, type StoredRun, taskIdsWithRuns } from "../store.ts";
 import { displayTimezone, describeSchedule, type TaskState, taskOverview } from "../task-info.ts";
 import { type TaskRow, taskRowFromOverview } from "../task-row.ts";
@@ -60,12 +64,31 @@ export interface TuiData {
   errors: string[];
   /** Display time zone (config, else system). */
   timezone: string;
+  /** Runs running or blocked right now, across every task. */
+  in_progress: number;
   /** False until the data folder was read once. */
   loaded: boolean;
 }
 
+/**
+ * A cheap fingerprint of the data folder: the modification times of the
+ * tasks folder and of each task's runs folder. Runs and tasks are written by
+ * renaming a temp file into place, which changes the folder's mtime, so a
+ * new or changed run changes the stamp without reading any file.
+ */
+export function dataStamp(paths: DataPaths): string {
+  const mtime = (dir: string) => {
+    try {
+      return statSync(dir).mtimeMs;
+    } catch {
+      return 0;
+    }
+  };
+  return [paths.tasksDir, paths.runsDir, ...taskIdsWithRuns(paths).map((id) => join(paths.runsDir, id))].map(mtime).join(",");
+}
+
 export function emptyData(): TuiData {
-  return { recent: [], upcoming: [], tasks: [], errors: [], timezone: "UTC", loaded: false };
+  return { recent: [], upcoming: [], tasks: [], errors: [], timezone: "UTC", in_progress: 0, loaded: false };
 }
 
 export function loadData(ctx: Context): TuiData {
@@ -107,6 +130,7 @@ export function loadData(ctx: Context): TuiData {
     for (const { ref, run } of runs.items) recent.push({ ref, task_id: id, run, cwd: null, max_attempts: null });
   }
 
+  const inProgress = recent.filter((r) => isInProgress(r.run.status)).length;
   recent.sort((a, b) => Date.parse(b.run.slot) - Date.parse(a.run.slot) || b.ref.localeCompare(a.ref));
   upcoming.sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.task_id.localeCompare(b.task_id));
   items.sort((a, b) => a.task.id.localeCompare(b.task.id));
@@ -116,6 +140,7 @@ export function loadData(ctx: Context): TuiData {
     tasks: items,
     errors,
     timezone: displayTimezone(ctx),
+    in_progress: inProgress,
     loaded: true,
   };
 }
