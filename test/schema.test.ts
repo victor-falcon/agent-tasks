@@ -35,7 +35,9 @@ describe("task validation", () => {
     const { machine: _, ...withoutMachine } = makeTask();
     const invalid = "machine: must be a machine name: lowercase letters, digits and dashes, starting with a letter";
     expect(taskErrors(withoutMachine)).toEqual([invalid]);
-    for (const bad of ["", "Mac", "2mac", "mac-", "mac mini", 5]) expect(taskErrors({ ...makeTask(), machine: bad })).toEqual([invalid]);
+    for (const bad of ["", "Mac", "2mac", "mac-", "mac mini", 5]) {
+      expect(taskErrors({ ...makeTask(), machine: bad })).toEqual([`${invalid} (got ${JSON.stringify(bad)})`]);
+    }
   });
 
   test("notify: run events, [] for never, null for the notifiers' own events", () => {

@@ -1,4 +1,4 @@
-import { isHub, knownMachines, localMachine, type Resolution, type UserConfig } from "./config.ts";
+import { isHub, isKnownMachine, knownMachines, localMachine, type Resolution, type UserConfig } from "./config.ts";
 import type { Context } from "./context.ts";
 import { parseDuration } from "./duration.ts";
 import type { DataPaths } from "./paths.ts";
@@ -165,8 +165,19 @@ export function findTask(ctx: Context, id: string): { task: Task; archived: bool
  * (or this one is a client), or a task runs somewhere else. A single-machine
  * install never sees it.
  */
-export function showMachineColumn(config: UserConfig, tasks: readonly Pick<Task, "machine">[]): boolean {
+export function showMachineColumn(config: UserConfig, machines: readonly (string | null)[]): boolean {
   if (!isHub(config) || Object.keys(knownMachines(config)).length > 1) return true;
   const self = localMachine(config);
-  return tasks.some((t) => t.machine !== self);
+  return machines.some((m) => m !== null && m !== self);
+}
+
+/**
+ * Checks a `--machine` filter: a machine from the config, or one some task
+ * still runs on (e.g. a machine removed from the registry). Anything else is
+ * most likely a typo, which would otherwise look like "no tasks".
+ */
+export function checkMachineFilter(ctx: Context, machine: string | undefined, tasks: readonly Pick<Task, "machine">[]): void {
+  if (machine === undefined || isKnownMachine(ctx.config.config, machine) || tasks.some((t) => t.machine === machine)) return;
+  const known = [...new Set([...Object.keys(knownMachines(ctx.config.config)), ...tasks.map((t) => t.machine)])].sort().join(", ");
+  throw new UsageError(`--machine: unknown machine "${machine}" (known: ${known})`);
 }

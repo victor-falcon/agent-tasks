@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { configErrors, isHub, isKnownMachine, knownMachines, localMachine } from "../src/config.ts";
 import { migrateTaskMachines } from "../src/migrate.ts";
@@ -68,7 +68,7 @@ describe("machine config", () => {
       'machine: must be a machine name: lowercase letters, digits and dashes, starting with a letter (got "My Mac")',
       'machines.mac: needs exactly one of "local": true or "ssh": "<host alias>"',
       'machines.pi: needs exactly one of "local": true or "ssh": "<host alias>"',
-      "machines.Box: is not a valid machine name: lowercase letters, digits and dashes, starting with a letter",
+      'machines.Box: must be a machine name: lowercase letters, digits and dashes, starting with a letter (got "Box")',
       "machines.nas.ssh: must be a non-empty string",
       "machines.vm.local: must be true (leave it out otherwise)",
       'machines.vm: needs exactly one of "local": true or "ssh": "<host alias>"',
@@ -102,6 +102,20 @@ describe("migration: tasks without machine", () => {
     const again = readFileSync(saved, "utf8");
     expect(migrateTaskMachines(home.paths, "other")).toEqual([]);
     expect(readFileSync(saved, "utf8")).toBe(again);
+  });
+
+  test("a task that can't be rewritten is left alone and reported where it is read", async () => {
+    const file = writeLegacyTask(home.paths.tasksDir, "weekly-report");
+    chmodSync(home.paths.tasksDir, 0o555);
+    try {
+      expect(migrateTaskMachines(home.paths, "local")).toEqual([]);
+      const r = await runCli(["list", "--json", NOW], home);
+      expect(r.code).toBe(0);
+      expect(r.json().errors[0]).toContain("machine: must be a machine name");
+    } finally {
+      chmodSync(home.paths.tasksDir, 0o755);
+    }
+    expect(readStored(file).machine).toBeUndefined();
   });
 
   test("a missing data folder is nothing to migrate", () => {
@@ -154,7 +168,7 @@ describe("--machine", () => {
     expect(unknown.code).toBe(1);
     expect(unknown.json().error).toMatchObject({ code: "unknown_machine", message: 'unknown machine "pi" (known: linux, mac); add it to `machines` in the config' });
     const invalid = await runCli(["add", "--title", "Bad", ...addFlags, "--machine", "My Mac", "--json", NOW], home, project);
-    expect(invalid.json().error.details).toEqual(["machine: must be a machine name: lowercase letters, digits and dashes, starting with a letter"]);
+    expect(invalid.json().error.details).toEqual(['machine: must be a machine name: lowercase letters, digits and dashes, starting with a letter (got "My Mac")']);
   });
 
   test("edit --machine moves a task; an unknown machine is rejected", async () => {
@@ -178,13 +192,20 @@ describe("--machine", () => {
     const ids = async (...args: string[]) => (await runCli(["list", "--json", ...args, NOW], home)).json().tasks.map((t: { id: string }) => t.id);
     expect(await ids()).toEqual(["on-linux", "on-mac"]);
     expect(await ids("--machine", "mac")).toEqual(["on-mac"]);
-    expect(await ids("--machine", "pi")).toEqual([]);
+    const typo = await runCli(["list", "--machine", "pi", NOW], home);
+    expect(typo.code).toBe(2);
+    expect(typo.stderr).toContain('--machine: unknown machine "pi" (known: linux, mac)');
+    expect((await runCli(["status", "--machine", "pi", NOW], home)).code).toBe(2);
+    // A machine some task still runs on is a valid filter, even once it left the config.
+    home.writeTask(makeTask({ id: "stray", machine: "local" }));
+    expect(await ids("--machine", "local")).toEqual(["stray"]);
     const human = await runCli(["list", NOW], home);
     expect(human.stdout.split("\n")[0]).toMatch(/^\s+ID\s+SCHEDULE\s+NEXT\s+LAST 10\s+MACHINE\s+FOLDER$/);
     expect(human.stdout).toMatch(/on-mac .* mac\s+~\/Projects\/foo/);
 
     const status = await runCli(["status", "--json", "--machine", "linux", NOW], home);
     expect(status.json().tasks).toBe(1);
+    expect((await runCli(["list", "--json", "--machine", "local", NOW], home)).json().tasks.map((t: { id: string }) => t.id)).toEqual(["stray"]);
     expect(status.json().next.map((n: { task_id: string; machine: string }) => `${n.task_id}@${n.machine}`)).toEqual(["on-linux@linux"]);
     const all = await runCli(["status", NOW], home);
     expect(all.stdout).toMatch(/on-linux\s+linux/);

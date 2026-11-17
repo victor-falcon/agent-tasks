@@ -63,7 +63,7 @@ function attentionRows(style: Style, items: readonly AttentionItem[], tz: string
 }
 
 /** `showMachine` adds each task's machine to the attention and upcoming rows (see `showMachineColumn`). */
-export function renderStatus(style: Style, report: StatusReport, tz: string, now: Date, showMachine = false): string {
+export function renderStatus(style: Style, report: StatusReport, tz: string, now: Date, { showMachine = false } = {}): string {
   const heading = (text: string) => style.paint("bold", text);
   const lines = [
     renderTable(
@@ -101,7 +101,8 @@ const status: Command = {
 One screen: whether the runner is alive (from its heartbeat), what happened
 in the last 24 hours, what is running now, what needs attention and the next
 run of up to ${NEXT_COUNT} tasks, soonest first. With --machine, only the tasks
-that run on that machine count. Once more than one machine is involved, each
+that run on that machine count (the runner line and the exit code still
+cover the runner itself). Once more than one machine is involved, each
 task's machine is shown next to it.
 
 Under "Attention":
@@ -118,8 +119,8 @@ could be read; ${EXIT_ATTENTION} otherwise. So it works in scripts and status ba
     const report = buildStatus(ctx, health, { machine: values.machine });
     warnCorrupt(ctx, report.errors.map((m) => new Error(m)));
     output(ctx, report, () => {
-      const machines = [...report.next, ...report.attention].flatMap((i) => (i.machine === null ? [] : [{ machine: i.machine }]));
-      return renderStatus(stdoutStyle(ctx), report, displayTimezone(ctx), ctx.now, showMachineColumn(ctx.config.config, machines));
+      const showMachine = showMachineColumn(ctx.config.config, [...report.next, ...report.attention].map((i) => i.machine));
+      return renderStatus(stdoutStyle(ctx), report, displayTimezone(ctx), ctx.now, { showMachine });
     });
     return report.ok ? 0 : EXIT_ATTENTION;
   },

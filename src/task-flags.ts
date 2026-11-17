@@ -1,12 +1,11 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { isKnownMachine, knownMachines } from "./config.ts";
 import type { Context } from "./context.ts";
 import { AgentTasksError, UsageError } from "./errors.ts";
 import { parseCount, readFileArg } from "./input.ts";
-import { isKnownMachine, knownMachines } from "./config.ts";
 import { homeDir, resolvePath, tildify } from "./paths.ts";
-import type { Schedule, Task } from "./schema.ts";
-import { TASK_FIELDS } from "./schema.ts";
+import { orderTaskKeys, type Schedule, type Task } from "./schema.ts";
 
 /**
  * Flags shared by `add` and `edit` to set task fields. With `edit`, an empty
@@ -164,12 +163,4 @@ export function completeTask(task: Partial<Task>): Task {
     schedule,
   };
   return orderTaskKeys(filled) as unknown as Task;
-}
-
-/** Same object with the task fields first, in `TASK_FIELDS` order. */
-export function orderTaskKeys(task: Record<string, unknown>): Record<string, unknown> {
-  const ordered: Record<string, unknown> = {};
-  for (const key of TASK_FIELDS) if (key in task) ordered[key] = task[key];
-  for (const [key, value] of Object.entries(task)) if (!(key in ordered)) ordered[key] = value;
-  return ordered;
 }

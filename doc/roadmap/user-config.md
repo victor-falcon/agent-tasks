@@ -73,7 +73,10 @@ example if it doesn't exist.
 
 - `machine`: this machine's name (lowercase letters, digits and dashes;
   `local` when unset). New tasks run here unless `add --machine` says
-  otherwise.
+  otherwise. Tasks saved before tasks had a `machine` get this name the
+  first time a newer CLI reads the data folder, so set it before upgrading;
+  set later, `doctor` lists the tasks left on the old name and
+  `agent-tasks edit <id> --machine <name>` moves them.
 - `machines`: on the hub (the machine that holds the data and runs the
   runner), the other machines tasks can run on, each with exactly one of
   `"ssh": "<host alias>"` or `"local": true`. This machine's own name is

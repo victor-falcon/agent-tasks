@@ -5,7 +5,7 @@ import { isDecisive, isFailure, lastActivity, runSummary } from "./run-info.ts";
 import type { RunnerHealth } from "./runner-health.ts";
 import type { RunStatus, Task } from "./schema.ts";
 import { listRuns, listTasks, readTicks, type StoredRun, taskIdsWithRuns } from "./store.ts";
-import { displayTimezone, taskOverview } from "./task-info.ts";
+import { checkMachineFilter, displayTimezone, taskOverview } from "./task-info.ts";
 import { formatInZone } from "./time.ts";
 
 // The data behind `agent-tasks status`: counts, what needs attention, what's next.
@@ -83,10 +83,12 @@ export interface StatusOptions {
 export function buildStatus(ctx: Context, health: RunnerHealth, { machine }: StatusOptions = {}): StatusReport {
   const now = ctx.now.getTime();
   const all = listTasks(ctx.paths);
+  checkMachineFilter(ctx, machine, all.items);
   const tasks = { ...all, items: machine === undefined ? all.items : all.items.filter((t) => t.machine === machine) };
   const errors: Error[] = [...tasks.errors];
   const byId = new Map<string, Task>(tasks.items.map((t) => [t.id, t]));
-  const orphans = machine === undefined ? taskIdsWithRuns(ctx.paths).filter((id) => !all.items.some((t) => t.id === id)) : [];
+  const saved = new Set(all.items.map((t) => t.id));
+  const orphans = machine === undefined ? taskIdsWithRuns(ctx.paths).filter((id) => !saved.has(id)) : [];
   const ids = [...new Set([...byId.keys(), ...orphans])].sort();
 
   const counts = { ok: 0, failed: 0, missed: 0 };

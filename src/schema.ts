@@ -219,6 +219,14 @@ export function checkTimezone(c: Checker, value: unknown, { nullable = false } =
   if (typeof value !== "string" || !isValidTimezone(value)) c.fail(`must be an IANA time zone such as Europe/Madrid (got ${JSON.stringify(value)})`);
 }
 
+/** A machine name (a task's `machine`, the config's `machine` or a key of `machines`). */
+export function checkMachineName(c: Checker, value: unknown): void {
+  if (typeof value !== "string" || !MACHINE_NAME_RE.test(value)) {
+    const got = value === undefined ? "" : ` (got ${JSON.stringify(value)})`;
+    c.fail(`must be a machine name: lowercase letters, digits and dashes, starting with a letter${got}`);
+  }
+}
+
 /** A task's (or profile's, or default) `notify`: a list of run events, possibly empty. */
 export function checkNotify(c: Checker, value: unknown, { nullable = false } = {}): void {
   if (value === undefined || (value === null && nullable)) return;
@@ -315,6 +323,14 @@ export const TASK_FIELDS = [
   "schedule_since",
 ] as const;
 
+/** Same object with the task fields first, in `TASK_FIELDS` order. */
+export function orderTaskKeys(task: Record<string, unknown>): Record<string, unknown> {
+  const ordered: Record<string, unknown> = {};
+  for (const key of TASK_FIELDS) if (key in task) ordered[key] = task[key];
+  for (const [key, value] of Object.entries(task)) if (!(key in ordered)) ordered[key] = value;
+  return ordered;
+}
+
 /** Returns the list of problems with a task; empty when valid. */
 export function taskErrors(value: unknown): string[] {
   const c = new Checker();
@@ -331,9 +347,7 @@ export function taskErrors(value: unknown): string[] {
     c.at("description").fail("must be a string or null");
   }
   checkString(c.at("cwd"), value.cwd);
-  if (typeof value.machine !== "string" || !MACHINE_NAME_RE.test(value.machine)) {
-    c.at("machine").fail("must be a machine name: lowercase letters, digits and dashes, starting with a letter");
-  }
+  checkMachineName(c.at("machine"), value.machine);
   checkString(c.at("instructions"), value.instructions);
   checkSchedule(c.at("schedule"), value.schedule);
   checkAgent(c.at("agent"), value.agent, { nullable: true });

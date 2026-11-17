@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { makeTempHome, runCli, type TempHome } from "./helpers.ts";
+import { makeTask, makeTempHome, runCli, type TempHome } from "./helpers.ts";
 
 const REPO = resolve(import.meta.dir, "..");
 const NOW = "2026-11-17T09:00:00+01:00";
@@ -362,6 +362,14 @@ describe("doctor", () => {
     const r = await doctor("--json");
     expect(r.code).toBe(1);
     expect(r.json().checks.find((c: any) => c.id === "data.writable").status).toBe("error");
+  });
+
+  test("tasks on a machine missing from the config are a warning", async () => {
+    await readyMachine();
+    home.writeTask(makeTask({ id: "old-one", machine: "local" }));
+    home.writeConfig({ ...JSON.parse(readFileSync(home.configFile, "utf8")), machine: "linux" });
+    const check = (await doctor("--json")).json().checks.find((c: any) => c.id === "data.machines");
+    expect(check).toMatchObject({ status: "warn", message: "1 task runs on a machine not in the config: local", details: ["old-one: local"] });
   });
 
   test("a stale heartbeat is a warning", async () => {

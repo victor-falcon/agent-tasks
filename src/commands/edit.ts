@@ -2,9 +2,9 @@ import { parseCommandArgs } from "../args.ts";
 import { output } from "../context.ts";
 import { UsageError, ValidationError } from "../errors.ts";
 import { parseJsonObject, readFileArg } from "../input.ts";
-import { isObject, type Task, TASK_FIELDS, taskErrors } from "../schema.ts";
+import { isObject, orderTaskKeys, type Task, TASK_FIELDS, taskErrors } from "../schema.ts";
 import { writeTask } from "../store.ts";
-import { applyTaskFlags, checkTaskMachine, normalizeTaskCwd, orderTaskKeys, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE } from "../task-flags.ts";
+import { applyTaskFlags, checkTaskMachine, normalizeTaskCwd, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE } from "../task-flags.ts";
 import { describeNext, nowIso, readActiveTask, taskOverview } from "../task-info.ts";
 import type { Command } from "./types.ts";
 

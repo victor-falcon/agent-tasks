@@ -11,7 +11,7 @@ import { paintMark, PENDING_MARK, RUN_MARKS, TASK_MARKS, type TaskMarkKind, task
 import { renderTable } from "../output/table.ts";
 import { DAY, formatSpan, whenTime } from "../output/time.ts";
 import { isDecisive, isFailure, isInProgress } from "../run-info.ts";
-import { describeSchedule, displayTimezone, showMachineColumn, TASK_STATES, type TaskState, taskOverview, warnCorrupt } from "../task-info.ts";
+import { checkMachineFilter, describeSchedule, displayTimezone, showMachineColumn, TASK_STATES, type TaskState, taskOverview, warnCorrupt } from "../task-info.ts";
 import type { Command } from "./types.ts";
 
 const WEEK_MS = 7 * DAY;
@@ -167,6 +167,7 @@ Options:
 
     const tasks = listTasks(ctx.paths);
     const archived = states.includes("archived") ? listArchivedTasks(ctx.paths) : { items: [], errors: [] };
+    checkMachineFilter(ctx, values.machine, [...tasks.items, ...archived.items]);
     const errors: Error[] = [...tasks.errors, ...archived.errors];
     const items: ListItem[] = [];
     const add = (task: Task, isArchived: boolean) => {
@@ -187,7 +188,7 @@ Options:
         style: stdoutStyle(ctx),
         now: ctx.now,
         timezone: displayTimezone(ctx),
-        showMachine: showMachineColumn(ctx.config.config, items.map((i) => i.task)),
+        showMachine: showMachineColumn(ctx.config.config, items.map((i) => i.task.machine)),
       }),
     );
   },

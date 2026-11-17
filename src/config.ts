@@ -17,7 +17,7 @@ import {
   isObject,
   KEEP_OPEN_VALUES,
   type KeepOpen,
-  MACHINE_NAME_RE,
+  checkMachineName,
   type Task,
 } from "./schema.ts";
 import { notifierErrors } from "./notifiers/config.ts";
@@ -198,12 +198,6 @@ function checkSection(c: Checker, value: unknown, fields: readonly string[]): va
   return true;
 }
 
-function checkMachineName(c: Checker, value: unknown): void {
-  if (typeof value !== "string" || !MACHINE_NAME_RE.test(value)) {
-    c.fail(`must be a machine name: lowercase letters, digits and dashes, starting with a letter (got ${JSON.stringify(value)})`);
-  }
-}
-
 function checkMachines(c: Checker, value: unknown, self: string): void {
   if (value === undefined) return;
   if (!isObject(value)) {
@@ -212,7 +206,7 @@ function checkMachines(c: Checker, value: unknown, self: string): void {
   }
   for (const [name, entry] of Object.entries(value)) {
     const m = c.at(name);
-    if (!MACHINE_NAME_RE.test(name)) m.fail("is not a valid machine name: lowercase letters, digits and dashes, starting with a letter");
+    checkMachineName(m, name);
     if (!isObject(entry)) {
       m.fail('must be { "local": true } or { "ssh": "<host alias>" }');
       continue;
