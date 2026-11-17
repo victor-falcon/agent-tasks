@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DEMO_REF, type ExecHome, execTask, FAKE_BIN, makeExecHome, REPO, settled, waitFor } from "./exec-helpers.ts";
+import { DEMO_REF, type ExecHome, execTask, FAKE_AGENT, FAKE_BIN, makeExecHome, REPO, settled, waitFor } from "./exec-helpers.ts";
 import { makeTask, makeTempHome, runCli, type TempHome } from "./helpers.ts";
 
 const NOW = "--now=2026-11-17T09:00:00+01:00";
-const HUB_CONFIG = { timezone: "Europe/Madrid", machine: "wsl", machines: { mac: { ssh: "mac" } } };
+const HUB_CONFIG = { timezone: "Europe/Madrid", machine: "wsl", machines: { mac: { ssh: "mac" } }, agent: { command: "bun", args: [FAKE_AGENT] }, launcher: { preset: "process" } };
 
 interface Setup {
   hub: ExecHome;
