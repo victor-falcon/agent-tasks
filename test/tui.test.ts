@@ -345,6 +345,39 @@ describe("interactive", () => {
     tui.stop();
   });
 
+  test("j/k move between a run's sections and scroll through a long open one", () => {
+    const run = scheduledRun("report", "2026-11-17T08:00:00+01:00", "succeeded", { summary: "all good" });
+    home.writeTask(makeTask({ id: "report", title: "Daily report" }));
+    writeRun(home.paths, run);
+    writeFileSync(join(home.dataDir, run.attempts[0]!.log!), Array.from({ length: 40 }, (_, i) => `log line ${i + 1}`).join("\n") + "\n");
+    const { tui, terminal } = startTui();
+    terminal.height = 12;
+    terminal.type("\r");
+    // Result, Details, Attempts, Events, Log: j twice selects Attempts.
+    terminal.type("j");
+    terminal.type("j");
+    terminal.type("\r");
+    expect(terminal.screen).toContain("Attempt 1 · ");
+    terminal.type("\r");
+    expect(terminal.screen).not.toContain("Attempt 1 · ");
+    // Down to the Log, open it: its heading goes to the top.
+    terminal.type("j");
+    terminal.type("j");
+    terminal.type("j"); // past the last section: nothing below
+    terminal.type("\r");
+    expect(terminal.screen.split("\n")[1]).toMatch(/^▾ Log/);
+    expect(terminal.screen).toContain("log line 1\n");
+    // In a long open section j scrolls a line at a time…
+    terminal.type("j");
+    expect(terminal.screen.split("\n")[1]).toBe("log line 1");
+    // …and k scrolls back up until the heading shows, then moves to Events.
+    terminal.type("k");
+    terminal.type("k");
+    terminal.type("\r");
+    expect(terminal.screen).toContain("▾ Events");
+    tui.stop();
+  });
+
   test("a run with no result yet opens its log", () => {
     const run = scheduledRun("report", "2026-11-17T08:00:00+01:00", "failed", {});
     home.writeTask(makeTask({ id: "report", title: "Daily report" }));

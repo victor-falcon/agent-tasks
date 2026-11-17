@@ -297,15 +297,7 @@ export class Tui {
   }
 
   private move(by: number): void {
-    if (this.state.view === "detail" && this.state.detail) {
-      const d = this.state.detail;
-      d.scroll = Math.max(0, Math.min(maxScroll(d, this.style, this.body), by === -Infinity ? 0 : by === Infinity ? Infinity : d.scroll + by));
-      // The top and the bottom select the first and the last section.
-      if (by === -Infinity) d.selected = 0;
-      else if (by === Infinity) d.selected = d.detail.sections.length - 1;
-      else this.followScroll();
-      return;
-    }
+    if (this.state.view === "detail" && this.state.detail) return this.moveInRun(by);
     const { list } = this.state;
     const count = this.rowsOf(list.focus);
     const current = list.cursor[list.focus];
@@ -313,48 +305,89 @@ export class Tui {
   }
 
   /**
-   * Scrolling selects the section being read: the one the top line is in.
-   * When everything fits on the screen nothing scrolls, and the selection
-   * stays where { and } put it.
+   * j/k in a run move between sections, like rows in a list. Inside an open
+   * section longer than the screen they scroll it a line at a time until the
+   * next (or previous) heading comes into view. Half pages scroll, and
+   * select the section being read; gg/G go to the first/last section.
    */
-  private followScroll(): void {
-    const d = this.state.detail;
-    if (!d || maxScroll(d, this.style, this.body) === 0) return;
-    const { starts } = layoutDetail(d, this.style);
-    d.selected = Math.max(0, starts.filter((line) => line <= d.scroll).length - 1);
+  private moveInRun(by: number): void {
+    const d = this.state.detail!;
+    const last = d.detail.sections.length - 1;
+    const max = maxScroll(d, this.style, this.body);
+    if (by === -Infinity || by === Infinity) {
+      d.selected = by < 0 ? 0 : last;
+      d.scroll = by < 0 ? 0 : max;
+      return;
+    }
+    if (Math.abs(by) === 1) {
+      const { starts } = layoutDetail(d, this.style);
+      const onScreen = (line: number) => line >= d.scroll && line < d.scroll + this.body;
+      if (by > 0) {
+        const next = starts[d.selected + 1];
+        if (next !== undefined && onScreen(next)) {
+          d.selected++;
+          this.revealSelected();
+        } else d.scroll = Math.min(max, d.scroll + 1);
+      } else {
+        const here = starts[d.selected]!;
+        if (d.selected > 0 && (onScreen(here) || here > d.scroll)) {
+          d.selected--;
+          this.revealSelected(true);
+        } else d.scroll = Math.max(0, d.scroll - 1);
+      }
+      return;
+    }
+    d.scroll = Math.max(0, Math.min(max, d.scroll + by));
+    // Half a page: the selection follows the section the top line is in.
+    if (max > 0) {
+      const { starts } = layoutDetail(d, this.style);
+      d.selected = Math.max(0, starts.filter((line) => line <= d.scroll).length - 1);
+    }
   }
 
   private jumpSection(direction: 1 | -1): void {
     const d = this.state.detail;
     if (!d) return;
     d.selected = Math.max(0, Math.min(d.detail.sections.length - 1, d.selected + direction));
-    this.scrollToSelected();
+    this.revealSelected();
   }
 
-  /** Puts the selected section's heading at the top (as far as the scroll goes). */
-  private scrollToSelected(): void {
+  /**
+   * Scrolls as little as possible to show the selected section: its heading
+   * and as much of what it holds as fits below it, or (`fromBelow`, moving
+   * up into a long section) its end, to read it upwards.
+   */
+  private revealSelected(fromBelow = false): void {
     const d = this.state.detail;
     if (!d) return;
-    const { starts } = layoutDetail(d, this.style);
-    d.scroll = Math.min(starts[d.selected] ?? 0, maxScroll(d, this.style, this.body));
+    const { lines, starts } = layoutDetail(d, this.style);
+    const head = starts[d.selected] ?? 0;
+    const next = starts[d.selected + 1];
+    // The section ends before the blank line that sets the next one apart.
+    const end = next === undefined ? lines.length - 1 : lines[next - 1] === "" ? next - 2 : next - 1;
+    let scroll = d.scroll;
+    if (fromBelow) {
+      if (head < scroll) scroll = Math.max(head, Math.min(scroll, end - this.body + 1));
+    } else {
+      if (end >= scroll + this.body) scroll = end - this.body + 1;
+      if (head < scroll) scroll = head;
+    }
+    d.scroll = Math.max(0, Math.min(scroll, maxScroll(d, this.style, this.body)));
   }
 
   private toggleSection(): void {
     const d = this.state.detail;
     const section = d?.detail.sections[d.selected];
     if (!d || !section) return;
-    const opening = !isOpen(d, section);
-    d.folds[section.id] = opening;
-    // Opening a section scrolls to it; folding keeps its heading where it was.
-    if (opening) this.scrollToSelected();
-    else d.scroll = Math.min(d.scroll, maxScroll(d, this.style, this.body));
+    d.folds[section.id] = !isOpen(d, section);
+    this.revealSelected();
   }
 
   private foldAll(open: boolean): void {
     const d = this.state.detail;
     if (!d) return;
     for (const section of d.detail.sections) d.folds[section.id] = open;
-    this.scrollToSelected();
+    this.revealSelected();
   }
 
   /** The selected row: in the list, or the open run. */
