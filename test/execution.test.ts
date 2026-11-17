@@ -54,6 +54,20 @@ describe("process preset: launch → finish", () => {
     expect((await home.tick(6)).events).toEqual([expect.objectContaining({ type: "failed", run_ref: DEMO_REF })]);
   });
 
+  test("a tick between finish's result and its keep_open decision waits before reporting", async () => {
+    execTask(home, "succeed", { keep_open: "always" });
+    await home.tick(1);
+    const run = await waitFor(finished(), "finish");
+    // As if the tick read the run between finish's two writes: ended, session not settled yet.
+    const session = run.attempts[0]!.session!;
+    delete session.kept_open;
+    run.events = run.events.filter((e) => e.event !== "kept_open");
+    run.attempts[0]!.finished_at = at(5);
+    writeFileSync(join(home.paths.runsDir, "demo", "20261117T080000Z.json"), JSON.stringify(run));
+    expect((await home.tick(5.5)).events).toEqual([]);
+    expect((await home.tick(7)).events).toEqual([expect.objectContaining({ type: "succeeded", run_ref: DEMO_REF })]);
+  });
+
   test("finish twice changes nothing", async () => {
     execTask(home, "succeed");
     await home.tick(1);

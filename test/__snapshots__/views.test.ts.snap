@@ -96,6 +96,7 @@ Catch up      latest                                           ← default
 Timeout       1h                                               ← profile ~/Projects/**
 Retries       1                                                ← task
 Keep open     on_failure                                       ← default
+Notify        notifiers' own events                            ← default
 
 Agent         clc (shell)                                      ← profile ~/Projects/**
 Launcher      herdr (launch overridden)                        ← config

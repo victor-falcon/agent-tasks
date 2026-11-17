@@ -3,6 +3,7 @@ import { formatSource, type Resolution, type ResolvedKey } from "../config.ts";
 import { type Context, output } from "../context.ts";
 import { resolvePath, tildify } from "../paths.ts";
 import { loadTaskArg } from "../store.ts";
+import { formatNotify } from "./show.ts";
 import type { Command } from "./types.ts";
 
 /** How each resolved value is shown, in display order. Typed so a new key cannot be forgotten. */
@@ -14,6 +15,7 @@ const FORMATTERS: Record<ResolvedKey, (r: Resolution, ctx: Context) => string> =
   instructions: (r, ctx) => r.instructions.map((f) => tildify(f, ctx.env)).join(", ") || "(none)",
   timeout: (r) => r.timeout,
   keep_open: (r) => r.keep_open,
+  notify: (r) => formatNotify(r.notify),
   retries: (r) => String(r.retries),
   catch_up: (r) => r.catch_up,
   max_delay: (r) => r.max_delay,

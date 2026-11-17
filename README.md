@@ -123,6 +123,23 @@ agent-tasks add --title "Release notes" --at 2026-12-01T09:00:00+01:00 --instruc
 | `agent-tasks run <id>` | Run a task now, outside its schedule. |
 | `agent-tasks edit`, `pause`, `resume`, `rm` | Change, pause, resume or archive a task. |
 
+Per task, you choose what happens when it finishes:
+
+```sh
+# Tell me when it succeeds or fails, with the agent's summary, and leave its
+# session open so I can keep talking to the agent.
+agent-tasks edit weekly-deps-report --notify succeeded,failed --keep-open always
+agent-tasks edit nightly-cleanup --notify none   # never notify for this task
+agent-tasks edit nightly-cleanup --notify ""     # unset: inherit (profile, defaults, notifiers' events)
+```
+
+`--notify` replaces every notifier's `events` for that task's runs (events:
+`launched`, `succeeded`, `failed`, `timed_out`, `missed`, `blocked`), so list
+`failed` too if you still want failure alerts. A
+`succeeded` or `failed` notification carries the summary the agent passed to
+`agent-tasks finish` and, when the session was kept open, the
+`agent-tasks attach <run_ref>` to get back to it.
+
 Every command takes `--json`. `agent-tasks help <command>` explains each one,
 with its filters (`agent-tasks list --status failed`, `agent-tasks runs --since 24h`,
 `agent-tasks log <run_ref> --raw`).
@@ -150,6 +167,12 @@ The full reference (precedence, profiles, instructions, templates, custom
 skills) is in [doc/roadmap/user-config.md](doc/roadmap/user-config.md), and
 the launcher commands and variables in
 [doc/roadmap/launcher.md](doc/roadmap/launcher.md).
+
+Notifications go to the `notifiers` in the config (a desktop notification by
+default, for `failed`, `timed_out` and `blocked`; or any command, e.g. one that
+sends a message to your phone). A task's `notify`, a profile's or
+`defaults.notify` picks which of a task's run events they send; see
+[doc/roadmap/runner.md](doc/roadmap/runner.md#notifications-notifiers).
 
 ## Presets
 

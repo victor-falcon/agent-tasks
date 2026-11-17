@@ -26,9 +26,12 @@ context: everything you need is in what `agent-tasks task` prints.
    ```
 
    `succeeded` only when the task's done criteria are met. The summary is one
-   or two sentences a person reads later; put long output in a file and pass
+   or two sentences a person reads later, and may be sent to them as a
+   notification (cut at 300 characters): lead with the result; put long output in a file and pass
    it with `--output-file`. `finish` saves the result and closes this session,
-   so run it last. If `agent-tasks task` itself fails, still run `finish` with
+   so run it last. If it says the session was kept open (`keep_open`), the
+   person may come back to it to talk about the result: stay available and
+   answer them. If `agent-tasks task` itself fails, still run `finish` with
    `--status failed` and the error as the summary.
 
 Rules:

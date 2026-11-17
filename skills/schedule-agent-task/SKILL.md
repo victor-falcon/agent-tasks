@@ -63,9 +63,28 @@ JSON
 ```
 
 Other options: `--timeout 45m`, `--retries 1`, `--catch-up latest|all|none`,
-`--max-delay 2h`, `--keep-open always|on_failure|never`. Leave them unset
-unless the user asks: the user's config provides the defaults (agent,
-launcher, profiles).
+`--max-delay 2h`. Leave them unset unless the user asks: the user's config
+provides the defaults (agent, launcher, profiles).
+
+Two per-task options decide what happens when a run ends. Offer them when the
+user's request hints at it ("let me know", "tell me what it found", "I want to
+follow up with it"), and use them when the user asks:
+
+- `--notify <events>`: be told about this task's runs, with the agent's
+  summary in the message. `--notify succeeded,failed` for "tell me when it's
+  done"; `--notify failed,timed_out` for "only if something goes wrong";
+  `--notify none` for a task that must stay silent. Unset, the user's
+  notifiers decide (by default only failures). The list replaces those
+  defaults for this task, so keep `failed` in it unless the user wants
+  silence on failure too. Events: `launched`,
+  `succeeded`, `failed`, `timed_out`, `missed`, `blocked`.
+- `--keep-open always|on_failure|never`: whether the agent's session stays
+  open after it finishes. `always` when the user wants to keep talking to the
+  agent afterwards (the notification then says how to get back to it:
+  `agent-tasks attach <run_ref>`); the default is `on_failure`.
+
+Both can be changed later with `agent-tasks edit <id>` (`--notify ""` goes
+back to the default from the user's config).
 
 Then tell the user the task **id** and the **next runs** that `add` printed.
 
@@ -75,6 +94,7 @@ Then tell the user the task **id** and the **next runs** that `add` printed.
 agent-tasks list                   # tasks, next run, last status
 agent-tasks show <id>              # definition, resolved settings, recent runs
 agent-tasks edit <id> --cron "0 8 * * 1-5"   # same flags as add
+agent-tasks edit <id> --notify succeeded,failed --keep-open always
 agent-tasks pause <id>             # stop scheduling (resume <id> to restart)
 agent-tasks resume <id>
 agent-tasks rm <id>                # archive it (its history is kept)

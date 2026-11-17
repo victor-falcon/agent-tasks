@@ -71,7 +71,7 @@ describe("loadConfig", () => {
       'runner.every: must be a duration such as 15m, 2h or 1d (got "soon")',
       "agent.command: must be a non-empty string",
       "profiles[0].match: must be a non-empty string",
-      "profiles[1].colour: unknown field (allowed: match, agent, launcher, skill, env, instructions, catch_up, max_delay, timeout, keep_open)",
+      "profiles[1].colour: unknown field (allowed: match, agent, launcher, skill, env, instructions, catch_up, max_delay, timeout, keep_open, notify)",
       "profiles[1].keep_open: must be one of: always, on_failure, never",
       "defaults.catch_up: must be one of: latest, all, none",
     ]);
@@ -105,6 +105,25 @@ describe("resolveFor precedence: task > first matching profile > config root > d
     ],
     defaults: { catch_up: "all", timeout: "30m", keep_open: "never" },
   };
+
+  test("notify: task > profile > config defaults > null (each notifier's events)", () => {
+    expect(resolveFor(makeTask({ cwd: "/srv/app" }), load(config)).notify).toBeNull();
+    const withNotify: UserConfig = { ...config, profiles: [{ match: "~/Projects/**", notify: ["succeeded"] }], defaults: { notify: ["failed"] } };
+    const fromProfile = resolveFor(makeTask({ cwd: "~/Projects/side" }), load(withNotify));
+    expect(fromProfile.notify).toEqual(["succeeded"]);
+    expect(formatSource(fromProfile.sources.notify)).toBe("profile ~/Projects/**");
+    const fromDefaults = resolveFor(makeTask({ cwd: "/srv/app" }), load(withNotify));
+    expect(fromDefaults.notify).toEqual(["failed"]);
+    expect(formatSource(fromDefaults.sources.notify)).toBe("config defaults");
+    // [] is a value (never notify), not "unset".
+    const never = resolveFor(makeTask({ cwd: "~/Projects/side", notify: [] }), load(withNotify));
+    expect(never.notify).toEqual([]);
+    expect(formatSource(never.sources.notify)).toBe("task");
+    expect(configErrors({ profiles: [{ match: "~/x/**", notify: ["anomaly"] }], defaults: { notify: "failed" } })).toEqual([
+      "profiles[0].notify: anomaly is not about a task's runs; choose it in a notifier's `events` instead",
+      "defaults.notify: must be an array of events (launched, succeeded, failed, timed_out, missed, blocked), [] for never",
+    ]);
+  });
 
   test("first matching profile wins over later ones and the root", () => {
     const r = resolveFor(makeTask({ cwd: "~/Projects/work/api" }), load(config));

@@ -120,6 +120,37 @@ the runner sends events to the notifiers in the config:
   `blocked`, `anomaly`, `runner_recovered` (the heartbeat returns after a gap).
 - They are grouped per tick and not repeated: each event is marked on the
   occurrence (`events[].notified`).
+- A single `succeeded` or `failed` run carries the summary the agent passed
+  to `agent-tasks finish --summary` (up to 300 characters) as its message and,
+  when `keep_open` left the session open, a line
+  `Session still open: agent-tasks attach <run_ref>`. Several runs grouped
+  in one tick keep the short form (the task titles).
+
+### Per task: `notify`
+
+Each notifier's `events` is the default for every task. A task can say which
+of its run events to notify instead, with `notify` (`agent-tasks add|edit
+--notify succeeded,failed`):
+
+| `notify` | For this task's run events |
+|---|---|
+| `null` (unset) | each notifier sends the events in its own `events` |
+| `["succeeded", "failed"]` | every notifier sends exactly these, ignoring its `events` |
+| `[]` (`--notify none`) | nothing is sent |
+
+Only run events can be listed (`launched`, `succeeded`, `failed`,
+`timed_out`, `missed`, `blocked`); `anomaly` and `runner_recovered` are not
+about a task's runs and stay with the notifiers' `events`. The list goes to
+every notifier: there is no per-task routing to one notifier, and a list
+without `failed` also silences failure alerts for that task. `--notify ""`
+resets the task to `null`, which inherits the profile's or
+`defaults.notify` when set. Like `keep_open` and `timeout`, it resolves
+task > first matching profile > `defaults.notify` > `null`, and
+`agent-tasks show` / `agent-tasks config resolve` print the value and where
+it came from.
+
+With `--keep-open always` as well, the user is told the result and can open
+the session (`agent-tasks attach <run_ref>`) to keep talking to the agent.
 
 ## Supervisor (optional)
 

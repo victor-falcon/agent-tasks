@@ -29,6 +29,17 @@ describe("task validation", () => {
     expect(taskErrors(makeTask({ agent: { command: "clc", args: ["-p"], shell: true } }))).toEqual([]);
   });
 
+  test("notify: run events, [] for never, null for the notifiers' own events", () => {
+    expect(taskErrors(makeTask({ notify: ["succeeded", "failed"] }))).toEqual([]);
+    expect(taskErrors(makeTask({ notify: [] }))).toEqual([]);
+    expect(taskErrors(makeTask({ notify: null }))).toEqual([]);
+    expect(taskErrors({ ...makeTask(), notify: "failed" })[0]).toStartWith("notify: must be an array of events (launched, succeeded, failed, timed_out, missed, blocked)");
+    expect(taskErrors({ ...makeTask(), notify: ["failed", "anomaly"] })).toEqual(["notify: anomaly is not about a task's runs; choose it in a notifier's `events` instead"]);
+    expect(taskErrors({ ...makeTask(), notify: ["anomaly", "runner_recovered"] })).toEqual(["notify: anomaly, runner_recovered are not about a task's runs; choose them in a notifier's `events` instead"]);
+    expect(taskErrors({ ...makeTask(), notify: ["done"] })).toEqual(['notify: unknown event "done" (allowed: launched, succeeded, failed, timed_out, missed, blocked)']);
+    expect(taskErrors({ ...makeTask(), notify: ["failed", "failed"] })).toEqual(["notify: lists an event twice"]);
+  });
+
   test("reports every problem with its path", () => {
     const errors = taskErrors({
       ...makeTask(),
@@ -42,7 +53,7 @@ describe("task validation", () => {
       extra: 1,
     });
     expect(errors).toEqual([
-      "extra: unknown field (allowed: id, title, description, cwd, instructions, schedule, agent, catch_up, max_delay, timeout, retries, keep_open, enabled, created_at, created_by, updated_at, schedule_since)",
+      "extra: unknown field (allowed: id, title, description, cwd, instructions, schedule, agent, catch_up, max_delay, timeout, retries, keep_open, notify, enabled, created_at, created_by, updated_at, schedule_since)",
       "id: must be a slug: lowercase letters, digits and dashes (max 64 chars)",
       "title: must be a non-empty string",
       'schedule.timezone: must be an IANA time zone such as Europe/Madrid (got "Nowhere/City")',

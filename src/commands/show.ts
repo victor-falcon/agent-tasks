@@ -21,6 +21,12 @@ export function formatAgent(agent: Resolution["agent"]): string {
   return [agent.command, ...agent.args].join(" ") + (agent.shell ? " (shell)" : "");
 }
 
+/** `succeeded, failed`, `none` for `[]`, or the notifiers' own events for null. */
+export function formatNotify(notify: Resolution["notify"]): string {
+  if (notify === null) return "notifiers' own events";
+  return notify.length === 0 ? "none" : notify.join(", ");
+}
+
 /** `herdr`, `herdr (launch, close overridden)`, or `custom (launch, close)`. */
 export function formatLauncher(launcher: LauncherConfig): string {
   const commands = Object.keys(launcher).filter((k) => k !== "preset");
@@ -85,6 +91,7 @@ export function renderTask(ctx: Context, style: Style, { overview, recent, perso
       setting("Timeout", "timeout", resolution.timeout),
       setting("Retries", "retries", String(resolution.retries)),
       setting("Keep open", "keep_open", resolution.keep_open),
+      setting("Notify", "notify", formatNotify(resolution.notify)),
       [],
       setting("Agent", "agent", formatAgent(resolution.agent)),
       setting("Launcher", "launcher", formatLauncher(resolution.launcher)),

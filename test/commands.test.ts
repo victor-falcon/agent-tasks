@@ -69,11 +69,18 @@ describe("add", () => {
       created_at: "2026-11-16T15:00:00+01:00",
       updated_at: "2026-11-16T15:00:00+01:00",
       created_by: { cwd: "~/Projects/foo", session: null },
+      notify: null,
       schedule_since: null,
     });
     expect(next_runs).toEqual(["2026-11-23T09:00:00+01:00", "2026-11-30T09:00:00+01:00", "2026-12-07T09:00:00+01:00"]);
     expect(readStoredTask("weekly-deps-report")).toEqual(task);
     expect(taskErrors(task)).toEqual([]);
+  });
+
+  test("--notify on add", async () => {
+    const r = await runCli(["add", "--title", "Notified", ...cronFlags, "--notify", "succeeded,failed", "--keep-open", "always", "--json", NOW], home, project);
+    expect(r.code).toBe(0);
+    expect(r.json().task).toMatchObject({ notify: ["succeeded", "failed"], keep_open: "always" });
   });
 
   test("records the creating terminal from $HC_TERMINAL_ID and accepts --cwd and --id", async () => {
@@ -254,6 +261,21 @@ describe("edit", () => {
     expect(bad.code).toBe(1);
     expect(bad.json().error.details).toEqual(["catch_up: must be one of: latest, all, none"]);
     expect(readStoredTask("weekly-report").catch_up).toBeNull();
+  });
+
+  test("--notify sets a list, none sets [], an empty value resets to null", async () => {
+    const set = await runCli(["edit", "weekly-report", "--notify", "succeeded, failed", "--json", NOW], home);
+    expect(set.code).toBe(0);
+    expect(readStoredTask("weekly-report").notify).toEqual(["succeeded", "failed"]);
+    await runCli(["edit", "weekly-report", "--notify", "none", "--json", NOW], home);
+    expect(readStoredTask("weekly-report").notify).toEqual([]);
+    await runCli(["edit", "weekly-report", "--notify", "", "--json", NOW], home);
+    expect(readStoredTask("weekly-report").notify).toBeNull();
+    const bad = await runCli(["edit", "weekly-report", "--notify", "succeeded,anomaly", "--json", NOW], home);
+    expect(bad.code).toBe(1);
+    expect(bad.json().error.details).toEqual(["notify: anomaly is not about a task's runs; choose it in a notifier's `events` instead"]);
+    const resolved = await runCli(["config", "resolve", "weekly-report", "--json", NOW], home);
+    expect(resolved.json().values.notify).toBeNull();
   });
 
   test("a JSON patch from --file or stdin; schedule merges when the type stays", async () => {

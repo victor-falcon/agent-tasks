@@ -2,6 +2,7 @@ import { Cron } from "croner";
 import { isDuration } from "./duration.ts";
 import { ValidationError } from "./errors.ts";
 import { isIsoTimestamp, isValidTimezone } from "./time.ts";
+import { NOTIFY_EVENTS, TASK_NOTIFY_EVENTS, type TaskNotifyEvent } from "./notifiers/types.ts";
 
 // ---------------------------------------------------------------------------
 // Types (see doc/roadmap/phase-1-core.md, "Data model")
@@ -73,6 +74,11 @@ export interface Task {
   timeout?: string | null;
   retries?: number;
   keep_open?: KeepOpen | null;
+  /**
+   * Which of this task's run events every notifier sends, instead of each
+   * notifier's own `events`. Null: the notifiers' `events` decide. `[]`: never.
+   */
+  notify?: TaskNotifyEvent[] | null;
   enabled: boolean;
   created_at: string;
   created_by?: { cwd?: string; session?: string | null } | null;
@@ -208,6 +214,23 @@ export function checkTimezone(c: Checker, value: unknown, { nullable = false } =
   if (typeof value !== "string" || !isValidTimezone(value)) c.fail(`must be an IANA time zone such as Europe/Madrid (got ${JSON.stringify(value)})`);
 }
 
+/** A task's (or profile's, or default) `notify`: a list of run events, possibly empty. */
+export function checkNotify(c: Checker, value: unknown, { nullable = false } = {}): void {
+  if (value === undefined || (value === null && nullable)) return;
+  if (!Array.isArray(value)) {
+    c.fail(`must be an array of events (${TASK_NOTIFY_EVENTS.join(", ")}), [] for never${nullable ? ", or null for the notifiers' own events" : ""}`);
+    return;
+  }
+  const global = value.filter((e) => (NOTIFY_EVENTS as readonly unknown[]).includes(e) && !(TASK_NOTIFY_EVENTS as readonly unknown[]).includes(e));
+  if (global.length > 0) {
+    c.fail(`${global.join(", ")} ${global.length > 1 ? "are" : "is"} not about a task's runs; choose ${global.length > 1 ? "them" : "it"} in a notifier's \`events\` instead`);
+    return;
+  }
+  const unknown = value.filter((e) => !(TASK_NOTIFY_EVENTS as readonly unknown[]).includes(e));
+  if (unknown.length > 0) c.fail(`unknown event${unknown.length > 1 ? "s" : ""} ${unknown.map((e) => JSON.stringify(e)).join(", ")} (allowed: ${TASK_NOTIFY_EVENTS.join(", ")})`);
+  else if (new Set(value).size !== value.length) c.fail("lists an event twice");
+}
+
 export function checkAgent(c: Checker, value: unknown, { nullable = false } = {}): void {
   if (value === undefined || (value === null && nullable)) return;
   if (typeof value === "string") {
@@ -278,6 +301,7 @@ export const TASK_FIELDS = [
   "timeout",
   "retries",
   "keep_open",
+  "notify",
   "enabled",
   "created_at",
   "created_by",
@@ -311,6 +335,7 @@ export function taskErrors(value: unknown): string[] {
     c.at("retries").fail("must be an integer >= 0");
   }
   checkEnum(c.at("keep_open"), value.keep_open, KEEP_OPEN_VALUES, { nullable: true });
+  checkNotify(c.at("notify"), value.notify, { nullable: true });
   if (typeof value.enabled !== "boolean") c.at("enabled").fail("must be a boolean");
   checkTimestamp(c.at("created_at"), value.created_at);
   checkTimestamp(c.at("updated_at"), value.updated_at);

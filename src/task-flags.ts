@@ -25,6 +25,7 @@ export const TASK_FLAG_OPTIONS = {
   timeout: { type: "string" },
   retries: { type: "string" },
   "keep-open": { type: "string" },
+  notify: { type: "string" },
   agent: { type: "string" },
 } as const;
 
@@ -43,6 +44,8 @@ export const TASK_FLAGS_USAGE = `  --title <text>              Title
   --timeout <duration>        Stop the subagent after this long, e.g. 45m
   --retries <n>               Extra attempts after a failure
   --keep-open <mode>          always | on_failure | never
+  --notify <events>           Run events every notifier sends for this task,
+                              e.g. succeeded,failed (none: never notify)
   --agent <command>           Agent command for this task (normally from config)`;
 
 /** Resolves a task folder against the command's cwd, checks it exists and stores it with `~`. */
@@ -75,6 +78,17 @@ function emptyToNull(value: string): string | null {
 }
 
 /**
+ * `--notify succeeded,failed` → a list, `--notify none` → `[]` (never),
+ * `--notify ""` → null (each notifier's own events). The events are checked
+ * with the whole task.
+ */
+export function parseNotify(value: string): Task["notify"] {
+  if (value.trim() === "") return null;
+  if (value.trim().toLowerCase() === "none") return [];
+  return value.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean) as NonNullable<Task["notify"]>;
+}
+
+/**
  * Applies the field flags to a (possibly partial) task, in place. Reads
  * `--instructions-file` (stdin for "-"). Validation happens later, on the
  * whole task, so only flag combinations are checked here.
@@ -94,6 +108,7 @@ export async function applyTaskFlags(ctx: Context, task: Partial<Task>, values: 
   if (values["max-delay"] !== undefined) task.max_delay = emptyToNull(values["max-delay"]);
   if (values.timeout !== undefined) task.timeout = emptyToNull(values.timeout);
   if (values["keep-open"] !== undefined) task.keep_open = emptyToNull(values["keep-open"]) as Task["keep_open"];
+  if (values.notify !== undefined) task.notify = parseNotify(values.notify);
   if (values.agent !== undefined) task.agent = emptyToNull(values.agent);
   if (values.retries !== undefined) task.retries = parseCount("--retries", values.retries, 0);
 
@@ -131,6 +146,7 @@ export function completeTask(task: Partial<Task>): Task {
     timeout: null,
     retries: 0,
     keep_open: null,
+    notify: null,
     schedule_since: null,
     ...task,
     schedule,
