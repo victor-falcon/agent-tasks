@@ -28,6 +28,8 @@ example if it doesn't exist.
 ```json
 {
   "data_dir": "~/.local/share/agent-tasks",
+  "machine": "linux",
+  "machines": { "mac": { "ssh": "mac-mini" } },
   "timezone": "Europe/Madrid",
 
   "runner": { "every": "5m" },
@@ -69,6 +71,17 @@ example if it doesn't exist.
 }
 ```
 
+- `machine`: this machine's name (lowercase letters, digits and dashes;
+  `local` when unset). New tasks run here unless `add --machine` says
+  otherwise.
+- `machines`: on the hub (the machine that holds the data and runs the
+  runner), the other machines tasks can run on, each with exactly one of
+  `"ssh": "<host alias>"` or `"local": true`. This machine's own name is
+  always local, listed or not. Multi-machine support is in progress: tasks
+  already record their machine, but the runner still launches every task
+  here.
+- `hub`: only on a client machine, `{ "ssh": "<host alias>" }` to reach the
+  hub. A config with `hub` is a client and has no `machines`. Not used yet.
 - `runner`: how often it ticks. See [runner.md](runner.md).
 - `launcher`: the commands that launch, watch and close each subagent
   (create the sub-tab in Herdr, etc.). A preset from the repo, partly

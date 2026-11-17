@@ -66,6 +66,11 @@ Other options: `--timeout 45m`, `--retries 1`, `--catch-up latest|all|none`,
 `--max-delay 2h`. Leave them unset unless the user asks: the user's config
 provides the defaults (agent, launcher, profiles).
 
+`--machine <name>` picks the machine the task runs on. Pass it only when the
+user names one ("on the mac, every morning…"); otherwise leave it out and the
+task runs on this machine. `agent-tasks list` shows each task's machine once
+there is more than one.
+
 Two per-task options decide what happens when a run ends. Offer them when the
 user's request hints at it ("let me know", "tell me what it found", "I want to
 follow up with it"), and use them when the user asks:

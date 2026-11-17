@@ -241,7 +241,7 @@ describe("--json", () => {
       "blocked review-pr-123",
       "missed inbox-triage",
     ]);
-    expect(s.next[0]).toEqual({ task_id: "sentry-summary", at: "2026-11-17T11:00:00+01:00", schedule: "every hour" });
+    expect(s.next[0]).toEqual({ task_id: "sentry-summary", machine: "local", at: "2026-11-17T11:00:00+01:00", schedule: "every hour" });
   });
 
   test("list rows carry the history and the indicator", async () => {

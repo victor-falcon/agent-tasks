@@ -118,5 +118,7 @@ Phase 2 (details in [phase-2-cli-ui.md](phase-2-cli-ui.md))
 ## Out of scope for now
 
 - Dependencies between tasks, queues or priorities.
-- Multiple machines: the model allows it (`machine` field), but it is not implemented.
+- Multiple machines: in progress. Tasks carry a `machine` and the config has
+  `machine`, `machines` (on the hub) and `hub` (on clients); forwarding
+  commands from clients and launching on other machines are not implemented yet.
 - Graphical interface (see [future-herdr-panel.md](future-herdr-panel.md)).

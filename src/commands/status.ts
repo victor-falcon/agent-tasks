@@ -7,7 +7,7 @@ import { renderTable, truncate } from "../output/table.ts";
 import { agendaTime, clockTime, relativeTime, sameDay } from "../output/time.ts";
 import type { RunnerHealth } from "../runner-health.ts";
 import { type AttentionItem, buildStatus, NEXT_COUNT, type OfflineGap, type StatusReport } from "../status-report.ts";
-import { displayTimezone, warnCorrupt } from "../task-info.ts";
+import { displayTimezone, showMachineColumn, warnCorrupt } from "../task-info.ts";
 import type { Command } from "./types.ts";
 
 const MISSED_TIMES_SHOWN = 5;
@@ -48,20 +48,22 @@ function nowLine(style: Style, report: StatusReport): string {
   return [style.paint(running > 0 ? "cyan" : undefined, `${running} running`), style.paint(blocked > 0 ? "magenta" : undefined, `${blocked} blocked`)].join(" · ");
 }
 
-function attentionRows(style: Style, items: readonly AttentionItem[], tz: string, now: Date): string[][] {
+function attentionRows(style: Style, items: readonly AttentionItem[], tz: string, now: Date, showMachine: boolean): string[][] {
+  const machine = (item: AttentionItem) => (showMachine ? [style.paint("dim", item.machine ?? "")] : []);
   return items.map((item) => {
     if (item.kind === "missed") {
       const times = item.slots.slice(-MISSED_TIMES_SHOWN).map((s) => agendaTime(new Date(s), tz, now));
       const more = item.slots.length > MISSED_TIMES_SHOWN ? ", …" : "";
-      return [paintMark(style, RUN_MARKS.missed), item.task_id, `${item.slots.length} missed`, `(${times.join(", ")}${more})`, item.reason ?? ""];
+      return [paintMark(style, RUN_MARKS.missed), item.task_id, ...machine(item), `${item.slots.length} missed`, `(${times.join(", ")}${more})`, item.reason ?? ""];
     }
     const mark = RUN_MARKS[item.status];
     const summary = item.summary ? `"${truncate(item.summary, 60)}"` : "";
-    return [paintMark(style, mark), item.ref, style.paint(mark.color, item.status), summary, relativeTime(new Date(item.at), now)];
+    return [paintMark(style, mark), item.ref, ...machine(item), style.paint(mark.color, item.status), summary, relativeTime(new Date(item.at), now)];
   });
 }
 
-export function renderStatus(style: Style, report: StatusReport, tz: string, now: Date): string {
+/** `showMachine` adds each task's machine to the attention and upcoming rows (see `showMachineColumn`). */
+export function renderStatus(style: Style, report: StatusReport, tz: string, now: Date, showMachine = false): string {
   const heading = (text: string) => style.paint("bold", text);
   const lines = [
     renderTable(
@@ -74,7 +76,7 @@ export function renderStatus(style: Style, report: StatusReport, tz: string, now
     ),
   ];
   if (report.attention.length > 0) {
-    lines.push(heading("Attention"), renderTable(attentionRows(style, report.attention, tz, now), { header: false, indent: "  " }));
+    lines.push(heading("Attention"), renderTable(attentionRows(style, report.attention, tz, now, showMachine), { header: false, indent: "  " }));
   }
   if (report.errors.length > 0) lines.push(style.paint("yellow", `${report.errors.length} file${report.errors.length === 1 ? "" : "s"} could not be read (see the warnings above)`));
   if (report.tasks === 0) lines.push("No tasks yet. Create one with: agent-tasks add --title … --cron … --instructions …");
@@ -83,7 +85,7 @@ export function renderStatus(style: Style, report: StatusReport, tz: string, now
     lines.push(
       heading("Upcoming"),
       renderTable(
-        report.next.map((n) => [agendaTime(new Date(n.at), tz, now), n.task_id, style.paint("dim", n.schedule)]),
+        report.next.map((n) => [agendaTime(new Date(n.at), tz, now), n.task_id, ...(showMachine ? [style.paint("dim", n.machine)] : []), style.paint("dim", n.schedule)]),
         { header: false, indent: "  " },
       ),
     );
@@ -94,11 +96,13 @@ export function renderStatus(style: Style, report: StatusReport, tz: string, now
 const status: Command = {
   name: "status",
   summary: "Is everything fine? Runner, last 24h, what needs attention, what's next",
-  usage: `Usage: agent-tasks status
+  usage: `Usage: agent-tasks status [--machine <name>]
 
 One screen: whether the runner is alive (from its heartbeat), what happened
 in the last 24 hours, what is running now, what needs attention and the next
-run of up to ${NEXT_COUNT} tasks, soonest first.
+run of up to ${NEXT_COUNT} tasks, soonest first. With --machine, only the tasks
+that run on that machine count. Once more than one machine is involved, each
+task's machine is shown next to it.
 
 Under "Attention":
   ✕  a task (not paused) whose latest result failed or timed out, for up to 7 days
@@ -109,11 +113,14 @@ Exit code: 0 when the runner is alive, nothing needs attention and every file
 could be read; ${EXIT_ATTENTION} otherwise. So it works in scripts and status bars
 (--json too).`,
   run(ctx, args) {
-    parseCommandArgs(args, {}, { maxPositionals: 0 });
+    const { values } = parseCommandArgs(args, { machine: { type: "string" } }, { maxPositionals: 0 });
     const health = runnerBanner(ctx);
-    const report = buildStatus(ctx, health);
+    const report = buildStatus(ctx, health, { machine: values.machine });
     warnCorrupt(ctx, report.errors.map((m) => new Error(m)));
-    output(ctx, report, () => renderStatus(stdoutStyle(ctx), report, displayTimezone(ctx), ctx.now));
+    output(ctx, report, () => {
+      const machines = [...report.next, ...report.attention].flatMap((i) => (i.machine === null ? [] : [{ machine: i.machine }]));
+      return renderStatus(stdoutStyle(ctx), report, displayTimezone(ctx), ctx.now, showMachineColumn(ctx.config.config, machines));
+    });
     return report.ok ? 0 : EXIT_ATTENTION;
   },
 };

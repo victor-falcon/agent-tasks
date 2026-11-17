@@ -21,6 +21,7 @@ function task(id: string, title: string, schedule: Task["schedule"], extra: Part
     title,
     description: null,
     cwd: "~/Projects/foo",
+    machine: "local",
     instructions: `Do ${title.toLowerCase()}.`,
     schedule,
     agent: null,

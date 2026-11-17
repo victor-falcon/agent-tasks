@@ -88,6 +88,7 @@ Details of a run: agent-tasks log <run>
 exports[`with every status show 1`] = `
 "◐ Sentry summary (sentry-summary) · active
 
+Machine       local
 Folder        ~/Projects/foo
 Schedule      every hour  (cron "0 * * * *" in Europe/Madrid)
 Time zone     Europe/Madrid                                    ← task

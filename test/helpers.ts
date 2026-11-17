@@ -68,6 +68,7 @@ export function makeTask(overrides: Partial<Task> = {}): Task {
     title: "Weekly report",
     description: null,
     cwd: "~/Projects/foo",
+    machine: "local",
     instructions: "Write the report.",
     schedule: { type: "cron", cron: "0 9 * * 1", timezone: "Europe/Madrid", starts_at: null, until: null },
     agent: null,

@@ -17,6 +17,7 @@ import {
   isObject,
   KEEP_OPEN_VALUES,
   type KeepOpen,
+  MACHINE_NAME_RE,
   type Task,
 } from "./schema.ts";
 import { notifierErrors } from "./notifiers/config.ts";
@@ -52,9 +53,21 @@ export interface Profile {
   notify?: TaskNotifyEvent[];
 }
 
+/** How the hub reaches a machine: this machine itself, or an SSH host alias. Exactly one of the two. */
+export interface MachineEntry {
+  local?: true;
+  ssh?: string;
+}
+
 export interface UserConfig {
   $schema?: string;
   data_dir?: string;
+  /** This machine's name; `local` when unset. */
+  machine?: string;
+  /** The machines tasks can run on (on the hub). This machine's own name is implicitly local. */
+  machines?: Record<string, MachineEntry>;
+  /** Set only on clients: how to reach the hub, which holds the data and runs the runner. */
+  hub?: { ssh: string };
   timezone?: string;
   runner?: { every?: string };
   launcher?: LauncherConfig;
@@ -107,6 +120,9 @@ export const BUILTIN_DEFAULTS: Readonly<{
 const ROOT_FIELDS = [
   "$schema",
   "data_dir",
+  "machine",
+  "machines",
+  "hub",
   "timezone",
   "runner",
   "launcher",
@@ -182,6 +198,36 @@ function checkSection(c: Checker, value: unknown, fields: readonly string[]): va
   return true;
 }
 
+function checkMachineName(c: Checker, value: unknown): void {
+  if (typeof value !== "string" || !MACHINE_NAME_RE.test(value)) {
+    c.fail(`must be a machine name: lowercase letters, digits and dashes, starting with a letter (got ${JSON.stringify(value)})`);
+  }
+}
+
+function checkMachines(c: Checker, value: unknown, self: string): void {
+  if (value === undefined) return;
+  if (!isObject(value)) {
+    c.fail('must be an object of machines, e.g. { "mac": { "ssh": "mac" } }');
+    return;
+  }
+  for (const [name, entry] of Object.entries(value)) {
+    const m = c.at(name);
+    if (!MACHINE_NAME_RE.test(name)) m.fail("is not a valid machine name: lowercase letters, digits and dashes, starting with a letter");
+    if (!isObject(entry)) {
+      m.fail('must be { "local": true } or { "ssh": "<host alias>" }');
+      continue;
+    }
+    checkUnknownKeys(m, entry, ["local", "ssh"]);
+    if (entry.local !== undefined && entry.local !== true) m.at("local").fail("must be true (leave it out otherwise)");
+    checkString(m.at("ssh"), entry.ssh, { optional: true });
+    const hasLocal = entry.local === true;
+    const hasSsh = entry.ssh !== undefined;
+    if (hasLocal === hasSsh) m.fail('needs exactly one of "local": true or "ssh": "<host alias>"');
+    else if (hasLocal && name !== self) m.at("local").fail(`only this machine ("${self}", from \`machine\`) can be local`);
+    else if (hasSsh && name === self) m.at("ssh").fail(`"${name}" is this machine (from \`machine\`); it is local, not reached over SSH`);
+  }
+}
+
 /** Returns the list of problems with a config object; empty when valid. */
 export function configErrors(value: unknown): string[] {
   const c = new Checker();
@@ -191,6 +237,10 @@ export function configErrors(value: unknown): string[] {
   }
   checkUnknownKeys(c, value, ROOT_FIELDS);
   checkString(c.at("data_dir"), value.data_dir, { optional: true });
+  if (value.machine !== undefined) checkMachineName(c.at("machine"), value.machine);
+  checkMachines(c.at("machines"), value.machines, typeof value.machine === "string" ? value.machine : DEFAULT_MACHINE);
+  if (checkSection(c.at("hub"), value.hub, ["ssh"])) checkString(c.at("hub").at("ssh"), value.hub.ssh);
+  if (value.hub !== undefined && value.machines !== undefined) c.at("machines").fail("only the hub keeps the machine registry; a client (with `hub`) must not set it");
   checkTimezone(c.at("timezone"), value.timezone);
 
   if (checkSection(c.at("runner"), value.runner, ["every"])) {
@@ -236,6 +286,33 @@ export function loadConfig(file: string, dir: string, env: Env): LoadedConfig {
   const errors = configErrors(parsed);
   if (errors.length > 0) throw new ConfigError(file, errors);
   return { file, dir, exists: true, config: parsed as UserConfig, env };
+}
+
+// ---------------------------------------------------------------------------
+// Machines: one hub holds the data and runs the runner; clients reach it over SSH
+// ---------------------------------------------------------------------------
+
+/** This machine's name when the config does not set `machine`. */
+export const DEFAULT_MACHINE = "local";
+
+/** This machine's name (`machine` in the config, or `local`). */
+export function localMachine(config: UserConfig): string {
+  return config.machine ?? DEFAULT_MACHINE;
+}
+
+/** Whether this machine is the hub: any machine without a `hub` entry is one. */
+export function isHub(config: UserConfig): boolean {
+  return config.hub === undefined;
+}
+
+/** How to reach each machine tasks can run on, by name: this machine (always local) plus the registry. */
+export function knownMachines(config: UserConfig): Record<string, MachineEntry> {
+  return { ...config.machines, [localMachine(config)]: { local: true } };
+}
+
+/** Whether tasks can be given this machine: this machine or one in the registry. */
+export function isKnownMachine(config: UserConfig, name: string): boolean {
+  return Object.hasOwn(knownMachines(config), name);
 }
 
 // ---------------------------------------------------------------------------

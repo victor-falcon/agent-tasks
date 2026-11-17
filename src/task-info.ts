@@ -1,4 +1,4 @@
-import type { Resolution } from "./config.ts";
+import { isHub, knownMachines, localMachine, type Resolution, type UserConfig } from "./config.ts";
 import type { Context } from "./context.ts";
 import { parseDuration } from "./duration.ts";
 import type { DataPaths } from "./paths.ts";
@@ -158,4 +158,15 @@ export function findTask(ctx: Context, id: string): { task: Task; archived: bool
   if (taskExists(ctx.paths, id)) return { task: readTask(ctx.paths, id), archived: false };
   if (isArchived(ctx.paths, id)) return { task: readArchivedTask(ctx.paths, id), archived: true };
   throw new NotFoundError(`task "${id}" not found (run "agent-tasks list --all" to see every task)`);
+}
+
+/**
+ * Whether views name each task's machine: when the config has other machines
+ * (or this one is a client), or a task runs somewhere else. A single-machine
+ * install never sees it.
+ */
+export function showMachineColumn(config: UserConfig, tasks: readonly Pick<Task, "machine">[]): boolean {
+  if (!isHub(config) || Object.keys(knownMachines(config)).length > 1) return true;
+  const self = localMachine(config);
+  return tasks.some((t) => t.machine !== self);
 }

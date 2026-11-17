@@ -83,6 +83,7 @@ export function renderTask(ctx: Context, style: Style, { overview, recent, perso
 
   const definition = renderTable(
     [
+      ["Machine", task.machine, ""],
       ["Folder", task.cwd, ""],
       ["Schedule", `${scheduleText(task.schedule, resolution.timezone, now)}  ${style.paint("dim", `(${describeSchedule(task)})`)}`, ""],
       setting("Time zone", "timezone", resolution.timezone),

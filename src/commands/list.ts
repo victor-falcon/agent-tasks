@@ -11,7 +11,7 @@ import { paintMark, PENDING_MARK, RUN_MARKS, TASK_MARKS, type TaskMarkKind, task
 import { renderTable } from "../output/table.ts";
 import { DAY, formatSpan, whenTime } from "../output/time.ts";
 import { isDecisive, isFailure, isInProgress } from "../run-info.ts";
-import { describeSchedule, displayTimezone, TASK_STATES, type TaskState, taskOverview, warnCorrupt } from "../task-info.ts";
+import { describeSchedule, displayTimezone, showMachineColumn, TASK_STATES, type TaskState, taskOverview, warnCorrupt } from "../task-info.ts";
 import type { Command } from "./types.ts";
 
 const WEEK_MS = 7 * DAY;
@@ -27,6 +27,7 @@ export interface TaskRow {
   id: string;
   title: string;
   cwd: string;
+  machine: string;
   state: TaskState;
   /** The task at a glance: ok, running, blocked, failing, paused, once_pending, finished, archived. */
   indicator: TaskMarkKind;
@@ -62,6 +63,7 @@ function taskRow(ctx: Context, task: Task, archived: boolean): { row: TaskRow; e
       id: task.id,
       title: task.title,
       cwd: task.cwd,
+      machine: task.machine,
       state: overview.state,
       indicator: taskMarkKind(overview.state, task.schedule.type === "once", statuses),
       schedule: describeSchedule(task),
@@ -100,18 +102,27 @@ function historyCell(style: Style, { row }: ListItem): string {
   return row.history.map((s) => paintMark(style, RUN_MARKS[s])).join("");
 }
 
-/** The task table: mark, id, schedule, next, last ${HISTORY} occurrences, folder. */
-export function renderTaskList(items: readonly ListItem[], { style, now, timezone }: { style: Style; now: Date; timezone: string }): string {
+export interface TaskListOptions {
+  style: Style;
+  now: Date;
+  timezone: string;
+  /** Adds a MACHINE column (see `showMachineColumn`). */
+  showMachine?: boolean;
+}
+
+/** The task table: mark, id, schedule, next, last ${HISTORY} occurrences, folder (and machine, when asked). */
+export function renderTaskList(items: readonly ListItem[], { style, now, timezone, showMachine = false }: TaskListOptions): string {
   if (items.length === 0) return "No tasks. Create one with: agent-tasks add --title … --cron … --instructions …";
   return renderTable(
     [
-      ["", "ID", "SCHEDULE", "NEXT", `LAST ${HISTORY}`, "FOLDER"],
+      ["", "ID", "SCHEDULE", "NEXT", `LAST ${HISTORY}`, ...(showMachine ? ["MACHINE"] : []), "FOLDER"],
       ...items.map((item) => [
         paintMark(style, TASK_MARKS[item.row.indicator]),
         item.row.id,
         scheduleText(item.task.schedule, timezone, now),
         nextCell(style, item, now, timezone),
         historyCell(style, item),
+        ...(showMachine ? [item.row.machine] : []),
         item.row.cwd,
       ]),
     ],
@@ -126,15 +137,16 @@ function isInside(path: string, folder: string): boolean {
 const list: Command = {
   name: "list",
   summary: "List tasks with their next run and recent results",
-  usage: `Usage: agent-tasks list [--status <filter,…>] [--cwd <dir>] [--all]
+  usage: `Usage: agent-tasks list [--status <filter,…>] [--cwd <dir>] [--machine <name>] [--all]
 
 Shows each task with its schedule, its next run and its last ${HISTORY}
 occurrences, oldest first: ■ ok, ✕ failed or timed out, □ missed,
 ◐ running, ! blocked, - superseded or cancelled, · pending. The mark before
 the id sums the task up: ● fine, ✕ its latest result failed, ◐ running,
 ! blocked (waiting for a person), ⏸ paused, ○ one-off still to run.
-By default only active and paused tasks are listed. --json adds the 7-day
-failed and missed counts.
+By default only active and paused tasks are listed. A MACHINE column shows
+where each task runs once more than one machine is involved. --json adds the
+7-day failed and missed counts.
 
 Options:
   --status <filters>  Comma-separated. Task states: ${TASK_STATES.join(", ")}.
@@ -142,9 +154,10 @@ Options:
                      running, blocked. Values of one kind add up; the two
                      kinds combine (paused,failed: paused tasks that fail)
   --cwd <dir>         Only tasks whose working directory is <dir> or inside it
+  --machine <name>    Only tasks that run on this machine
   --all               Include finished and archived tasks`,
   run(ctx, args) {
-    const { values } = parseCommandArgs(args, { status: { type: "string" }, cwd: { type: "string" }, all: { type: "boolean" } }, { maxPositionals: 0 });
+    const { values } = parseCommandArgs(args, { status: { type: "string" }, cwd: { type: "string" }, machine: { type: "string" }, all: { type: "boolean" } }, { maxPositionals: 0 });
     const filters = values.status === undefined ? [] : parseEnumList("--status", values.status, STATUS_FILTERS);
     const results = filters.filter((f): f is ResultFilter => (RESULT_FILTERS as readonly string[]).includes(f));
     const chosenStates = filters.filter((f): f is TaskState => (TASK_STATES as readonly string[]).includes(f));
@@ -157,6 +170,7 @@ Options:
     const errors: Error[] = [...tasks.errors, ...archived.errors];
     const items: ListItem[] = [];
     const add = (task: Task, isArchived: boolean) => {
+      if (values.machine !== undefined && task.machine !== values.machine) return;
       if (cwdFilter !== undefined && !isInside(resolvePath(task.cwd, ctx.env, ctx.cwd), cwdFilter)) return;
       const { row, errors: runErrors } = taskRow(ctx, task, isArchived);
       errors.push(...runErrors);
@@ -169,7 +183,12 @@ Options:
     runnerBanner(ctx);
     warnCorrupt(ctx, errors);
     output(ctx, { tasks: items.map((i) => i.row), errors: errors.map((e) => e.message) }, () =>
-      renderTaskList(items, { style: stdoutStyle(ctx), now: ctx.now, timezone: displayTimezone(ctx) }),
+      renderTaskList(items, {
+        style: stdoutStyle(ctx),
+        now: ctx.now,
+        timezone: displayTimezone(ctx),
+        showMachine: showMachineColumn(ctx.config.config, items.map((i) => i.task)),
+      }),
     );
   },
 };

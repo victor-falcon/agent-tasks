@@ -66,7 +66,7 @@ describe("loadConfig", () => {
       typo: true,
     });
     expect(errors).toEqual([
-      "typo: unknown field (allowed: $schema, data_dir, timezone, runner, launcher, agent, skill, profiles, instructions, notifiers, supervisor, defaults)",
+      "typo: unknown field (allowed: $schema, data_dir, machine, machines, hub, timezone, runner, launcher, agent, skill, profiles, instructions, notifiers, supervisor, defaults)",
       'timezone: must be an IANA time zone such as Europe/Madrid (got "Mars/Olympus")',
       'runner.every: must be a duration such as 15m, 2h or 1d (got "soon")',
       "agent.command: must be a non-empty string",
