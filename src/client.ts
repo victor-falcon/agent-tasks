@@ -8,9 +8,9 @@ import { LIST_OPTIONS } from "./commands/list.ts";
 import { localMachine } from "./config.ts";
 import type { Context } from "./context.ts";
 import { AgentTasksError, HubUnreachableError, NotFoundError, UsageError } from "./errors.ts";
-import { parseJsonObject, readFileArg, readStdin } from "./input.ts";
+import { parseJsonObject, readFileArg, readStdin, readStdinBytes } from "./input.ts";
 import { resolvePath } from "./paths.ts";
-import { COMMAND_NOT_FOUND_EXIT, REMOTE_CLI, remoteCliLine, runSshStreaming, sshArgv } from "./ssh.ts";
+import { COMMAND_NOT_FOUND_EXIT, REMOTE_CLI, remoteCliLine, runSshStreaming, SshSpawnError, sshArgv } from "./ssh.ts";
 import { displayPath, isMachineIndependentPath, normalizeTaskCwd } from "./task-flags.ts";
 
 // Client mode: a machine whose config has `hub` keeps no data. It forwards
@@ -23,7 +23,11 @@ import { displayPath, isMachineIndependentPath, normalizeTaskCwd } from "./task-
  */
 export const LOCAL_ONLY_GROUPS: readonly string[] = ["help", "version", "init", "install", "doctor", "config", "remote"];
 
-/** Commands a client refuses: they act on the hub's scheduler, which only the hub runs. */
+/**
+ * Commands a client refuses: they drive the hub's scheduler, which only the
+ * hub runs. Commands that only read its state (`runner status`, `due`) are
+ * forwarded.
+ */
 export const HUB_ONLY_COMMANDS: readonly string[] = ["runner", "tick"];
 
 /** Whether a command (by its full name, e.g. `config resolve`) always runs locally. */
@@ -34,9 +38,11 @@ export function runsLocally(name: string): boolean {
 /** What to run on the hub: the arguments after `agent-tasks`, and how. */
 export interface Forward {
   args: string[];
-  /** Text for the remote command's stdin, or `inherit` to hand over the terminal. */
-  stdin?: string | "inherit";
-  /** Allocate a terminal on the hub (interactive commands). */
+  /** Sent as the remote command's stdin. */
+  input?: string | Uint8Array;
+  /** Hand this terminal's stdin over (interactive commands). */
+  inheritStdin?: boolean;
+  /** Force a terminal on the hub (interactive or never-ending commands). */
   tty?: boolean;
   /** Environment set for the remote command. */
   env?: Record<string, string>;
@@ -55,35 +61,48 @@ export async function forwardToHub(ctx: Context, hubAlias: string, name: string,
   const argv = sshArgv(hubAlias, remoteCliLine([...globals, ...name.split(" "), ...forward.args], forward.env), { tty: forward.tty });
   let result;
   try {
-    result = await runSshStreaming(argv, { env: ctx.env, stdout: ctx.stdout, stderr: ctx.stderr, stdin: forward.stdin });
+    result = await runSshStreaming(argv, { env: ctx.env, stdout: ctx.stdout, stderr: ctx.stderr, input: forward.input, inheritStdin: forward.inheritStdin });
   } catch (err) {
-    throw new HubUnreachableError(`cannot reach the hub "${hubAlias}" over SSH: could not run ssh: ${(err as Error).message}`);
+    if (err instanceof SshSpawnError) throw new HubUnreachableError(hubAlias, `could not run ssh: ${err.message}`);
+    throw err;
   }
-  if (result.connectError !== null) {
-    throw new HubUnreachableError(`cannot reach the hub "${hubAlias}" over SSH: ${result.connectError || "ssh exited with 255"}`);
-  }
+  if (result.connectError !== null) throw new HubUnreachableError(hubAlias, result.connectError);
   if (result.code === COMMAND_NOT_FOUND_EXIT) {
-    throw new HubUnreachableError(`agent-tasks is not installed on the hub "${hubAlias}" (looked for ${REMOTE_CLI}); run "agent-tasks install" there`);
+    throw new HubUnreachableError(
+      hubAlias,
+      `could not run ${REMOTE_CLI} there: install agent-tasks on the hub ("agent-tasks install") and make sure bun is in the PATH of non-interactive SSH sessions`,
+    );
   }
   return result.code;
 }
 
-/** Rewrites a command's arguments so they mean on the hub what they mean here. */
+type Prepare = (ctx: Context, args: string[]) => Forward | Promise<Forward>;
+
+/**
+ * How each command's arguments are rewritten so they mean on the hub what
+ * they mean here (folders, files and stdin of this client). Commands not
+ * listed are forwarded as they are; add one here when a command reads a
+ * local file, folder or stdin.
+ */
+const PREPARE: Record<string, Prepare> = {
+  add: prepareAdd,
+  edit: prepareEdit,
+  finish: prepareFinish,
+  list: prepareList,
+  attach: (_ctx, args) => ({ args, inheritStdin: true, tty: process.stdin.isTTY === true }),
+  log: prepareLog,
+};
+
 export async function prepareForward(ctx: Context, name: string, args: string[]): Promise<Forward> {
-  switch (name) {
-    case "add":
-      return await prepareAdd(ctx, args);
-    case "edit":
-      return await prepareEdit(ctx, args);
-    case "finish":
-      return await prepareFinish(ctx, args);
-    case "list":
-      return prepareList(ctx, args);
-    case "attach":
-      return { args, stdin: "inherit", tty: process.stdin.isTTY === true };
-    default:
-      return { args };
-  }
+  return (await PREPARE[name]?.(ctx, args)) ?? { args };
+}
+
+/**
+ * `log --follow` never ends by itself: on a terminal it runs with one on the
+ * hub too, so Ctrl-C (closing it) also stops the hub's side.
+ */
+function prepareLog(_ctx: Context, args: string[]): Forward {
+  return { args, tty: args.includes("--follow") && process.stdout.isTTY === true };
 }
 
 type Values = Record<string, string | boolean | undefined>;
@@ -144,11 +163,15 @@ async function prepareAdd(ctx: Context, args: string[]): Promise<Forward> {
   const machine = values.machine ?? (typeof fromJson.machine === "string" ? fromJson.machine : localMachine(ctx.config.config));
   values.machine = machine;
   // A cwd of the wrong type in the JSON is left for the hub to report.
+  const ownMachine = machine === localMachine(ctx.config.config);
+  if (values.cwd === undefined && fromJson.cwd === undefined && !ownMachine) {
+    throw new UsageError(`a task on machine "${machine}" needs --cwd: this folder is on this machine ("${localMachine(ctx.config.config)}")`);
+  }
   const cwd = values.cwd ?? (fromJson.cwd === undefined ? ctx.cwd : typeof fromJson.cwd === "string" ? fromJson.cwd : undefined);
   if (cwd !== undefined) values.cwd = clientTaskCwd(ctx, cwd, machine);
   values["created-cwd"] = displayPath(ctx, ctx.cwd);
   if (ctx.env.HC_TERMINAL_ID) values["created-session"] = ctx.env.HC_TERMINAL_ID;
-  return { args: toArgv(values, positionals), stdin };
+  return { args: toArgv(values, positionals), input: stdin };
 }
 
 /** `edit`: a patch file and `--cwd` are this client's; the patch goes over stdin. */
@@ -176,7 +199,7 @@ async function prepareEdit(ctx: Context, args: string[]): Promise<Forward> {
   }
   // `--cwd ""` is an error the hub reports.
   if (values.cwd !== undefined && values.cwd.trim() !== "") values.cwd = clientTaskCwd(ctx, values.cwd, values.machine);
-  return { args: toArgv(values, [id, ...rest]), stdin };
+  return { args: toArgv(values, [id, ...rest]), input: stdin };
 }
 
 /**
@@ -185,13 +208,13 @@ async function prepareEdit(ctx: Context, args: string[]): Promise<Forward> {
  */
 async function prepareFinish(ctx: Context, args: string[]): Promise<Forward> {
   const { values, positionals } = parseCommandArgs(args, FINISH_OPTIONS, { minPositionals: 1, maxPositionals: 1 });
-  let stdin: string | undefined;
+  let input: Uint8Array | undefined;
   const file = values["output-file"];
-  if (file === "-") stdin = await readStdin();
+  if (file === "-") input = await readStdinBytes();
   else if (file !== undefined) {
     const source = resolvePath(file, ctx.env, ctx.cwd);
     if (!existsSync(source) || !statSync(source).isFile()) throw new NotFoundError(`output file not found: ${source}`);
-    stdin = readFileSync(source, "utf8");
+    input = readFileSync(source);
     values["output-file"] = "-";
     values["output-ext"] = extname(source);
   }
@@ -200,7 +223,7 @@ async function prepareFinish(ctx: Context, args: string[]): Promise<Forward> {
     const value = ctx.env[key];
     if (value) env[key] = value;
   }
-  return { args: toArgv(values, positionals), stdin, env };
+  return { args: toArgv(values, positionals), input, env };
 }
 
 /** `list --cwd`: a folder on this client, written with `~` so the hub reads it against its own home. */

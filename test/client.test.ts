@@ -135,7 +135,15 @@ describe("client mode: forwarding to the hub", () => {
     const r = await s.cli("list", "--json");
     expect(r.code).toBe(1);
     expect(r.json().error.code).toBe("hub_unreachable");
-    expect(r.json().error.message).toContain("agent-tasks is not installed on the hub");
+    expect(r.json().error.message).toContain('cannot reach the hub "hub" over SSH: could not run ~/.local/bin/agent-tasks there: install agent-tasks on the hub');
+  });
+
+  test("a client must name itself", async () => {
+    s.client.writeConfig({ hub: { ssh: "hub" } });
+    const r = await s.cli("list", "--json");
+    expect(r.code).toBe(1);
+    expect(r.json().error.details).toEqual(['machine: a client (with `hub`) must name itself, e.g. "machine": "mac", as the hub\'s `machines` knows it']);
+    expect(s.sshCalls()).toEqual([]);
   });
 });
 
@@ -157,6 +165,13 @@ describe("client mode: add and edit", () => {
     const r = await s.cli("add", "--title", "Bad", ...addFlags, "--cwd", "missing", "--json");
     expect(r.code).toBe(1);
     expect(r.json().error).toMatchObject({ code: "invalid_cwd", message: `cwd does not exist or is not a folder: ${join(s.project, "missing")}` });
+    expect(s.sshCalls()).toEqual([]);
+  });
+
+  test("add for another machine needs --cwd", async () => {
+    const r = await s.cli("add", "--title", "On hub", ...addFlags, "--machine", "wsl", "--json", NOW);
+    expect(r.code).toBe(2);
+    expect(r.json().error.message).toBe('a task on machine "wsl" needs --cwd: this folder is on this machine ("mac")');
     expect(s.sshCalls()).toEqual([]);
   });
 
@@ -196,12 +211,14 @@ describe("client mode: a subagent on the client", () => {
   test("finish forwards the result, its output file and attempt to the hub", async () => {
     execTask(s.hub, "hang");
     await s.hub.tick(1);
-    writeFileSync(join(s.project, "report.md"), "# Long report\n");
-    const r = await s.cli("finish", DEMO_REF, "--status", "succeeded", "--summary=- all done", "--output-file", "report.md", "--json");
+    // Not valid UTF-8: the bytes must arrive as they are.
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00, 0x0a]);
+    writeFileSync(join(s.project, "report.png"), bytes);
+    const r = await s.cli("finish", DEMO_REF, "--status", "succeeded", "--summary=- all done", "--output-file", "report.png", "--json");
     expect(r.stderr).toBe("");
     expect(r.code).toBe(0);
-    expect(r.json()).toMatchObject({ run_ref: DEMO_REF, status: "succeeded", summary: "- all done", output: "runs/demo/20261117T080000Z.output.md" });
-    expect(readFileSync(join(s.hub.dataDir, "runs/demo/20261117T080000Z.output.md"), "utf8")).toBe("# Long report\n");
+    expect(r.json()).toMatchObject({ run_ref: DEMO_REF, status: "succeeded", summary: "- all done", output: "runs/demo/20261117T080000Z.output.png" });
+    expect(new Uint8Array(readFileSync(join(s.hub.dataDir, "runs/demo/20261117T080000Z.output.png")))).toEqual(bytes);
     await waitFor(settled(s.hub), "the session to settle");
   });
 

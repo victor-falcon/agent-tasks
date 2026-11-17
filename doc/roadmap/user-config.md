@@ -231,8 +231,9 @@ runs on the hub over SSH, as `ssh -o BatchMode=yes -o ConnectTimeout=10
 <hub> ~/.local/bin/agent-tasks <args>`, with its output, `--json` and exit
 code passed through. The hub needs agent-tasks installed (`agent-tasks
 install` links it at `~/.local/bin`) and the client a key-based SSH alias
-for the hub. If the hub can't be reached, the command fails with
-`hub_unreachable`; nothing is queued.
+for the hub. The client must set `machine`, and the hub must list that name
+in its `machines` (e.g. `"mac": { "ssh": "mac" }`). If the hub can't be
+reached, the command fails with `hub_unreachable`; nothing is queued.
 
 - Always local: `help`, `version`, `init`, `install`, `doctor`, `config …`
   (they describe this machine) and `remote …` (what the hub runs on this
@@ -241,7 +242,7 @@ for the hub. If the hub can't be reached, the command fails with
   and `due` only read the hub's state, so they are forwarded.
 - `add` from a client defaults `--machine` to the client's `machine` and
   `--cwd` to the current folder, checked on the client and written with
-  `~` for the client's home. `edit --cwd`, `list --cwd`, a task JSON or
+  `~` for the client's home. A task for another machine needs `--cwd`. `edit --cwd`, `list --cwd`, a task JSON or
   patch on stdin or in a file, `--instructions-file` and
   `finish --output-file` are read on the client and sent to the hub.
 

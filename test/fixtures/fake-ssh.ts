@@ -28,7 +28,8 @@ while (i < argv.length) {
 }
 const alias = argv[i]!;
 const line = argv.slice(i + 1).join(" ");
-const stdin = process.stdin.isTTY ? "" : await Bun.stdin.text();
+const input = process.stdin.isTTY ? new Uint8Array() : await Bun.stdin.bytes();
+const stdin = new TextDecoder().decode(input);
 appendFileSync(join(dir, "calls.jsonl"), `${JSON.stringify({ options, alias, line, stdin })}\n`);
 
 const hostsFile = join(dir, "hosts.json");
@@ -43,7 +44,7 @@ const child = Bun.spawn({
   cmd: ["/bin/sh", "-c", line],
   cwd: host.HOME,
   env: { PATH: process.env.PATH!, ...host },
-  stdin: new TextEncoder().encode(stdin),
+  stdin: input,
   stdout: "inherit",
   stderr: "inherit",
 });

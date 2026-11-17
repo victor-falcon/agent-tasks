@@ -11,6 +11,11 @@ export async function readStdin(): Promise<string> {
   return await Bun.stdin.text();
 }
 
+/** Reads all of stdin as bytes (for files that may not be text). */
+export async function readStdinBytes(): Promise<Uint8Array> {
+  return await Bun.stdin.bytes();
+}
+
 /** Reads a file argument relative to the command's cwd, or stdin for "-". */
 export async function readFileArg(ctx: Context, path: string): Promise<string> {
   if (path === "-") return await readStdin();

@@ -234,6 +234,7 @@ export function configErrors(value: unknown): string[] {
   if (value.machine !== undefined) checkMachineName(c.at("machine"), value.machine);
   checkMachines(c.at("machines"), value.machines, typeof value.machine === "string" ? value.machine : DEFAULT_MACHINE);
   if (checkSection(c.at("hub"), value.hub, ["ssh"])) checkString(c.at("hub").at("ssh"), value.hub.ssh);
+  if (value.hub !== undefined && value.machine === undefined) c.at("machine").fail('a client (with `hub`) must name itself, e.g. "machine": "mac", as the hub\'s `machines` knows it');
   if (value.hub !== undefined && value.machines !== undefined) c.at("machines").fail("only the hub keeps the machine registry; a client (with `hub`) must not set it");
   checkTimezone(c.at("timezone"), value.timezone);
 

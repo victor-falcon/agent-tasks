@@ -4,7 +4,7 @@ import { parseCommandArgs } from "../args.ts";
 import { type Context, output } from "../context.ts";
 import { AgentTasksError, NotFoundError, UsageError } from "../errors.ts";
 import { dataFile, endAttempt, lastAttempt, readRunRef, requireTask, settleSession, stamp, updateRun } from "../execution.ts";
-import { readStdin } from "../input.ts";
+import { readStdinBytes } from "../input.ts";
 import { resolvePath } from "../paths.ts";
 import { parseRunRef } from "../slot.ts";
 import type { Command } from "./types.ts";
@@ -29,8 +29,8 @@ interface OutputSource {
 async function readOutputSource(ctx: Context, file: string, ext: string | undefined): Promise<OutputSource> {
   if (file === "-") {
     if (ext !== undefined && !/^(\.[A-Za-z0-9]{1,16})?$/.test(ext)) throw new UsageError(`--output-ext must be like .md (got "${ext}")`);
-    const text = await readStdin();
-    return { ext: ext ?? "", save: (dest) => writeFileSync(dest, text) };
+    const bytes = await readStdinBytes();
+    return { ext: ext ?? "", save: (dest) => writeFileSync(dest, bytes) };
   }
   const source = resolvePath(file, ctx.env, ctx.cwd);
   if (!existsSync(source) || !statSync(source).isFile()) throw new NotFoundError(`output file not found: ${source}`);

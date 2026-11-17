@@ -29,24 +29,36 @@ export function remoteCliLine(args: readonly string[], env: Record<string, strin
   return [...assignments, REMOTE_CLI, ...args.map(shellQuote)].join(" ");
 }
 
-/** `ssh` argv that runs `remoteLine` on `alias`; `tty` allocates a terminal (for interactive commands). */
+/**
+ * `ssh` argv that runs `remoteLine` on `alias`. `tty` forces a terminal on the
+ * remote side (`-tt`): for interactive commands, and so that Ctrl-C (which
+ * closes the terminal) also stops a remote command that never ends by itself.
+ */
 export function sshArgv(alias: string, remoteLine: string, { tty = false } = {}): string[] {
-  return ["ssh", ...SSH_OPTIONS, tty ? "-t" : "-T", "--", alias, remoteLine];
+  return ["ssh", ...SSH_OPTIONS, tty ? "-tt" : "-T", "--", alias, remoteLine];
 }
 
 export interface SshStreamOptions {
   env: Env;
   stdout: Writer;
   stderr: Writer;
-  /** Text sent as the remote command's stdin; `inherit` hands over this process's stdin; none by default. */
-  stdin?: string | "inherit";
+  /** Sent as the remote command's stdin (none by default). */
+  input?: string | Uint8Array;
+  /** Hands this process's stdin over to the remote command (interactive commands). */
+  inheritStdin?: boolean;
 }
 
 export interface SshResult {
   code: number;
-  /** ssh's stderr when it failed to connect (exit 255); it was not passed through. */
+  /**
+   * Set when ssh itself failed (exit 255): its stderr, unless remote output
+   * had already been passed through (the connection dropped midway).
+   */
   connectError: string | null;
 }
+
+/** `ssh` could not be started at all (not installed, not on PATH). */
+export class SshSpawnError extends Error {}
 
 /**
  * Runs an `ssh` argv, streaming the remote stdout and stderr to the writers,
@@ -56,8 +68,14 @@ export interface SshResult {
  * enough to tell the two apart: the remote CLI never exits with 255.
  */
 export async function runSshStreaming(argv: string[], opts: SshStreamOptions): Promise<SshResult> {
-  const stdin = opts.stdin === "inherit" ? "inherit" : opts.stdin === undefined ? "ignore" : new TextEncoder().encode(opts.stdin);
-  const child = Bun.spawn({ cmd: argv, env: opts.env as Record<string, string>, stdin, stdout: "pipe", stderr: "pipe" });
+  const input = typeof opts.input === "string" ? new TextEncoder().encode(opts.input) : opts.input;
+  const stdin = opts.inheritStdin ? "inherit" : (input ?? "ignore");
+  let child;
+  try {
+    child = Bun.spawn({ cmd: argv, env: opts.env as Record<string, string>, stdin, stdout: "pipe", stderr: "pipe" });
+  } catch (err) {
+    throw new SshSpawnError((err as Error).message);
+  }
 
   let held: string | null = "";
   const flushStderr = () => {
@@ -82,7 +100,9 @@ export async function runSshStreaming(argv: string[], opts: SshStreamOptions): P
     }),
   ]);
   const code = await child.exited;
-  if (code === SSH_UNREACHABLE_EXIT && held !== null) return { code, connectError: held.trim() };
-  flushStderr();
-  return { code, connectError: null };
+  if (code !== SSH_UNREACHABLE_EXIT) {
+    flushStderr();
+    return { code, connectError: null };
+  }
+  return { code, connectError: held === null ? "the connection was lost" : held.trim() || "ssh exited with 255" };
 }
