@@ -89,8 +89,8 @@ example if it doesn't exist.
   `catch_up`, `max_delay`, `timeout`, `keep_open` and `notify` can also be set
   per profile; a task's own value wins over both.
 - `notify` (task, profile or `defaults`): which of a task's run events every
-  notifier sends, replacing the notifiers' own `events` (`[]`: never; unset or
-  `null`: the notifiers' `events`). See
+  notifier sends, replacing the notifiers' own `events` (`[]`: never; unset
+  everywhere: the notifiers' `events`). See
   [runner.md](runner.md#per-task-notify).
 
 No secrets in this file. Credentials keep coming from wherever they already
