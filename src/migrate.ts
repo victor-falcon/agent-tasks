@@ -12,11 +12,9 @@ function taskFiles(dir: string): string[] {
     return readdirSync(dir)
       .filter((f) => f.endsWith(".json") && !f.startsWith("."))
       .map((f) => join(dir, f));
-  } catch (err) {
-    // No data folder yet, or a broken one: nothing to migrate; `doctor` reports the latter.
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return [];
-    throw err;
+  } catch {
+    // No data folder yet, or one that can't be listed: nothing to migrate; reading it or `doctor` reports the latter.
+    return [];
   }
 }
 
@@ -55,7 +53,7 @@ export function migrateTaskMachines(paths: DataPaths, machine: string): string[]
   return rewritten;
 }
 
-/** Brings the data folder up to date. Run once per process for each data folder, before anything reads it. */
+/** Brings the data folder up to date; run before anything reads it (each context does, on first use of its paths). */
 export function migrateData(paths: DataPaths, machine: string): void {
   migrateTaskMachines(paths, machine);
 }

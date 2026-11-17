@@ -10,6 +10,7 @@ import {
   checkAgent,
   checkDuration,
   checkEnum,
+  checkMachineName,
   checkNotify,
   checkString,
   checkTimezone,
@@ -17,7 +18,6 @@ import {
   isObject,
   KEEP_OPEN_VALUES,
   type KeepOpen,
-  checkMachineName,
   type Task,
 } from "./schema.ts";
 import { notifierErrors } from "./notifiers/config.ts";
