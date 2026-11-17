@@ -131,7 +131,6 @@ export function sanitize(text: string): string[] {
     .replace(/\x1b(?!\[[0-9;]*m)[@-_]/g, ""); // other two-character escapes
   return cleaned.split("\n").map((line) => {
     const afterCr = line.slice(line.lastIndexOf("\r") + 1);
-    // biome-ignore lint: control characters on purpose
     return afterCr.replace(/\t/g, "  ").replace(/[\x00-\x08\x0b-\x1a\x1c-\x1f\x7f]/g, "");
   });
 }
