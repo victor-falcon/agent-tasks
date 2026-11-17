@@ -10,6 +10,7 @@ import {
   checkAgent,
   checkDuration,
   checkEnum,
+  checkNotify,
   checkString,
   checkTimezone,
   checkUnknownKeys,
@@ -19,7 +20,7 @@ import {
   type Task,
 } from "./schema.ts";
 import { notifierErrors } from "./notifiers/config.ts";
-import type { NotifierConfig } from "./notifiers/types.ts";
+import type { NotifierConfig, TaskNotifyEvent } from "./notifiers/types.ts";
 import { defaultMaxDelay, formatDuration, parseDuration } from "./duration.ts";
 import { systemTimezone } from "./time.ts";
 
@@ -48,6 +49,7 @@ export interface Profile {
   max_delay?: string;
   timeout?: string;
   keep_open?: KeepOpen;
+  notify?: TaskNotifyEvent[];
 }
 
 export interface UserConfig {
@@ -62,7 +64,7 @@ export interface UserConfig {
   instructions?: { subagent?: string[]; supervisor?: string[] };
   notifiers?: NotifierConfig[];
   supervisor?: Record<string, unknown>;
-  defaults?: { catch_up?: CatchUp; max_delay?: string; timeout?: string; keep_open?: KeepOpen };
+  defaults?: { catch_up?: CatchUp; max_delay?: string; timeout?: string; keep_open?: KeepOpen; notify?: TaskNotifyEvent[] };
 }
 
 export interface LoadedConfig {
@@ -84,6 +86,7 @@ export const BUILTIN_DEFAULTS: Readonly<{
   catch_up: CatchUp;
   timeout: string;
   keep_open: KeepOpen;
+  notify: TaskNotifyEvent[] | null;
   retries: number;
 }> = {
   agent: { command: "claude", args: [], shell: false },
@@ -93,6 +96,7 @@ export const BUILTIN_DEFAULTS: Readonly<{
   catch_up: "latest",
   timeout: "45m",
   keep_open: "on_failure",
+  notify: null,
   retries: 0,
 };
 
@@ -126,6 +130,7 @@ const PROFILE_FIELDS = [
   "max_delay",
   "timeout",
   "keep_open",
+  "notify",
 ] as const;
 
 function checkStringArray(c: Checker, value: unknown): void {
@@ -164,6 +169,7 @@ function checkProfile(c: Checker, value: unknown): void {
   checkDuration(c.at("max_delay"), value.max_delay);
   checkDuration(c.at("timeout"), value.timeout);
   checkEnum(c.at("keep_open"), value.keep_open, KEEP_OPEN_VALUES);
+  checkNotify(c.at("notify"), value.notify);
 }
 
 function checkSection(c: Checker, value: unknown, fields: readonly string[]): value is Record<string, unknown> {
@@ -207,12 +213,13 @@ export function configErrors(value: unknown): string[] {
   c.errors.push(...notifierErrors(value.notifiers));
   if (value.supervisor !== undefined && !isObject(value.supervisor)) c.at("supervisor").fail("must be an object");
 
-  if (checkSection(c.at("defaults"), value.defaults, ["catch_up", "max_delay", "timeout", "keep_open"])) {
+  if (checkSection(c.at("defaults"), value.defaults, ["catch_up", "max_delay", "timeout", "keep_open", "notify"])) {
     const d = c.at("defaults");
     checkEnum(d.at("catch_up"), value.defaults.catch_up, CATCH_UP_VALUES);
     checkDuration(d.at("max_delay"), value.defaults.max_delay);
     checkDuration(d.at("timeout"), value.defaults.timeout);
     checkEnum(d.at("keep_open"), value.defaults.keep_open, KEEP_OPEN_VALUES);
+    checkNotify(d.at("notify"), value.defaults.notify);
   }
   return c.errors;
 }
@@ -252,6 +259,8 @@ export interface Resolved {
   max_delay: string;
   timeout: string;
   keep_open: KeepOpen;
+  /** Null: each notifier's own `events` decide. */
+  notify: TaskNotifyEvent[] | null;
   retries: number;
   timezone: string;
   runner_every: string;
@@ -314,7 +323,7 @@ interface Layers<T> {
 }
 
 /** The fields `resolveFor` needs; a full Task works, and so does a partial one. */
-export type ResolvableTask = Pick<Task, "cwd"> & Partial<Pick<Task, "agent" | "catch_up" | "max_delay" | "timeout" | "retries" | "keep_open" | "schedule">>;
+export type ResolvableTask = Pick<Task, "cwd"> & Partial<Pick<Task, "agent" | "catch_up" | "max_delay" | "timeout" | "retries" | "keep_open" | "notify" | "schedule">>;
 
 /** Resolves every per-task setting and records where each one came from. */
 export function resolveFor(task: ResolvableTask, loaded: LoadedConfig): Resolution {
@@ -346,6 +355,13 @@ export function resolveFor(task: ResolvableTask, loaded: LoadedConfig): Resoluti
   const catch_up = take("catch_up", { task: task.catch_up, profile: profile?.catch_up, config: defaults?.catch_up, configDetail: "defaults", builtin: builtin.catch_up });
   const timeout = take("timeout", { task: task.timeout, profile: profile?.timeout, config: defaults?.timeout, configDetail: "defaults", builtin: builtin.timeout });
   const keep_open = take("keep_open", { task: task.keep_open, profile: profile?.keep_open, config: defaults?.keep_open, configDetail: "defaults", builtin: builtin.keep_open });
+  const notify = take<TaskNotifyEvent[] | null>("notify", {
+    task: task.notify,
+    profile: profile?.notify,
+    config: defaults?.notify,
+    configDetail: "defaults",
+    builtin: builtin.notify,
+  });
   const retries = take("retries", { task: task.retries, builtin: builtin.retries });
   const runner_every = take("runner_every", { config: config.runner?.every, builtin: builtin.runner_every });
   const timezone = take("timezone", {
@@ -387,6 +403,7 @@ export function resolveFor(task: ResolvableTask, loaded: LoadedConfig): Resoluti
     max_delay,
     timeout,
     keep_open,
+    notify,
     retries,
     timezone,
     runner_every,

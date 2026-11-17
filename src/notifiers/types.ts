@@ -5,6 +5,17 @@ import type { exec } from "../launcher.ts";
 export const NOTIFY_EVENTS = ["launched", "succeeded", "failed", "timed_out", "missed", "blocked", "anomaly", "runner_recovered"] as const;
 export type NotifyEventType = (typeof NOTIFY_EVENTS)[number];
 
+/**
+ * Events about one task's runs: the ones a task's `notify` can pick. `anomaly`
+ * and `runner_recovered` are not about a run, so only notifiers' `events` choose them.
+ */
+export const TASK_NOTIFY_EVENTS = ["launched", "succeeded", "failed", "timed_out", "missed", "blocked"] as const satisfies readonly NotifyEventType[];
+export type TaskNotifyEvent = (typeof TASK_NOTIFY_EVENTS)[number];
+
+export function isTaskNotifyEvent(type: string): type is TaskNotifyEvent {
+  return (TASK_NOTIFY_EVENTS as readonly string[]).includes(type);
+}
+
 /** What the runner hands to the notifiers: one event of a tick. */
 export interface NotifyItem {
   type: NotifyEventType;

@@ -6,8 +6,9 @@ import { configErrors } from "../src/config.ts";
 import { createContext } from "../src/context.ts";
 import { newRun } from "../src/execution.ts";
 import { commandNotifyArgv } from "../src/notifiers/command.ts";
-import { dispatchNotifications, groupNotification, notifierErrors, type NotifierDeps, type NotifyItem } from "../src/notifiers/index.ts";
+import { dispatchNotifications, groupNotification, notifierErrors, type NotifierDeps, type NotifyItem, SUMMARY_LIMIT } from "../src/notifiers/index.ts";
 import { appleScriptString, systemNotifyArgv } from "../src/notifiers/system.ts";
+import type { Task } from "../src/schema.ts";
 import { claimRun, readRun } from "../src/store.ts";
 import { makeTask, makeTempHome, type TempHome } from "./helpers.ts";
 
@@ -61,6 +62,26 @@ describe("grouping", () => {
     expect(n.task_ids).toEqual(["demo", "other"]);
   });
 
+  test("a single succeeded or failed run carries the agent's summary, truncated, and its open session", () => {
+    const run = newRun("demo", new Date("2026-11-17T08:00:00Z"), "UTC", "schedule", "succeeded", null, { event: "claimed" }, "2026-11-17T08:00:00Z");
+    run.attempts.push({ n: 1, started_at: "2026-11-17T08:00:00Z", finished_at: "2026-11-17T08:10:00Z", session: null, agent: null, status: "succeeded", summary: "Report in docs/report.md", log: null });
+    const item: NotifyItem = { type: "succeeded", run_ref: "demo/20261117T080000Z", task_id: "demo", attempt: 1, message: "Report in docs/report.md" };
+    expect(groupNotification("succeeded", [item], titles, () => run)).toMatchObject({ title: "Demo task succeeded", message: "Report in docs/report.md" });
+
+    run.attempts[0]!.summary = "x".repeat(500);
+    run.attempts[0]!.session = { launcher: "herdr", handle: "t1", name: "n", pid: null, closed_at: null, kept_open: true };
+    const long = groupNotification("succeeded", [item], titles, () => run).message;
+    expect(long).toBe(`${"x".repeat(SUMMARY_LIMIT - 1)}…\nSession still open: agent-tasks attach demo/20261117T080000Z`);
+
+    // Closed since (session close): no attach hint. No summary (tick ended it): the reason.
+    run.attempts[0]!.session.closed_at = "2026-11-17T09:00:00Z";
+    run.attempts[0]!.summary = null;
+    const failedItem: NotifyItem = { ...item, type: "failed", reason: "exited_without_report", message: "the session ended without calling finish" };
+    expect(groupNotification("failed", [failedItem], titles, () => run).message).toBe("exited_without_report: the session ended without calling finish");
+    // Grouped: the short form.
+    expect(groupNotification("succeeded", [item, { ...item, run_ref: "demo/20261117T090000Z" }], titles, () => run).message).toBe("Demo task");
+  });
+
   test("anomalies and runner_recovered", () => {
     expect(groupNotification("anomaly", [{ type: "anomaly", run_ref: null, task_id: null, message: "bad file" }], titles)).toMatchObject({ title: "anomaly", message: "bad file" });
     expect(groupNotification("anomaly", [{ type: "anomaly", run_ref: null, task_id: "demo", message: "x" }, { type: "anomaly", run_ref: null, task_id: null, message: "y" }], titles).title).toBe("2 anomalies");
@@ -102,9 +123,9 @@ describe("command notifier", () => {
 });
 
 describe("dispatch", () => {
-  function setup(config: Record<string, unknown>) {
+  function setup(config: Record<string, unknown>, task: Partial<Task> = {}) {
     home.writeConfig({ timezone: "UTC", ...config });
-    home.writeTask(makeTask({ id: "demo", title: "Demo task" }));
+    home.writeTask(makeTask({ id: "demo", title: "Demo task", ...task }));
     const run = newRun("demo", new Date("2026-11-17T08:00:00Z"), "UTC", "schedule", "failed", null, { event: "claimed" }, "2026-11-17T08:00:00Z");
     run.events.push({ at: "2026-11-17T08:01:00Z", event: "failed", attempt: 1 });
     claimRun(home.paths, run);
@@ -138,6 +159,30 @@ describe("dispatch", () => {
     dispatchNotifications(ctx, [item], deps);
     expect(calls).toHaveLength(1);
     expect(calls[0]![0]).toEndWith("osascript");
+  });
+
+  test("a task's notify replaces every notifier's events for its run events", () => {
+    const notifiers = [{ type: "command", events: ["failed"], run: ["a", "{{event}}"] }, { type: "command", events: ["blocked"], run: ["b", "{{event}}"] }];
+    const succeeded = setup({ notifiers }, { notify: ["succeeded"] });
+    // The run's events have no `succeeded` to mark; it is still sent.
+    dispatchNotifications(succeeded.ctx, [{ ...item, type: "succeeded" }, item], succeeded.deps);
+    expect(succeeded.calls).toEqual([
+      ["a", "succeeded"],
+      ["b", "succeeded"],
+    ]);
+  });
+
+  test("notify: [] silences the task; anomalies stay with the notifiers' events", () => {
+    const { ctx, calls, deps } = setup({ notifiers: [{ type: "command", events: ["failed", "anomaly"], run: ["n", "{{event}}"] }] }, { notify: [] });
+    dispatchNotifications(ctx, [item, { type: "anomaly", run_ref: null, task_id: "demo", message: "odd" }], deps);
+    expect(calls).toEqual([["n", "anomaly"]]);
+    expect(readRun(home.paths, "demo", "20261117T080000Z").events.at(-1)?.notified).toBeUndefined();
+  });
+
+  test("notify from config defaults applies to tasks without their own", () => {
+    const { ctx, calls, deps } = setup({ notifiers: [{ type: "command", events: ["failed"], run: ["n", "{{event}}"] }], defaults: { notify: ["launched"] } });
+    dispatchNotifications(ctx, [item, { ...item, type: "launched" }], deps);
+    expect(calls).toEqual([["n", "launched"]]);
   });
 
   test("an invalid notifiers section is rejected when the config loads", () => {
