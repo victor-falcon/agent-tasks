@@ -3,6 +3,7 @@
   "title": "Weekly dependencies report",
   "description": "Every Monday morning, list outdated dependencies so they can be planned.",
   "cwd": "~/Projects/example",
+  "machine": "local",
   "instructions": "Run the package manager's outdated check (for example `bun outdated`) and write a short report to reports/deps-<date>.md: one line per outdated package with current and latest version, major upgrades first. Do not upgrade anything. Done when the report file exists.",
   "schedule": { "type": "cron", "cron": "0 9 * * 1", "timezone": "Europe/Madrid", "starts_at": null, "until": null },
   "agent": null,

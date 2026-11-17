@@ -1,5 +1,6 @@
 import type { Command } from "./commands/types.ts";
-import { type LoadedConfig, loadConfig, type Resolution, type ResolvableTask, resolveFor } from "./config.ts";
+import { type LoadedConfig, loadConfig, localMachine, type Resolution, type ResolvableTask, resolveFor } from "./config.ts";
+import { migrateData } from "./migrate.ts";
 import { withSchema } from "./output/json.ts";
 import { buildPaths, type Env, type Paths, resolveConfigLocation, resolveDataDir } from "./paths.ts";
 
@@ -20,7 +21,10 @@ export interface Context {
   stderr: Writer;
   /** The command registry (for `help`). */
   commands: readonly Command[];
-  /** Resolved paths. Loads the config on first use (data_dir may come from it). */
+  /**
+   * Resolved paths. Loads the config on first use (data_dir may come from it)
+   * and brings the data folder's files up to date (see `migrateData`).
+   */
   readonly paths: Paths;
   /** The user config. Loaded on first use, so `help` works even with a broken config. */
   readonly config: LoadedConfig;
@@ -41,7 +45,10 @@ export function createContext(opts: ContextOptions): Context {
       return config;
     },
     get paths() {
-      paths ??= buildPaths(configLocation, resolveDataDir(opts.env, ctx.config.config.data_dir, configLocation.configDir));
+      if (!paths) {
+        paths = buildPaths(configLocation, resolveDataDir(opts.env, ctx.config.config.data_dir, configLocation.configDir));
+        migrateData(paths, localMachine(ctx.config.config));
+      }
       return paths;
     },
     resolveFor(task) {

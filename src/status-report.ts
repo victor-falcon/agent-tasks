@@ -5,7 +5,7 @@ import { isDecisive, isFailure, lastActivity, runSummary } from "./run-info.ts";
 import type { RunnerHealth } from "./runner-health.ts";
 import type { RunStatus, Task } from "./schema.ts";
 import { listRuns, listTasks, readTicks, type StoredRun, taskIdsWithRuns } from "./store.ts";
-import { displayTimezone, taskOverview } from "./task-info.ts";
+import { checkMachineFilter, displayTimezone, taskOverview } from "./task-info.ts";
 import { formatInZone } from "./time.ts";
 
 // The data behind `agent-tasks status`: counts, what needs attention, what's next.
@@ -22,11 +22,12 @@ export interface OfflineGap {
 }
 
 export type AttentionItem =
-  | { kind: "failed" | "blocked"; task_id: string; ref: string; status: RunStatus; summary: string | null; at: string }
-  | { kind: "missed"; task_id: string; reason: string | null; slots: string[] };
+  | { kind: "failed" | "blocked"; task_id: string; machine: string | null; ref: string; status: RunStatus; summary: string | null; at: string }
+  | { kind: "missed"; task_id: string; machine: string; reason: string | null; slots: string[] };
 
 export interface NextRun {
   task_id: string;
+  machine: string;
   at: string;
   schedule: string;
 }
@@ -74,12 +75,21 @@ function offlineGaps(ctx: Context, missedSlots: readonly Date[]): OfflineGap[] {
   return [...gaps.values()].sort((a, b) => (a.from === null ? -1 : b.from === null ? 1 : Date.parse(a.from) - Date.parse(b.from)));
 }
 
-export function buildStatus(ctx: Context, health: RunnerHealth): StatusReport {
+export interface StatusOptions {
+  /** Only tasks that run on this machine (runs of removed tasks, whose machine is unknown, are left out). */
+  machine?: string;
+}
+
+export function buildStatus(ctx: Context, health: RunnerHealth, { machine }: StatusOptions = {}): StatusReport {
   const now = ctx.now.getTime();
-  const tasks = listTasks(ctx.paths);
+  const all = listTasks(ctx.paths);
+  checkMachineFilter(ctx, machine, all.items);
+  const tasks = { ...all, items: machine === undefined ? all.items : all.items.filter((t) => t.machine === machine) };
   const errors: Error[] = [...tasks.errors];
   const byId = new Map<string, Task>(tasks.items.map((t) => [t.id, t]));
-  const ids = [...new Set([...byId.keys(), ...taskIdsWithRuns(ctx.paths)])].sort();
+  const saved = new Set(all.items.map((t) => t.id));
+  const orphans = machine === undefined ? taskIdsWithRuns(ctx.paths).filter((id) => !saved.has(id)) : [];
+  const ids = [...new Set([...byId.keys(), ...orphans])].sort();
 
   const counts = { ok: 0, failed: 0, missed: 0 };
   const live = { running: 0, blocked: 0 };
@@ -96,7 +106,7 @@ export function buildStatus(ctx: Context, health: RunnerHealth): StatusReport {
       errors.push(...overview.errors);
       runs = overview.runs;
       active = overview.state === "active" || overview.state === "finished";
-      for (const at of overview.next) next.push({ task_id: id, at, schedule: scheduleText(task.schedule, overview.resolution.timezone, ctx.now) });
+      for (const at of overview.next) next.push({ task_id: id, machine: task.machine, at, schedule: scheduleText(task.schedule, overview.resolution.timezone, ctx.now) });
     } else {
       const result = listRuns(ctx.paths, id); // a removed or archived task: only its live runs matter
       errors.push(...result.errors);
@@ -108,7 +118,7 @@ export function buildStatus(ctx: Context, health: RunnerHealth): StatusReport {
       if (run.status === "running") live.running++;
       if (run.status === "blocked") {
         live.blocked++;
-        attention.push({ kind: "blocked", task_id: id, ref, status: run.status, summary: runSummary(run) || null, at: lastActivity(run) });
+        attention.push({ kind: "blocked", task_id: id, machine: task?.machine ?? null, ref, status: run.status, summary: runSummary(run) || null, at: lastActivity(run) });
       }
       const slot = Date.parse(run.slot);
       if (slot > now || slot < now - DAY_MS) continue;
@@ -127,7 +137,7 @@ export function buildStatus(ctx: Context, health: RunnerHealth): StatusReport {
     const after = lastSuccess ? Date.parse(lastSuccess.run.slot) : Number.NEGATIVE_INFINITY;
     for (const [reason, slots] of missedByReason) {
       const open = slots.filter((s) => Date.parse(s) > after);
-      if (open.length > 0) attention.push({ kind: "missed", task_id: id, reason, slots: open });
+      if (open.length > 0) attention.push({ kind: "missed", task_id: id, machine: task.machine, reason, slots: open });
     }
 
     // The latest decisive result of a task that is not paused: a failure stays until a later success, for a week at most.
@@ -135,7 +145,7 @@ export function buildStatus(ctx: Context, health: RunnerHealth): StatusReport {
     if (active && decisive && isFailure(decisive.run.status)) {
       const at = lastActivity(decisive.run);
       if (Date.parse(at) >= now - FAILURE_WINDOW_MS) {
-        attention.push({ kind: "failed", task_id: id, ref: decisive.ref, status: decisive.run.status, summary: runSummary(decisive.run) || null, at });
+        attention.push({ kind: "failed", task_id: id, machine: task.machine, ref: decisive.ref, status: decisive.run.status, summary: runSummary(decisive.run) || null, at });
       }
     }
   }

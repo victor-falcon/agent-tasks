@@ -1,11 +1,11 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { isKnownMachine, knownMachines } from "./config.ts";
 import type { Context } from "./context.ts";
 import { AgentTasksError, UsageError } from "./errors.ts";
 import { parseCount, readFileArg } from "./input.ts";
 import { homeDir, resolvePath, tildify } from "./paths.ts";
-import type { Schedule, Task } from "./schema.ts";
-import { TASK_FIELDS } from "./schema.ts";
+import { orderTaskKeys, type Schedule, type Task } from "./schema.ts";
 
 /**
  * Flags shared by `add` and `edit` to set task fields. With `edit`, an empty
@@ -15,6 +15,7 @@ export const TASK_FLAG_OPTIONS = {
   title: { type: "string" },
   description: { type: "string" },
   cwd: { type: "string" },
+  machine: { type: "string" },
   at: { type: "string" },
   cron: { type: "string" },
   timezone: { type: "string" },
@@ -34,6 +35,7 @@ export type TaskFlagValues = { [K in keyof typeof TASK_FLAG_OPTIONS]?: string };
 export const TASK_FLAGS_USAGE = `  --title <text>              Title
   --description <text>        Why the task exists; read by a person
   --cwd <dir>                 Working directory (must exist)
+  --machine <name>            Machine the task runs on (default: this one)
   --at <iso>                  Run once at this time, e.g. 2026-11-20T09:00:00+01:00
   --cron <expr>               Run on a 5-field cron expression, e.g. "0 9 * * 1"
   --timezone <tz>             Time zone for --cron, e.g. Europe/Madrid
@@ -47,6 +49,14 @@ export const TASK_FLAGS_USAGE = `  --title <text>              Title
   --notify <events>           Run events every notifier sends for this task,
                               e.g. succeeded,failed (none: never notify)
   --agent <command>           Agent command for this task (normally from config)`;
+
+/** Rejects a machine that is neither this one nor in the config's `machines`. */
+export function checkTaskMachine(ctx: Context, machine: string): void {
+  const config = ctx.config.config;
+  if (isKnownMachine(config, machine)) return;
+  const known = Object.keys(knownMachines(config)).sort().join(", ");
+  throw new AgentTasksError("unknown_machine", `unknown machine "${machine}" (known: ${known}); add it to \`machines\` in the config`);
+}
 
 /** Resolves a task folder against the command's cwd, checks it exists and stores it with `~`. */
 export function normalizeTaskCwd(ctx: Context, cwd: unknown): string {
@@ -102,6 +112,7 @@ export async function applyTaskFlags(ctx: Context, task: Partial<Task>, values: 
   if (values.title !== undefined) task.title = values.title;
   if (values.description !== undefined) task.description = emptyToNull(values.description);
   if (values.cwd !== undefined) task.cwd = values.cwd;
+  if (values.machine !== undefined) task.machine = values.machine;
   if (values.instructions !== undefined) task.instructions = values.instructions;
   if (values["instructions-file"] !== undefined) task.instructions = (await readFileArg(ctx, values["instructions-file"])).trim();
   if (values["catch-up"] !== undefined) task.catch_up = emptyToNull(values["catch-up"]) as Task["catch_up"];
@@ -152,12 +163,4 @@ export function completeTask(task: Partial<Task>): Task {
     schedule,
   };
   return orderTaskKeys(filled) as unknown as Task;
-}
-
-/** Same object with the task fields first, in `TASK_FIELDS` order. */
-export function orderTaskKeys(task: Record<string, unknown>): Record<string, unknown> {
-  const ordered: Record<string, unknown> = {};
-  for (const key of TASK_FIELDS) if (key in task) ordered[key] = task[key];
-  for (const [key, value] of Object.entries(task)) if (!(key in ordered)) ordered[key] = value;
-  return ordered;
 }

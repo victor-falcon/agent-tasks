@@ -168,6 +168,11 @@ skills) is in [doc/roadmap/user-config.md](doc/roadmap/user-config.md), and
 the launcher commands and variables in
 [doc/roadmap/launcher.md](doc/roadmap/launcher.md).
 
+Each task has a `machine`, where it runs: this machine's name (`machine` in
+the config, `local` by default) unless `add --machine <name>` picks one of
+the `machines` in the config. Running tasks on other machines is in
+progress; see [doc/roadmap/user-config.md](doc/roadmap/user-config.md).
+
 Notifications go to the `notifiers` in the config (a desktop notification by
 default, for `failed`, `timed_out` and `blocked`; or any command, e.g. one that
 sends a message to your phone). A task's `notify`, a profile's or

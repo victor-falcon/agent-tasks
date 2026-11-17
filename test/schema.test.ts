@@ -11,6 +11,7 @@ describe("task validation", () => {
         title: "Weekly dependencies report",
         description: "Why the task exists; read by a person.",
         cwd: "~/Projects/foo",
+        machine: "local",
         instructions: "Full prompt for the subagent.",
         schedule: { type: "cron", cron: "0 9 * * 1", timezone: "Europe/Madrid", starts_at: null, until: null },
         agent: null,
@@ -27,6 +28,16 @@ describe("task validation", () => {
     ).toEqual([]);
     expect(taskErrors(makeTask({ schedule: { type: "once", at: "2026-11-20T09:00:00+01:00" } }))).toEqual([]);
     expect(taskErrors(makeTask({ agent: { command: "clc", args: ["-p"], shell: true } }))).toEqual([]);
+  });
+
+  test("machine is required and must be a machine name", () => {
+    expect(taskErrors(makeTask({ machine: "mac-mini-2" }))).toEqual([]);
+    const { machine: _, ...withoutMachine } = makeTask();
+    const invalid = "machine: must be a machine name: lowercase letters, digits and dashes, starting with a letter";
+    expect(taskErrors(withoutMachine)).toEqual([invalid]);
+    for (const bad of ["", "Mac", "2mac", "mac-", "mac mini", 5]) {
+      expect(taskErrors({ ...makeTask(), machine: bad })).toEqual([`${invalid} (got ${JSON.stringify(bad)})`]);
+    }
   });
 
   test("notify: run events, [] for never, null for the notifiers' own events", () => {
@@ -53,7 +64,7 @@ describe("task validation", () => {
       extra: 1,
     });
     expect(errors).toEqual([
-      "extra: unknown field (allowed: id, title, description, cwd, instructions, schedule, agent, catch_up, max_delay, timeout, retries, keep_open, notify, enabled, created_at, created_by, updated_at, schedule_since)",
+      "extra: unknown field (allowed: id, title, description, cwd, machine, instructions, schedule, agent, catch_up, max_delay, timeout, retries, keep_open, notify, enabled, created_at, created_by, updated_at, schedule_since)",
       "id: must be a slug: lowercase letters, digits and dashes (max 64 chars)",
       "title: must be a non-empty string",
       'schedule.timezone: must be an IANA time zone such as Europe/Madrid (got "Nowhere/City")',

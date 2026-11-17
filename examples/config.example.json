@@ -1,5 +1,6 @@
 {
   "data_dir": "~/.local/share/agent-tasks",
+  "machine": "local",
   "timezone": "Europe/Madrid",
 
   "runner": { "every": "5m" },

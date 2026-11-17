@@ -1,10 +1,11 @@
 import { parseCommandArgs } from "../args.ts";
+import { localMachine } from "../config.ts";
 import { output } from "../context.ts";
 import { UsageError, ValidationError } from "../errors.ts";
 import { parseJsonObject, readStdin } from "../input.ts";
 import { type Task, taskErrors } from "../schema.ts";
 import { taskPath } from "../store.ts";
-import { applyTaskFlags, displayPath, normalizeTaskCwd, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE } from "../task-flags.ts";
+import { applyTaskFlags, checkTaskMachine, displayPath, normalizeTaskCwd, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE } from "../task-flags.ts";
 import { createTaskFromTitle, createTaskWithId } from "../task-id.ts";
 import { describeNext, nowIso, taskOverview } from "../task-info.ts";
 import type { Command } from "./types.ts";
@@ -27,7 +28,9 @@ ${TASK_FLAGS_USAGE}
 
 Without --id, the id is a slug of the title; a numeric suffix is added when
 it is taken (by a task, an archived task or old run history). --cwd
-defaults to the current folder. With --json, prints the task and its next
+defaults to the current folder, --machine to this machine (\`machine\` in
+the config, or "local"); another machine must be in the config's
+\`machines\`. With --json, prints the task and its next
 runs.`,
   async run(ctx, args) {
     const { values, positionals } = parseCommandArgs(
@@ -46,6 +49,7 @@ runs.`,
 
     const now = nowIso(ctx);
     task.cwd ??= ctx.cwd;
+    task.machine ??= localMachine(ctx.config.config);
     task.enabled ??= true;
     task.created_at = now;
     task.updated_at = now;
@@ -56,6 +60,7 @@ runs.`,
     // A placeholder id, so field errors are reported before id errors.
     const errors = taskErrors({ ...task, id: explicitId ?? "placeholder" });
     if (errors.length > 0) throw new ValidationError("task", errors);
+    checkTaskMachine(ctx, task.machine);
     task.cwd = normalizeTaskCwd(ctx, task.cwd);
 
     const created = explicitId !== undefined ? createTaskWithId(ctx, task, explicitId) : createTaskFromTitle(ctx, task as Partial<Task> & { title: string });

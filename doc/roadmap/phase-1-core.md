@@ -58,6 +58,7 @@ CLI works the same from any folder. The paths below such as
   "title": "Weekly dependencies report",
   "description": "Why the task exists; read by a person.",
   "cwd": "~/Projects/foo",
+  "machine": "local",
   "instructions": "Full prompt for the subagent: what to do, what to deliver, where to leave it.",
   "schedule": { "type": "cron", "cron": "0 9 * * 1", "timezone": "Europe/Madrid",
                 "starts_at": null, "until": null },
@@ -77,6 +78,10 @@ CLI works the same from any folder. The paths below such as
 - `agent`: normally `null`; it is resolved from the user's configuration
   (per-folder profiles, aliases such as `clc`). Only filled in if the task
   needs a specific agent.
+- `machine`: where the task runs (its `cwd` may only exist there): this
+  machine's name from the config (`local` by default) or a key of
+  `machines`. Tasks written before the field existed get this machine's name
+  the first time a newer CLI reads the data folder.
 - One-off `schedule`: `{ "type": "once", "at": "2026-11-20T09:00:00+01:00" }`.
 - `catch_up`, what to do with late slots that are still within `max_delay`:
   - `latest` (default): launches only the most recent; earlier ones become `superseded`.

@@ -1,7 +1,7 @@
 import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type Check, fail, ok, warn } from "./checks.ts";
-import { BUILTIN_DEFAULTS, type LoadedConfig } from "./config.ts";
+import { BUILTIN_DEFAULTS, isHub, isKnownMachine, type LoadedConfig } from "./config.ts";
 import { configChecks, configuredLaunchers, findExecutable, launcherNeedsTerminal } from "./config-check.ts";
 import type { Context } from "./context.ts";
 import { defaultMaxDelay, formatDuration, parseDuration } from "./duration.ts";
@@ -51,6 +51,20 @@ function dataChecks(ctx: Context, paths: Paths): Check[] {
     checks.push(fail("data.tasks", `${tasks.errors.length} task file${tasks.errors.length > 1 ? "s" : ""} can't be read`, "fix or remove them (they are skipped by tick)", tasks.errors.map((e) => e.message)));
   } else {
     checks.push(ok("data.tasks", `${tasks.items.length} task${tasks.items.length === 1 ? "" : "s"} readable`));
+  }
+  // E.g. tasks migrated as `local` before `machine` was set in the config.
+  const config = ctx.config.config;
+  const strays = isHub(config) ? tasks.items.filter((t) => !isKnownMachine(config, t.machine)) : [];
+  if (strays.length > 0) {
+    const machines = [...new Set(strays.map((t) => t.machine))].sort();
+    checks.push(
+      warn(
+        "data.machines",
+        `${strays.length} task${strays.length > 1 ? "s run" : " runs"} on ${machines.length > 1 ? "machines" : "a machine"} not in the config: ${machines.join(", ")}`,
+        "move them with agent-tasks edit <id> --machine <name>, or add the machine to `machines` in the config",
+        strays.map((t) => `${t.id}: ${t.machine}`),
+      ),
+    );
   }
   return checks;
 }

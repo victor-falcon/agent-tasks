@@ -2,9 +2,9 @@ import { parseCommandArgs } from "../args.ts";
 import { output } from "../context.ts";
 import { UsageError, ValidationError } from "../errors.ts";
 import { parseJsonObject, readFileArg } from "../input.ts";
-import { isObject, type Task, TASK_FIELDS, taskErrors } from "../schema.ts";
+import { isObject, orderTaskKeys, type Task, TASK_FIELDS, taskErrors } from "../schema.ts";
 import { writeTask } from "../store.ts";
-import { applyTaskFlags, normalizeTaskCwd, orderTaskKeys, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE } from "../task-flags.ts";
+import { applyTaskFlags, checkTaskMachine, normalizeTaskCwd, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE } from "../task-flags.ts";
 import { describeNext, nowIso, readActiveTask, taskOverview } from "../task-info.ts";
 import type { Command } from "./types.ts";
 
@@ -64,6 +64,7 @@ ${TASK_FLAGS_USAGE}
 
     const errors = taskErrors(task);
     if (errors.length > 0) throw new ValidationError("task", errors);
+    if (task.machine !== old.machine) checkTaskMachine(ctx, task.machine);
     if (task.cwd !== old.cwd) task.cwd = normalizeTaskCwd(ctx, task.cwd);
 
     const changed = EDITABLE.filter((k) => !Bun.deepEquals(task[k as keyof Task], old[k as keyof Task]));
