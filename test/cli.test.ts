@@ -19,6 +19,7 @@ describe("global flags", () => {
       json: true,
       now: "2026-11-17T09:00:00Z",
       help: false,
+      clientProtocol: undefined,
       rest: ["config", "resolve", "x", "--", "--json"],
     });
     expect(extractGlobalFlags(["-h", "--now=2026-11-17T09:00:00Z"])).toMatchObject({ help: true, now: "2026-11-17T09:00:00Z", rest: [] });

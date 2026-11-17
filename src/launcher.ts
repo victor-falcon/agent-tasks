@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import type { LauncherConfig, ResolvedAgent } from "./config.ts";
 import { AgentTasksError } from "./errors.ts";
 import { type Env, REPO_ROOT } from "./paths.ts";
+import { withSigint } from "./sigint.ts";
 import { readJson } from "./store.ts";
 import { isObject } from "./schema.ts";
 import { once, render, shellQuote, type Vars } from "./template.ts";
@@ -288,6 +289,26 @@ export function exec(argv: string[], opts: ExecOptions): ExecResult {
   } catch (err) {
     return { argv, code: 127, stdout: "", stderr: `could not run ${argv[0]}: ${(err as Error).message}` };
   }
+}
+
+/**
+ * Runs an interactive command (an attach) with this terminal handed over,
+ * and returns its exit code. Ctrl+C belongs to it: it does not stop us
+ * before the command returns.
+ */
+export function handOverTerminal(argv: string[], opts: { cwd?: string; env: Env }): Promise<number> {
+  return withSigint(
+    () => {},
+    async () => {
+      let child: Bun.Subprocess;
+      try {
+        child = Bun.spawn({ cmd: argv, cwd: opts.cwd, env: opts.env as Record<string, string>, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+      } catch (err) {
+        throw new LauncherError(`attach failed: could not run ${shellLine(argv)}: ${(err as Error).message}`);
+      }
+      return await child.exited;
+    },
+  );
 }
 
 function describeFailure(what: string, result: ExecResult): string {

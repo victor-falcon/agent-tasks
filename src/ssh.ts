@@ -48,6 +48,13 @@ export interface SshStreamOptions {
   input?: string | Uint8Array;
   /** Hands this process's stdin over to the remote command (interactive commands). */
   inheritStdin?: boolean;
+  /**
+   * Holds all output back for this long after the first byte. When the
+   * command ends within it, `swallow(code, output)` decides whether that
+   * output is dropped (e.g. an older agent-tasks rejecting a new flag) instead
+   * of printed.
+   */
+  early?: { ms: number; swallow: (code: number, output: string) => boolean };
 }
 
 export interface SshResult {
@@ -57,6 +64,8 @@ export interface SshResult {
    * had already been passed through (the connection dropped midway).
    */
   connectError: string | null;
+  /** The output was dropped by `early.swallow`. */
+  swallowed: boolean;
 }
 
 /** `ssh` could not be started at all (not installed, not on PATH). */
@@ -79,9 +88,22 @@ export async function runSshStreaming(argv: string[], opts: SshStreamOptions): P
     throw new SshSpawnError((err as Error).message);
   }
 
+  // Output held during the `early` window, in order; null once released.
+  let queue: Array<[Writer, string]> | null = opts.early ? [] : null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const release = () => {
+    for (const [writer, text] of queue ?? []) writer.write(text);
+    queue = null;
+  };
+  const emit = (writer: Writer, text: string) => {
+    if (!queue) return writer.write(text);
+    queue.push([writer, text]);
+    timer ??= setTimeout(release, opts.early!.ms);
+  };
+
   let held: string | null = "";
   const flushStderr = () => {
-    if (held) opts.stderr.write(held);
+    if (held) emit(opts.stderr, held);
     held = null;
   };
   const decode = async (stream: ReadableStream<Uint8Array>, onText: (text: string) => void) => {
@@ -93,20 +115,25 @@ export async function runSshStreaming(argv: string[], opts: SshStreamOptions): P
     decode(child.stdout, (text) => {
       if (!text) return;
       flushStderr();
-      opts.stdout.write(text);
+      emit(opts.stdout, text);
     }),
     decode(child.stderr, (text) => {
       if (!text) return;
-      if (held === null) opts.stderr.write(text);
+      if (held === null) emit(opts.stderr, text);
       else held += text;
     }),
   ]);
   const code = await child.exited;
+  clearTimeout(timer);
   if (code !== SSH_UNREACHABLE_EXIT) {
+    const output = [...(queue ?? []).map(([, text]) => text), held ?? ""].join("");
+    if (queue && opts.early!.swallow(code, output)) return { code, connectError: null, swallowed: true };
     flushStderr();
-    return { code, connectError: null };
+    release();
+    return { code, connectError: null, swallowed: false };
   }
-  return { code, connectError: held === null ? "the connection was lost" : held.trim() || "ssh exited with 255" };
+  release();
+  return { code, connectError: held === null ? "the connection was lost" : held.trim() || "ssh exited with 255", swallowed: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -115,8 +142,19 @@ export async function runSshStreaming(argv: string[], opts: SshStreamOptions): P
 // on stdin and the answer comes back as JSON on stdout.
 // ---------------------------------------------------------------------------
 
-/** Version of the `remote` payloads. Both sides put it in every message and check it. */
+/**
+ * Version of what machines say to each other: the `remote` payloads (both
+ * sides put it in every message and check it) and the commands a client
+ * forwards to the hub (`--client-protocol`, checked by the hub).
+ */
 export const REMOTE_PROTOCOL = 1;
+
+/**
+ * Hidden global flag a client adds to every command it forwards, so a hub
+ * that speaks another protocol refuses it. A hub too old to know the flag
+ * fails with a usage error that names it.
+ */
+export const CLIENT_PROTOCOL_FLAG = "--client-protocol";
 
 const REMOTE_TIMEOUT_MS = 90_000;
 

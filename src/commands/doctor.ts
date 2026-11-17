@@ -20,7 +20,15 @@ Checks, one line each (✓ ok, ! warning, ✕ error, with how to fix it):
   - the skills are installed (agent-tasks install), and so is any skill the
     config names;
   - the runner's heartbeat (state/ticks.jsonl): a warning if there is none
-    yet or it is older than 3 × runner.every (at least 15m).
+    yet or it is older than 3 × runner.every (at least 15m);
+  - on a hub with \`machines\`: each one answers over SSH (remote ping) with
+    the same protocol, calls itself by its registry name, is a client and
+    has a launcher that is ready ("agent-tasks machines check"). An
+    unreachable machine is a warning: machines sleep.
+
+On a client (config with \`hub\`), the data and heartbeat checks are the
+hub's and are left out; instead: the hub answers over SSH with the same
+protocol, and the hub reaches this machine back.
 
 Exits with 1 when any check is an error; warnings don't change the exit code.
 

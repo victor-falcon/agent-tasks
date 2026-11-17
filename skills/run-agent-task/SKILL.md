@@ -37,5 +37,7 @@ context: everything you need is in what `agent-tasks task` prints.
 Rules:
 
 - Never read or edit the agent-tasks data folder (`tasks/`, `runs/`, `state/`)
-  by hand. Only use the `agent-tasks` CLI.
+  by hand. Only use the `agent-tasks` CLI. The data may live on another
+  machine (the hub): `task` and `finish` reach it by themselves, and
+  `--output-file` is read on this machine and sent along.
 - Don't start other agents or schedule new tasks unless the task says so.

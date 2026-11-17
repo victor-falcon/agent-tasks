@@ -248,3 +248,24 @@ reached, the command fails with `hub_unreachable`; nothing is queued.
 
 On the hub, the cwd of a task that runs on another machine must be absolute
 or start with `~`, and is stored as given (that machine checks it exists).
+
+**Protocol check.** A client puts the hidden global flag
+`--client-protocol=<n>` first in every forwarded command; the hub refuses a
+different protocol (`protocol_mismatch`, naming which side to update). A hub
+too old to know the flag fails with a usage error naming it: the client holds
+the first 300ms of output back to catch that, drops the old hub's message and
+reports `protocol_mismatch` ("update agent-tasks on the hub"). A forwarded
+command that reaches a machine that is itself a client is refused
+(`not_a_hub`) instead of being forwarded again.
+
+**Joining.** `agent-tasks init --join <hub-alias> --machine <name> [--ssh
+<alias>]` on the new machine pings the hub (`remote ping`: same protocol, a
+hub and not a client, a different name), sets `machine` and `hub` in this
+machine's config (created from the example when missing; otherwise only those
+two keys change, the rest of the file is kept byte for byte, and it refuses
+with the lines to add by hand if that can't be done safely), runs
+`machines add <name> --ssh <alias>` on the hub and reports whether the hub
+reaches the machine back. `--ssh` is the alias the hub uses for this machine
+(default: its name). `machines list|add|rm|check` manage and check the
+registry on the hub (forwarded from a client); `machines rm` is refused while
+tasks still run on the machine.

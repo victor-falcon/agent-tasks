@@ -1,73 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { DEMO_REF, type ExecHome, execTask, FAKE_AGENT, FAKE_BIN, makeExecHome, REPO, settled, waitFor } from "./exec-helpers.ts";
-import { makeTask, makeTempHome, runCli, type TempHome } from "./helpers.ts";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { makeSetup, type Setup } from "./client-setup.ts";
+import { DEMO_REF, execTask, settled, waitFor } from "./exec-helpers.ts";
+import { makeTask } from "./helpers.ts";
 
 const NOW = "--now=2026-11-17T09:00:00+01:00";
-const HUB_CONFIG = { timezone: "Europe/Madrid", machine: "wsl", machines: { mac: { ssh: "mac" } }, agent: { command: "bun", args: [FAKE_AGENT] }, launcher: { preset: "process" } };
-
-interface Setup {
-  hub: ExecHome;
-  client: TempHome;
-  /** The client's current folder for commands. */
-  project: string;
-  sshDir: string;
-  sshCalls(): { options: string[]; alias: string; line: string; stdin: string }[];
-  cli(...args: string[]): ReturnType<typeof runCli>;
-  /** Runs the real `agent-tasks` binary on the client, with stdin. */
-  spawnCli(args: string[], stdin: string): Promise<{ code: number; stdout: string; stderr: string }>;
-}
-
-/**
- * A hub (an exec home, with `~/.local/bin/agent-tasks` linked to this repo)
- * and a client whose config points at it through the fake `ssh` (alias "hub").
- */
-function makeSetup(): Setup {
-  const hub = makeExecHome();
-  hub.writeConfig(HUB_CONFIG);
-  mkdirSync(join(hub.root, ".local", "bin"), { recursive: true });
-  symlinkSync(join(REPO, "bin", "agent-tasks"), join(hub.root, ".local", "bin", "agent-tasks"));
-
-  const client = makeTempHome();
-  client.writeConfig({ machine: "mac", hub: { ssh: "hub" } });
-  const project = join(client.root, "project");
-  mkdirSync(project, { recursive: true });
-  const sshDir = join(client.root, "ssh");
-  mkdirSync(sshDir, { recursive: true });
-  Object.assign(client.env, { PATH: [FAKE_BIN, dirname(process.execPath), process.env.PATH].join(":"), FAKE_SSH_DIR: sshDir });
-  // The hub reaches the client back ("mac") to run `remote …` there, e.g. to check a task's cwd.
-  mkdirSync(join(client.root, ".local", "bin"), { recursive: true });
-  symlinkSync(join(REPO, "bin", "agent-tasks"), join(client.root, ".local", "bin", "agent-tasks"));
-  const { PATH: _, ...hubEnv } = hub.env;
-  writeFileSync(join(sshDir, "hosts.json"), JSON.stringify({ hub: { ...hubEnv, PATH: hub.env.PATH, FAKE_SSH_DIR: sshDir }, mac: client.env }));
-
-  return {
-    hub,
-    client,
-    project,
-    sshDir,
-    sshCalls() {
-      const file = join(sshDir, "calls.jsonl");
-      if (!existsSync(file)) return [];
-      return readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-    },
-    cli: (...args) => runCli(args, client, project),
-    async spawnCli(args, stdin) {
-      const child = Bun.spawn({
-        cmd: [join(REPO, "bin", "agent-tasks"), ...args],
-        cwd: project,
-        env: client.env as Record<string, string>,
-        stdin: new TextEncoder().encode(stdin),
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-      return { code, stdout, stderr };
-    },
-  };
-}
-
 let s: Setup;
 beforeEach(() => {
   s = makeSetup();
@@ -96,7 +34,7 @@ describe("client mode: forwarding to the hub", () => {
     const [call] = s.sshCalls();
     expect(call!.alias).toBe("hub");
     expect(call!.options).toEqual(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-T"]);
-    expect(call!.line).toBe("~/.local/bin/agent-tasks --json --now=2026-11-17T09:00:00+01:00 list");
+    expect(call!.line).toBe("~/.local/bin/agent-tasks --client-protocol=1 --json --now=2026-11-17T09:00:00+01:00 list");
 
     const missing = await s.cli("show", "nope", NOW);
     expect(missing.code).toBe(1);
@@ -126,7 +64,7 @@ describe("client mode: forwarding to the hub", () => {
     // `runner status` only reads the hub's state.
     const status = await s.cli("runner", "status", "--json");
     expect(status.json().running).toBe(false);
-    expect(s.sshCalls().map((c) => c.line)).toEqual(["~/.local/bin/agent-tasks --json runner status"]);
+    expect(s.sshCalls().map((c) => c.line)).toEqual(["~/.local/bin/agent-tasks --client-protocol=1 --json runner status"]);
   });
 
   test("an unreachable hub is a clear error", async () => {
@@ -239,7 +177,7 @@ describe("client mode: a subagent on the client", () => {
     const r = await s.cli("finish", DEMO_REF, "--status", "succeeded", "--summary", "Done", "--json");
     expect(r.code).toBe(1);
     expect(r.json().error.code).toBe("stale_attempt");
-    expect(s.sshCalls()[0]!.line).toStartWith(`AGENT_TASKS_RUN=${DEMO_REF} AGENT_TASKS_ATTEMPT=2 ~/.local/bin/agent-tasks`);
+    expect(s.sshCalls()[0]!.line).toStartWith(`AGENT_TASKS_RUN=${DEMO_REF} AGENT_TASKS_ATTEMPT=2 ~/.local/bin/agent-tasks --client-protocol=1`);
     await s.hub.cli("session", "close", DEMO_REF);
   });
 

@@ -32,13 +32,13 @@ export function hasErrors(checks: readonly Check[]): boolean {
   return checks.some((c) => c.status === "error");
 }
 
+/** The lines of one check: the message, its details and how to fix it. */
+export function renderCheck(c: Check): string[] {
+  return [`${SYMBOLS[c.status]} ${c.message}`, ...(c.details ?? []).map((d) => `    - ${d}`), ...(c.hint ? [`    fix: ${c.hint}`] : [])];
+}
+
 export function renderChecks(checks: readonly Check[]): string {
-  const lines: string[] = [];
-  for (const c of checks) {
-    lines.push(`${SYMBOLS[c.status]} ${c.message}`);
-    for (const d of c.details ?? []) lines.push(`    - ${d}`);
-    if (c.hint) lines.push(`    fix: ${c.hint}`);
-  }
+  const lines = checks.flatMap(renderCheck);
   const errors = checks.filter((c) => c.status === "error").length;
   const warnings = checks.filter((c) => c.status === "warn").length;
   lines.push("", errors === 0 && warnings === 0 ? "All checks passed." : `${errors} error${errors === 1 ? "" : "s"}, ${warnings} warning${warnings === 1 ? "" : "s"}.`);

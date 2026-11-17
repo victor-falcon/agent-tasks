@@ -68,8 +68,10 @@ provides the defaults (agent, launcher, profiles).
 
 `--machine <name>` picks the machine the task runs on. Pass it only when the
 user names one ("on the mac, every morning…"); otherwise leave it out and the
-task runs on this machine. `agent-tasks list` shows each task's machine once
-there is more than one.
+task runs on this machine. A task for another machine needs `--cwd` with its
+folder on that machine, absolute or starting with `~` (that machine checks it
+exists). `agent-tasks machines list` shows the machine names. `agent-tasks
+list` shows each task's machine once there is more than one.
 
 Two per-task options decide what happens when a run ends. Offer them when the
 user's request hints at it ("let me know", "tell me what it found", "I want to

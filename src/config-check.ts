@@ -76,7 +76,7 @@ export function configuredLaunchers(config: UserConfig): { where: string; launch
   return list;
 }
 
-function launcherName(launcher: LauncherConfig): string {
+export function launcherName(launcher: LauncherConfig): string {
   return launcher.preset ? `preset "${launcher.preset}"` : "custom";
 }
 
@@ -142,7 +142,7 @@ function instructionChecks(loaded: LoadedConfig): Check[] {
   );
 }
 
-function launcherChecks(loaded: LoadedConfig): Check[] {
+export function launcherChecks(loaded: LoadedConfig): Check[] {
   const checks: Check[] = [];
   for (const { where, launcher } of configuredLaunchers(loaded.config)) {
     let spec: LauncherSpec;
