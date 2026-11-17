@@ -84,8 +84,8 @@ function emptyToNull(value: string): string | null {
  */
 export function parseNotify(value: string): Task["notify"] {
   if (value.trim() === "") return null;
-  if (value.trim() === "none") return [];
-  return value.split(",").map((e) => e.trim()).filter(Boolean) as NonNullable<Task["notify"]>;
+  if (value.trim().toLowerCase() === "none") return [];
+  return value.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean) as NonNullable<Task["notify"]>;
 }
 
 /**

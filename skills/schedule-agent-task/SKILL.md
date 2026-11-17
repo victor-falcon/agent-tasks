@@ -74,7 +74,9 @@ follow up with it"), and use them when the user asks:
   summary in the message. `--notify succeeded,failed` for "tell me when it's
   done"; `--notify failed,timed_out` for "only if something goes wrong";
   `--notify none` for a task that must stay silent. Unset, the user's
-  notifiers decide (by default only failures). Events: `launched`,
+  notifiers decide (by default only failures). The list replaces those
+  defaults for this task, so keep `failed` in it unless the user wants
+  silence on failure too. Events: `launched`,
   `succeeded`, `failed`, `timed_out`, `missed`, `blocked`.
 - `--keep-open always|on_failure|never`: whether the agent's session stays
   open after it finishes. `always` when the user wants to keep talking to the
@@ -82,7 +84,7 @@ follow up with it"), and use them when the user asks:
   `agent-tasks attach <run_ref>`); the default is `on_failure`.
 
 Both can be changed later with `agent-tasks edit <id>` (`--notify ""` goes
-back to the default).
+back to the default from the user's config).
 
 Then tell the user the task **id** and the **next runs** that `add` printed.
 

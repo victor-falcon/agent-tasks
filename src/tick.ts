@@ -218,7 +218,11 @@ class TickPass {
   followUpFinished(w: Watched, run: Run): void {
     const attempt = lastAttempt(run)!;
     const n = attempt.n;
-    if (!isReported(run, n) && FINISHED_STATUSES.includes(attempt.status)) {
+    const record = attempt.session;
+    // `finish` ends the attempt, then decides `keep_open`: wait for that (briefly), so the
+    // notification knows whether the session was kept open.
+    const settling = !!record && !record.closed_at && !record.kept_open && !record.close_attempts && this.nowMs - Date.parse(attempt.finished_at!) < CLOSE_GRACE_MS;
+    if (!settling && !isReported(run, n) && FINISHED_STATUSES.includes(attempt.status)) {
       let claimed = false;
       updateRun(this.ctx, w.ref, (r) => {
         if (isReported(r, n)) return;
@@ -227,7 +231,6 @@ class TickPass {
       });
       if (claimed) this.report(w, n, attempt.status, attempt.reason ?? null, attempt.summary);
     }
-    const record = attempt.session;
     if (!record || record.closed_at || record.kept_open || (record.close_attempts ?? 0) >= MAX_CLOSE_ATTEMPTS) return;
     if (this.nowMs - Date.parse(attempt.finished_at!) < CLOSE_GRACE_MS) return;
     const session = sessionFor(this.ctx, w.task, w.resolution, run);

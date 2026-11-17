@@ -130,11 +130,12 @@ Per task, you choose what happens when it finishes:
 # session open so I can keep talking to the agent.
 agent-tasks edit weekly-deps-report --notify succeeded,failed --keep-open always
 agent-tasks edit nightly-cleanup --notify none   # never notify for this task
-agent-tasks edit nightly-cleanup --notify ""     # back to the notifiers' own events
+agent-tasks edit nightly-cleanup --notify ""     # unset: inherit (profile, defaults, notifiers' events)
 ```
 
 `--notify` replaces every notifier's `events` for that task's runs (events:
-`launched`, `succeeded`, `failed`, `timed_out`, `missed`, `blocked`). A
+`launched`, `succeeded`, `failed`, `timed_out`, `missed`, `blocked`), so list
+`failed` too if you still want failure alerts. A
 `succeeded` or `failed` notification carries the summary the agent passed to
 `agent-tasks finish` and, when the session was kept open, the
 `agent-tasks attach <run_ref>` to get back to it.

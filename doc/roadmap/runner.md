@@ -140,8 +140,11 @@ of its run events to notify instead, with `notify` (`agent-tasks add|edit
 
 Only run events can be listed (`launched`, `succeeded`, `failed`,
 `timed_out`, `missed`, `blocked`); `anomaly` and `runner_recovered` are not
-about a task's runs and stay with the notifiers' `events`. `--notify ""`
-resets the task to `null`. Like `keep_open` and `timeout`, it resolves
+about a task's runs and stay with the notifiers' `events`. The list goes to
+every notifier: there is no per-task routing to one notifier, and a list
+without `failed` also silences failure alerts for that task. `--notify ""`
+resets the task to `null`, which inherits the profile's or
+`defaults.notify` when set. Like `keep_open` and `timeout`, it resolves
 task > first matching profile > `defaults.notify` > `null`, and
 `agent-tasks show` / `agent-tasks config resolve` print the value and where
 it came from.

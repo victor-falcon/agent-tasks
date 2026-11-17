@@ -73,6 +73,10 @@ describe("grouping", () => {
     const long = groupNotification("succeeded", [item], titles, () => run).message;
     expect(long).toBe(`${"x".repeat(SUMMARY_LIMIT - 1)}…\nSession still open: agent-tasks attach demo/20261117T080000Z`);
 
+    // A retry started: `attach` would reach the new attempt, so no hint.
+    run.attempts.push({ ...run.attempts[0]!, n: 2, session: null });
+    expect(groupNotification("succeeded", [item], titles, () => run).message).not.toContain("attach");
+    run.attempts.pop();
     // Closed since (session close): no attach hint. No summary (tick ended it): the reason.
     run.attempts[0]!.session.closed_at = "2026-11-17T09:00:00Z";
     run.attempts[0]!.summary = null;

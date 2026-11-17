@@ -6,7 +6,7 @@ import type { Run, RunEvent } from "../schema.ts";
 import { sendCommand } from "./command.ts";
 import { notifiersOf } from "./config.ts";
 import { sendSystem } from "./system.ts";
-import { isTaskNotifyEvent, type NotifierConfig, type NotifierDeps, type Notification, type NotifyEventType, type NotifyItem, type TaskNotifyEvent } from "./types.ts";
+import { isTaskNotifyEvent, type NotifierConfig, type NotifierDeps, type Notification, type NotifyEventType, type NotifyItem } from "./types.ts";
 
 export * from "./config.ts";
 export * from "./types.ts";
@@ -43,9 +43,10 @@ function detailOf(item: NotifyItem): string {
 /** How much of the agent's `finish --summary` a notification carries. */
 export const SUMMARY_LIMIT = 300;
 
+/** Cuts at `limit` characters (code points, so an emoji is never split). */
 function truncate(text: string, limit: number): string {
-  const trimmed = text.trim();
-  return trimmed.length <= limit ? trimmed : `${trimmed.slice(0, limit - 1).trimEnd()}…`;
+  const chars = Array.from(text.trim());
+  return chars.length <= limit ? chars.join("") : `${chars.slice(0, limit - 1).join("").trimEnd()}…`;
 }
 
 /**
@@ -58,7 +59,8 @@ function finishedRunMessage(item: NotifyItem, run: Run | undefined): string | nu
   const attempt = item.attempt !== undefined ? run.attempts[item.attempt - 1] : run.attempts.at(-1);
   if (!attempt) return null;
   const text = attempt.summary ? truncate(attempt.summary, SUMMARY_LIMIT) : detailOf(item);
-  const open = attempt.session?.kept_open && !attempt.session.closed_at;
+  // `attach` reaches the latest attempt only: no hint once a retry has started.
+  const open = attempt.session?.kept_open && !attempt.session.closed_at && attempt.n === run.attempts.length;
   const tail = open ? `Session still open: agent-tasks attach ${item.run_ref}` : "";
   return [text, tail].filter(Boolean).join("\n") || null;
 }
@@ -110,6 +112,23 @@ export function defaultNotifierDeps(env: NotifierDeps["env"]): NotifierDeps {
   return { env, platform: process.platform, exec };
 }
 
+/** `load` once per key; `onError` gives the value (and may report) when it throws. */
+function memo<T>(load: (key: string) => T, onError: (key: string, err: unknown) => T): (key: string) => T {
+  const cache = new Map<string, T>();
+  return (key) => {
+    if (!cache.has(key)) {
+      let value: T;
+      try {
+        value = load(key);
+      } catch (err) {
+        value = onError(key, err);
+      }
+      cache.set(key, value);
+    }
+    return cache.get(key)!;
+  };
+}
+
 function send(config: NotifierConfig, n: Notification, deps: NotifierDeps): void {
   if (config.type === "system") sendSystem(n, deps);
   else sendCommand(config, n, deps);
@@ -124,67 +143,32 @@ export function dispatchNotifications(ctx: Context, items: NotifyItem[], deps: N
   // Validated when the config is loaded.
   const notifiers = notifiersOf(ctx.config.config);
 
+  const tasks = memo((id: string) => findTask(ctx, id)?.task ?? null, (id, err) => {
+    result.warnings.push(`could not read task ${id} for its notifications: ${(err as Error).message}`);
+    return null;
+  });
+  const runOf = memo((ref: string): Run | undefined => readRunRef(ctx, ref), () => undefined);
+  const titleOf = (id: string) => tasks(id)?.title ?? id;
+
   // A task's `notify` (resolved: task > profile > config defaults) replaces
   // every notifier's `events` for that task's run events.
-  const taskNotify = new Map<string, TaskNotifyEvent[] | null>();
-  const notifyOf = (item: NotifyItem): TaskNotifyEvent[] | null => {
-    if (!item.task_id || !isTaskNotifyEvent(item.type)) return null;
-    if (!taskNotify.has(item.task_id)) {
-      let notify: TaskNotifyEvent[] | null = null;
-      try {
-        const found = findTask(ctx, item.task_id);
-        if (found) notify = ctx.resolveFor(found.task).notify;
-      } catch {
-        // A broken task file: the notifiers' own events.
-      }
-      taskNotify.set(item.task_id, notify);
-    }
-    return taskNotify.get(item.task_id)!;
-  };
+  const notifyOf = memo((id: string) => {
+    const task = tasks(id);
+    return task ? ctx.resolveFor(task).notify : null;
+  }, () => null);
   const wants = (config: NotifierConfig, item: NotifyItem): boolean => {
-    const notify = notifyOf(item);
-    return notify ? (notify as NotifyEventType[]).includes(item.type) : config.events.includes(item.type);
+    const notify = item.task_id && isTaskNotifyEvent(item.type) ? notifyOf(item.task_id) : null;
+    return (notify ?? config.events).some((e) => e === item.type);
   };
 
   // Drop what was already notified (a run event carries `notified` once sent).
   const fresh = items.filter((item) => {
     if (!notifiers.some((n) => wants(n, item))) return false;
     if (!item.run_ref) return true;
-    try {
-      return !matchingRunEvent(readRunRef(ctx, item.run_ref), item)?.notified;
-    } catch {
-      return true;
-    }
+    const run = runOf(item.run_ref);
+    return !run || !matchingRunEvent(run, item)?.notified;
   });
   if (fresh.length === 0) return result;
-
-  const titles = new Map<string, string>();
-  const titleOf = (id: string) => {
-    if (!titles.has(id)) {
-      let title = id;
-      try {
-        title = findTask(ctx, id)?.task.title ?? id;
-      } catch {
-        // A broken task file: use its id.
-      }
-      titles.set(id, title);
-    }
-    return titles.get(id)!;
-  };
-
-  const runs = new Map<string, Run | undefined>();
-  const runOf = (ref: string) => {
-    if (!runs.has(ref)) {
-      let run: Run | undefined;
-      try {
-        run = readRunRef(ctx, ref);
-      } catch {
-        // Unreadable: the notification keeps its short form.
-      }
-      runs.set(ref, run);
-    }
-    return runs.get(ref);
-  };
 
   notifiers.forEach((config, index) => {
     const byType = new Map<NotifyEventType, NotifyItem[]>();
