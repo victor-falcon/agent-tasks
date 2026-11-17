@@ -29,6 +29,7 @@ import show from "./show.ts";
 import status from "./status.ts";
 import task from "./task.ts";
 import tick from "./tick.ts";
+import top from "./top.ts";
 import type { Command } from "./types.ts";
 import version from "./version.ts";
 
@@ -70,6 +71,7 @@ export const commands: Command[] = [
   status,
   task,
   tick,
+  top,
   version,
 ];
 

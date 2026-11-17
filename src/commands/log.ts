@@ -19,7 +19,7 @@ import { findRun } from "../find-run.ts";
 import { EXIT_INTERRUPTED, followWithClock } from "../follow.ts";
 import type { Command } from "./types.ts";
 
-interface CapturedLog {
+export interface CapturedLog {
   attempt: number;
   /** Attempts that write to the same file (the default log is one per slot). */
   shared_with: number[];
@@ -34,7 +34,7 @@ function logPath(ctx: Context, run: Run, attempt: Attempt): string {
 }
 
 /** The attempt's captured output; runs without a recorded path use the default `runs/<task>/<slot>.log`. */
-function capturedLog(ctx: Context, run: Run, attempt: Attempt | undefined): CapturedLog | null {
+export function capturedLog(ctx: Context, run: Run, attempt: Attempt | undefined): CapturedLog | null {
   if (!attempt) return null;
   const path = logPath(ctx, run, attempt);
   const exists = existsSync(path);
@@ -55,7 +55,7 @@ function eventTime(at: string, run: Run, tz: string, now: Date): string {
   return sameDay(date, new Date(run.slot), tz) ? clockTimeWithSeconds(date, tz) : absoluteTimeWithSeconds(date, tz, now);
 }
 
-function renderEvents(run: Run, tz: string, now: Date): string {
+export function renderEvents(run: Run, tz: string, now: Date): string {
   if (run.events.length === 0) return "Events: none";
   const rows = run.events.map((e: RunEvent) => [eventTime(e.at, run, tz, now), e.event, pairs(e, ["at", "event"])]);
   return `Events\n${renderTable(rows, { header: false, indent: "  " })}`;
@@ -77,7 +77,7 @@ function sessionText(session: SessionRecord | null): string {
   return rest ? `${launcher} · ${rest}` : launcher;
 }
 
-function renderAttempt(ctx: Context, style: Style, run: Run, attempt: Attempt, log: CapturedLog | null, tz: string): string {
+export function renderAttempt(ctx: Context, style: Style, run: Run, attempt: Attempt, log: CapturedLog | null, tz: string): string {
   const start = new Date(attempt.started_at);
   const end = attempt.finished_at ? new Date(attempt.finished_at) : null;
   const duration = formatSpan((end ?? ctx.now).getTime() - start.getTime());
@@ -93,7 +93,7 @@ function renderAttempt(ctx: Context, style: Style, run: Run, attempt: Attempt, l
   return `Attempt ${attempt.n} · ${statusLabel(style, attempt.status)} · ${when}\n${renderTable(rows, { header: false, indent: "  " })}`;
 }
 
-function renderLog(ctx: Context, run: Run, log: CapturedLog | null): string {
+export function renderLog(ctx: Context, run: Run, log: CapturedLog | null): string {
   if (!log) return neverStarted(run.status) ? "Log: none (it never started)" : "Log: none (no attempt yet)";
   const where = tildify(log.path, ctx.env);
   if (log.content === null) return isInProgress(run.status) ? `Log: not captured yet (still in progress): ${where}` : `Log: none captured (${where})`;

@@ -24,8 +24,9 @@ sub-agent  "/run-agent-task <run_ref>"
 
 - **The runner** (`agent-tasks runner`) is a normal process you leave open
   in a tab. Each tick it records a heartbeat, works out which slots are due,
-  watches running sessions and launches new ones. It shows every launch,
-  success and failure live, and can send desktop notifications.
+  watches running sessions and launches new ones. On a terminal it shows a
+  dashboard (what runs, what's next, recent results and their output, with
+  Vim keys) and it can send desktop notifications.
 - **One sub-agent per run**, started by a **launcher**: a few commands in your
   config (`launch`, `close`, `status`, `read`, `attach`), from a preset or
   written by hand. The core knows nothing about any multiplexer.
@@ -113,6 +114,7 @@ agent-tasks add --title "Release notes" --at 2026-12-01T09:00:00+01:00 --instruc
 
 | Command | What it answers |
 |---|---|
+| `agent-tasks top` | The runner's dashboard, without running the scheduler: runs in progress, the next run of every task, recent results; open a run to read its summary, output file and log; retry, run, pause or attach from there. |
 | `agent-tasks status` | Is everything fine? Runner, last 24h, what needs attention, what's next. Exits 1 when something needs attention. |
 | `agent-tasks list` | Every task, its next run and its last 10 results. |
 | `agent-tasks show <id>` | A task's definition and which agent, launcher and profile it resolves to, and why. |
@@ -139,6 +141,14 @@ agent-tasks edit nightly-cleanup --notify ""     # unset: inherit (profile, defa
 `succeeded` or `failed` notification carries the summary the agent passed to
 `agent-tasks finish` and, when the session was kept open, the
 `agent-tasks attach <run_ref>` to get back to it.
+
+The dashboard (`agent-tasks runner` on a terminal, or `agent-tasks top`)
+uses Vim keys: `j`/`k`, `gg`/`G`, `<C-d>`/`<C-u>`, `<Tab>` between panels,
+`<CR>` or `l` to open a run, `{`/`}` between its sections, `h`, `q` or
+`<Esc>` to go back, `a` attach, `r` retry, `R` run now, `p` pause or resume,
+`?` for the full list. Change them in `~/.config/agent-tasks/tui.toml` (see
+[examples/tui.example.toml](examples/tui.example.toml)); `runner --plain`
+prints one line per event instead.
 
 Every command takes `--json`. `agent-tasks help <command>` explains each one,
 with its filters (`agent-tasks list --status failed`, `agent-tasks runs --since 24h`,

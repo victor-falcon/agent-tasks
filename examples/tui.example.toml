@@ -1,0 +1,31 @@
+# Key bindings of the dashboard (`agent-tasks top`, and `agent-tasks runner`
+# on a terminal). Copy to ~/.config/agent-tasks/tui.toml and keep only what
+# you change: an action you set replaces its default keys, `[]` unbinds it.
+#
+# Keys use Vim notation: j, G, gg (one key after the other), <C-d>, <CR>,
+# <Esc>, <Tab>, <S-Tab>, <BS>, <Space>, <Up>, <Down>, <Left>, <Right>,
+# <Home>, <End>, <PageUp>, <PageDown>, <C-w>j, <lt> for "<". Ctrl-C always
+# quits. Press ? in the dashboard to see the keys in use.
+#
+# These are the defaults:
+
+[keys]
+down = ["j", "<Down>"]
+up = ["k", "<Up>"]
+first = ["gg", "<Home>"]
+last = ["G", "<End>"]
+half_page_down = ["<C-d>", "<PageDown>"]
+half_page_up = ["<C-u>", "<PageUp>"]
+next_panel = ["<Tab>", "<C-w>j"]
+prev_panel = ["<S-Tab>", "<C-w>k"]
+open = ["<CR>", "l"]           # open the selected run (a task in Next: its latest run)
+back = ["<Esc>", "h", "q"]     # close the run
+next_section = ["}"]           # in a run: Run, Output, Attempts, Events, Log
+prev_section = ["{"]
+attach = ["a"]                 # running or blocked runs
+retry = ["r"]                  # failed, timed-out or missed runs (asks first)
+run_now = ["R"]                # asks first
+toggle_pause = ["p"]
+refresh = ["<C-l>"]
+help = ["?"]
+quit = ["q"]                   # in a run, q goes back (see back)

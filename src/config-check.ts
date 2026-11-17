@@ -9,6 +9,7 @@ import { type CommandSpec, type LauncherSpec, resolveLauncher } from "./launcher
 import { type Env, resolveConfigLocation, resolvePath, tildify } from "./paths.ts";
 import type { AgentSpec } from "./schema.ts";
 import { TASK_TEMPLATE_VARIABLES } from "./task-context.ts";
+import { loadKeymap, TUI_CONFIG_FILE } from "./tui/keys.ts";
 import { variablesIn } from "./template.ts";
 
 // `agent-tasks config check`: everything in the user's config folder that
@@ -221,11 +222,24 @@ export function configLoadCheck(ctx: Context): { loaded: LoadedConfig | null; ch
   }
 }
 
+/** The dashboard's key bindings (`tui.toml`), when the file exists. */
+export function tuiChecks(configDir: string, env: Env): Check[] {
+  try {
+    const { file } = loadKeymap(configDir);
+    return file ? [ok("config.tui", `keys: ${tildify(file, env)} is valid`)] : [];
+  } catch (err) {
+    if (!(err instanceof AgentTasksError)) throw err;
+    const file = tildify(join(configDir, TUI_CONFIG_FILE), env);
+    return [fail("config.tui", `keys: ${file} is invalid`, "fix the listed keys (see examples/tui.example.toml)", err.details.length > 0 ? err.details : [err.message])];
+  }
+}
+
 /** Every check of `config check`, in display order, and the config when it loads. */
 export function configChecks(ctx: Context): { checks: Check[]; loaded: LoadedConfig | null } {
   const { loaded, check } = configLoadCheck(ctx);
   const checks = [check];
-  checks.push(...templateChecks(join(resolveConfigLocation(ctx.env).configDir, "templates"), ctx.env));
+  const { configDir } = resolveConfigLocation(ctx.env);
+  checks.push(...templateChecks(join(configDir, "templates"), ctx.env), ...tuiChecks(configDir, ctx.env));
   if (loaded) checks.push(...instructionChecks(loaded), ...launcherChecks(loaded), ...agentChecks(loaded));
   return { checks, loaded };
 }

@@ -6,6 +6,7 @@ import type { Env } from "../paths.ts";
 const CODES = {
   bold: [1, 22],
   dim: [2, 22],
+  inverse: [7, 27],
   red: [31, 39],
   green: [32, 39],
   yellow: [33, 39],
