@@ -64,7 +64,32 @@ agent-tasks runner · every 5m · launcher: herdr (clc) · data: ~/.local/share/
 - The same lines go to `<data_dir>/state/runner.log`.
 
 Options: `--every 5m` (default, from the config), `--once` (a single tick and
-exit, for testing), `--quiet` (events only, no status line).
+exit, for testing), `--quiet` (events only, no status line), `--plain` (this
+log instead of the dashboard on a terminal).
+
+### Dashboard
+
+On a terminal (stdin and stdout), and without `--plain`, `--quiet`, `--once`
+or `--json`, the runner shows the dashboard of `agent-tasks top` instead of
+the log above: the runner's health and today's counts, runs in progress, the
+next run of every task (paused ones last), recent results with their
+summary, and the tail of `runner.log` (without the tick lines). Opening a run
+shows its summary, the file passed to `finish --output-file`, its attempts,
+events and the captured log. From there, `retry`, `run`, `pause`/`resume`
+and `attach` run the same CLI commands (retry and run ask first).
+
+- The loop does not change: lines still go to `runner.log`, which the
+  dashboard shows, and the Herdr escapes still go out. The dashboard
+  watches the data folder and reloads when it changes (and every 15 s).
+- `q` (or Ctrl-C) closes the dashboard first and then stops the runner
+  after the current tick, so the final status line lands on the normal
+  screen.
+- Keys are Vim-style and can be changed in `<config dir>/tui.toml`
+  (`examples/tui.example.toml`); `config check` validates it. A broken
+  file stops the runner before it takes the screen.
+- `agent-tasks top` is the same dashboard without the scheduler (for
+  another tab or another machine; a client runs it on the hub over SSH).
+  `top --json` prints its data once.
 
 ### Staying alive
 
@@ -271,6 +296,7 @@ less than 15 min.
 |---|---|---|
 | R1 | `agent-tasks runner`: loop, lock, caught errors, `--once`, `--every` | a tick is made to fail on purpose and the runner keeps going |
 | R2 | Output: log with colors and symbols, status line, `runner.log` | what was launched and what failed is clear at a glance |
+| R2b | Dashboard on a terminal (`top`), Vim keys from `tui.toml` | what runs, what's next and what each run did, without leaving the tab |
 | R3 | "Runner stopped" warning in the rest of the commands | `agent-tasks list` without a runner says so at the top |
 | R4 | Runner title (OSC 2) and agent state (OSC 7501) | tasks hang from the runner in the Herdr sidebar |
 | R5 | `system` and `command` notifiers, grouped and not repeated | one failure produces a single notification |

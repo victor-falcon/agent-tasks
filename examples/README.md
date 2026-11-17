@@ -2,6 +2,8 @@
 
 - `config.example.json`: a starting point for `~/.config/agent-tasks/config.json`.
   Every field is optional; see `doc/roadmap/user-config.md`.
+- `tui.example.toml`: key bindings of the dashboard (`agent-tasks top` and
+  `agent-tasks runner` on a terminal), for `~/.config/agent-tasks/tui.toml`.
 - `tasks/`: one one-off task (`once`) and one recurring task (`cron`), in the
   format stored in `<data_dir>/tasks/`.
 

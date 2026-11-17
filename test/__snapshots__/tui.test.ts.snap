@@ -1,0 +1,67 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`frames the panels 1`] = `
+"agent-tasks top · ● every 5m · last tick 10:00 · next tick 10:05                   today ■3 ✕1 □4 !1
+── Running (3) ─────────────────────────────────────────────────────────────────────────────────────
+  !  review-pr-123     blocked  since 09:50  12m    p18
+  ◐  worktree-cleanup  running  since 09:58  4m     p18
+  ◐  sentry-summary    running  since 10:01  1m     p19
+── Next (6) ────────────────────────────────────────────────────────────────────────────────────────
+  ○  11:00      sentry-summary      in 58m  every hour
+  ○  Wed 06:00  inbox-triage        in 20h  every day 06:00
+  ○  Wed 08:00  worktree-cleanup    in 22h  every day 08:00
+  ○  Fri 09:00  release-notes       in 3d   Nov 20 09:00
+  ○  Mon 09:00  weekly-deps-report  in 6d   Mon 09:00
+  ⏸  paused     backup-notes                every day 23:00
+── Recent (31) ─────────────────────────────────────────────────────────────────────────────────────
+› ✕  09:10         sentry-summary      3m  ×2  sentry-cli has no auth
+  ■  08:37         sentry-summary      6m      3 new issues in notes/sentry.md
+  □  06:20         inbox-triage        –       runner_offline
+  □  04:20         sentry-summary      –       runner_offline
+  □  03:20         sentry-summary      –       runner_offline
+  □  02:20         sentry-summary      –       runner_offline
+  ■  01:04         sentry-summary      3m      1 new issue in notes/sentry.md
+  ■  00:04         sentry-summary      3m      no new issues
+  ■  Mon 09:07     weekly-deps-report  6m      deps report in notes/deps.md
+  ■  Mon 08:04     worktree-cleanup    3m      removed 2 worktrees
+  ■  Mon 06:04     inbox-triage        3m      inbox at zero
+  ■  Sun 08:04     worktree-cleanup    3m      removed 2 worktrees
+  ■  Sun 06:04     inbox-triage        3m      inbox at zero
+  ■  Sat 08:04     worktree-cleanup    3m      removed 2 worktrees
+── Events · runner.log ─────────────────────────────────────────────────────────────────────────────
+  09:55:01  ▶ sentry-summary/20261117T085500Z      launched in t45
+j/k move · <Tab> panel · <CR> open · a attach · r retry · R run · p pause · ? keys · q quit"
+`;
+
+exports[`frames no tasks yet 1`] = `
+"agent-tasks top · ✕ runner not running · no tick recorded yet                      today ■0 ✕0 □0 !0
+── Running (0) ─────────────────────────────────────────────────────────────────────────────────────
+  nothing running
+── Next (0) ────────────────────────────────────────────────────────────────────────────────────────
+  nothing scheduled
+── Recent (0) ──────────────────────────────────────────────────────────────────────────────────────
+  no runs yet
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+── Events · runner.log ─────────────────────────────────────────────────────────────────────────────
+  no events yet
+j/k move · <Tab> panel · <CR> open · a attach · r retry · R run · p pause · ? keys · q quit"
+`;

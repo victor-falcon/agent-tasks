@@ -121,6 +121,8 @@ const PREPARE: Record<string, Prepare> = {
   list: prepareList,
   attach: (_ctx, args) => ({ args, inheritStdin: true, tty: process.stdin.isTTY === true }),
   log: prepareLog,
+  // The dashboard runs on the hub, on this terminal (the hub's tui.toml applies).
+  top: (_ctx, args) => ({ args, inheritStdin: true, tty: process.stdin.isTTY === true && process.stdout.isTTY === true }),
 };
 
 export async function prepareForward(ctx: Context, name: string, args: string[]): Promise<Forward> {

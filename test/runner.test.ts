@@ -338,6 +338,32 @@ describe("terminal output", () => {
     );
   });
 
+  test("while the dashboard has the screen, lines only go to runner.log; the final line is shown once it is gone", async () => {
+    let shown = false;
+    const started: string[] = [];
+    const h = harness(home, {
+      tty: true,
+      stopAfter: 1,
+      tick: (ctx) => ({ ...emptyTick(ctx), events: [{ type: "launched", run_ref: "demo/20261117T080000Z", task_id: "demo", attempt: 1, handle: "4242" }] }),
+    });
+    h.deps.onStarted = () => {
+      started.push(readRunnerLock(home.paths) ? "locked" : "unlocked");
+      shown = true;
+    };
+    h.deps.screenHidden = () => shown;
+    const sleep = h.deps.sleep;
+    h.deps.sleep = async (ms, signal) => {
+      await sleep(ms, signal);
+      shown = false; // the user quit the dashboard
+    };
+    await h.run();
+    expect(started).toEqual(["locked"]);
+    const visible = h.output().replace(/\x1b\][^\x07]*\x07/g, ""); // the Herdr escapes still go out
+    expect(visible).not.toContain("launched");
+    expect(visible).toContain("stopped · last tick 09:00:00");
+    expect(readFileSync(runnerLogPath(home.paths), "utf8")).toContain("▶ demo/20261117T080000Z");
+  });
+
   test("today's counters add up the events", async () => {
     const events = [
       { type: "succeeded" as const, run_ref: "a/20261117T080000Z", task_id: "a" },
