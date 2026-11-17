@@ -1,6 +1,6 @@
 ---
 name: schedule-agent-task
-description: Schedule work for a coding agent to do later, once or on a recurring schedule, with the agent-tasks CLI. Use when the user asks to schedule something or have an agent do it later ("every Monday…", "on the 20th do…", "remind an agent to…", "tomorrow at 9 check…"), or to list, change, pause or remove scheduled agent tasks.
+description: Schedule work for a coding agent to do later, once or on a recurring schedule, with the agent-tasks CLI. Use when the user asks to schedule something or have an agent do it later ("every Monday…", "on the 20th do…", "remind an agent to…", "tomorrow at 9 check…"), or to list, change, pause, remove, run now or retry scheduled agent tasks, or to check how they went ("did anything fail last night?", "why did it fail?").
 argument-hint: <what to do and when>
 ---
 
@@ -106,6 +106,23 @@ agent-tasks pause <id>             # stop scheduling (resume <id> to restart)
 agent-tasks resume <id>
 agent-tasks rm <id>                # archive it (its history is kept)
 agent-tasks runs <id>              # past occurrences and their results
+agent-tasks run <id>               # run it now, outside its schedule
 ```
+
+## 5. Check how they went
+
+```sh
+agent-tasks status                 # runner alive? last 24h, what needs attention, what's next
+agent-tasks runs --since 24h       # every run of the last day, with its result
+agent-tasks log <id>               # the latest run of a task: events, summary, captured output
+agent-tasks log <run_ref>          # one run (run refs are in "runs")
+agent-tasks retry <run_ref>        # a new attempt of a failed, timed-out or missed run
+agent-tasks attach <run_ref>       # bring a running or blocked run's tab to the front
+```
+
+When asked why a run failed, read its log and explain the cause in a
+sentence or two; if the instructions were the problem, offer to fix them
+with `agent-tasks edit` and retry. A `missed` run with reason
+`runner_offline` means the runner was stopped or the machine asleep.
 
 Always go through the CLI; never edit the agent-tasks data folder by hand.

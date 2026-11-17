@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { commands } from "../src/commands/index.ts";
 
 const REPO = resolve(import.meta.dir, "..");
-const DOCS = ["README.md", "RECIPE.md"] as const;
+const DOCS = ["README.md", "RECIPE.md", "doc/guide.md"] as const;
 const RECIPE_URL = "https://github.com/victor-falcon/agent-tasks/blob/main/RECIPE.md";
 
 /**
