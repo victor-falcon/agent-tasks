@@ -90,7 +90,8 @@ and `attach` run the same CLI commands (retry and run ask first).
   file stops the runner before it takes the screen.
 - `agent-tasks top` is the same dashboard without the scheduler (for
   another tab or another machine; a client runs it on the hub over SSH).
-  `top --json` prints its data once.
+  `top --json` prints its data once, with the resolved `data_dir` so a UI
+  knows which folder to watch.
 
 ### Staying alive
 

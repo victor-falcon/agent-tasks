@@ -171,7 +171,8 @@ describe("dashboard data", () => {
     expect(code).toBe(0);
     const json = JSON.parse(stdout);
     expect(json.schema).toBe(1);
-    expect(Object.keys(json)).toEqual(expect.arrayContaining(["runner", "running", "next", "recent", "today", "events"]));
+    expect(Object.keys(json)).toEqual(expect.arrayContaining(["data_dir", "runner", "running", "next", "recent", "today", "events"]));
+    expect(json.data_dir).toBe(home.paths.dataDir);
   });
 });
 
