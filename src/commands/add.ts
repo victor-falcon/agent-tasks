@@ -5,10 +5,21 @@ import { UsageError, ValidationError } from "../errors.ts";
 import { parseJsonObject, readStdin } from "../input.ts";
 import { type Task, taskErrors } from "../schema.ts";
 import { taskPath } from "../store.ts";
-import { applyTaskFlags, checkTaskMachine, displayPath, normalizeTaskCwd, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE } from "../task-flags.ts";
+import { applyTaskFlags, checkTaskMachine, displayPath, normalizeTaskCwdFor, TASK_FLAG_OPTIONS, TASK_FLAGS_USAGE } from "../task-flags.ts";
 import { createTaskFromTitle, createTaskWithId } from "../task-id.ts";
 import { describeNext, nowIso, taskOverview } from "../task-info.ts";
 import type { Command } from "./types.ts";
+
+/**
+ * Hidden options set by a client that forwards `add` to the hub (see
+ * src/client.ts): where the task was created, on the client.
+ */
+const CREATED_BY_OPTIONS = {
+  "created-cwd": { type: "string" },
+  "created-session": { type: "string" },
+} as const;
+
+export const ADD_OPTIONS = { ...TASK_FLAG_OPTIONS, ...CREATED_BY_OPTIONS, id: { type: "string" }, "json-input": { type: "boolean" } } as const;
 
 const add: Command = {
   name: "add",
@@ -33,11 +44,7 @@ the config, or "local"); another machine must be in the config's
 \`machines\`. With --json, prints the task and its next
 runs.`,
   async run(ctx, args) {
-    const { values, positionals } = parseCommandArgs(
-      args,
-      { ...TASK_FLAG_OPTIONS, id: { type: "string" }, "json-input": { type: "boolean" } },
-      { maxPositionals: 1 },
-    );
+    const { values, positionals } = parseCommandArgs(args, ADD_OPTIONS, { maxPositionals: 1 });
     if (positionals[0] !== undefined && positionals[0] !== "-") throw new UsageError(`unexpected argument "${positionals[0]}"`);
     const fromStdin = values["json-input"] === true || positionals[0] === "-";
     if (fromStdin && values["instructions-file"] === "-") throw new UsageError("stdin can hold the task JSON or the instructions, not both");
@@ -53,7 +60,10 @@ runs.`,
     task.enabled ??= true;
     task.created_at = now;
     task.updated_at = now;
-    task.created_by = { cwd: displayPath(ctx, ctx.cwd), session: ctx.env.HC_TERMINAL_ID || null };
+    task.created_by = {
+      cwd: values["created-cwd"] ?? displayPath(ctx, ctx.cwd),
+      session: (values["created-session"] ?? ctx.env.HC_TERMINAL_ID) || null,
+    };
     task.schedule_since = null;
 
     const explicitId = values.id ?? task.id;
@@ -61,7 +71,7 @@ runs.`,
     const errors = taskErrors({ ...task, id: explicitId ?? "placeholder" });
     if (errors.length > 0) throw new ValidationError("task", errors);
     checkTaskMachine(ctx, task.machine);
-    task.cwd = normalizeTaskCwd(ctx, task.cwd);
+    task.cwd = normalizeTaskCwdFor(ctx, task.cwd, task.machine);
 
     const created = explicitId !== undefined ? createTaskWithId(ctx, task, explicitId) : createTaskFromTitle(ctx, task as Partial<Task> & { title: string });
     if (created.schedule.type === "once" && Date.parse(created.schedule.at) <= ctx.now.getTime() && !ctx.json) {

@@ -1,19 +1,46 @@
-import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname } from "node:path";
 import { parseCommandArgs } from "../args.ts";
-import { output } from "../context.ts";
+import { type Context, output } from "../context.ts";
 import { AgentTasksError, NotFoundError, UsageError } from "../errors.ts";
 import { dataFile, endAttempt, lastAttempt, readRunRef, requireTask, settleSession, stamp, updateRun } from "../execution.ts";
+import { readStdin } from "../input.ts";
 import { resolvePath } from "../paths.ts";
 import { parseRunRef } from "../slot.ts";
 import type { Command } from "./types.ts";
 
 const STATUSES = ["succeeded", "failed"] as const;
 
+export const FINISH_OPTIONS = {
+  status: { type: "string" },
+  summary: { type: "string" },
+  "output-file": { type: "string" },
+  // Hidden: the extension of an output file read from stdin.
+  "output-ext": { type: "string" },
+} as const;
+
+/** The run's long output: its file extension and how to save it at a path. */
+interface OutputSource {
+  ext: string;
+  save(dest: string): void;
+}
+
+/** `--output-file <file>`, or `-` for stdin (how a client forwards its file, with the hidden `--output-ext`). */
+async function readOutputSource(ctx: Context, file: string, ext: string | undefined): Promise<OutputSource> {
+  if (file === "-") {
+    if (ext !== undefined && !/^(\.[A-Za-z0-9]{1,16})?$/.test(ext)) throw new UsageError(`--output-ext must be like .md (got "${ext}")`);
+    const text = await readStdin();
+    return { ext: ext ?? "", save: (dest) => writeFileSync(dest, text) };
+  }
+  const source = resolvePath(file, ctx.env, ctx.cwd);
+  if (!existsSync(source) || !statSync(source).isFile()) throw new NotFoundError(`output file not found: ${source}`);
+  return { ext: extname(source), save: (dest) => copyFileSync(source, dest) };
+}
+
 const finish: Command = {
   name: "finish",
   summary: "Record the result of a run and close its session (called by the subagent)",
-  usage: `Usage: agent-tasks finish <run_ref> --status succeeded|failed --summary "<text>" [--output-file <file>]
+  usage: `Usage: agent-tasks finish <run_ref> --status succeeded|failed --summary "<text>" [--output-file <file|->]
 
 Saves the result of the run's latest attempt and then closes its session with
 the launcher's \`close\`, unless \`keep_open\` says to keep it (\`always\`, or
@@ -30,11 +57,11 @@ Arguments:
 Options:
   --status <status>     succeeded or failed
   --summary <text>      What was done and where the result is
-  --output-file <file>  Long output, copied next to the run's log`,
-  run(ctx, args) {
+  --output-file <file>  Long output, copied next to the run's log ("-" for stdin)`,
+  async run(ctx, args) {
     const { positionals, values } = parseCommandArgs(
       args,
-      { status: { type: "string" }, summary: { type: "string" }, "output-file": { type: "string" } },
+      FINISH_OPTIONS,
       { minPositionals: 1, maxPositionals: 1 },
     );
     const ref = positionals[0]!;
@@ -42,11 +69,7 @@ Options:
     if (!status || !STATUSES.includes(status)) throw new UsageError("--status must be succeeded or failed");
     const summary = values.summary?.trim();
     if (!summary) throw new UsageError("--summary is required: say what was done and where the result is");
-    let source: string | null = null;
-    if (values["output-file"] !== undefined) {
-      source = resolvePath(values["output-file"], ctx.env, ctx.cwd);
-      if (!existsSync(source) || !statSync(source).isFile()) throw new NotFoundError(`output file not found: ${source}`);
-    }
+    const source = values["output-file"] !== undefined ? await readOutputSource(ctx, values["output-file"], values["output-ext"]) : null;
 
     const before = readRunRef(ctx, ref);
     const latest = lastAttempt(before);
@@ -73,9 +96,9 @@ Options:
       }
       if (source) {
         const { taskId, slot } = parseRunRef(ref);
-        a.output = `runs/${taskId}/${slot}${n > 1 ? `.${n}` : ""}.output${extname(source)}`;
+        a.output = `runs/${taskId}/${slot}${n > 1 ? `.${n}` : ""}.output${source.ext}`;
         mkdirSync(dirname(dataFile(ctx, a.output)), { recursive: true });
-        copyFileSync(source, dataFile(ctx, a.output));
+        source.save(dataFile(ctx, a.output));
       }
       endAttempt(r, n, status, null, at, { summary, by: "finish" });
     });

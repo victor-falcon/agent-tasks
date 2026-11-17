@@ -1,3 +1,4 @@
+import { forwardToHub, runsLocally } from "./client.ts";
 import { commands, findCommand, subcommandsOf } from "./commands/index.ts";
 import { createContext, type Writer } from "./context.ts";
 import { AgentTasksError, UsageError } from "./errors.ts";
@@ -97,11 +98,18 @@ export async function main(argv: string[], opts: MainOptions = {}): Promise<numb
       printHelp(ctx, cmd.name.split(" "));
       return EXIT_OK;
     }
+    const hub = runsLocally(cmd.name) ? undefined : ctx.config.config.hub;
+    if (hub) return await forwardToHub(ctx, hub.ssh, cmd.name, args, forwardedGlobals(flags));
     return (await cmd.run(ctx, args)) ?? EXIT_OK;
   } catch (err) {
     reportError(err, json, stdout, stderr, err instanceof UsageError ? (hint ?? 'Run "agent-tasks help" for usage.') : undefined);
     return err instanceof UsageError ? EXIT_USAGE : EXIT_ERROR;
   }
+}
+
+/** The global flags a client passes on to the hub with a forwarded command. */
+function forwardedGlobals(flags: GlobalFlags): string[] {
+  return [...(flags.json ? ["--json"] : []), ...(flags.now !== undefined ? [`--now=${flags.now}`] : [])];
 }
 
 function parseNow(value: string): Date {
