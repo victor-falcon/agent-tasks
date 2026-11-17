@@ -16,7 +16,12 @@ Checks, one line each (✓ ok, ! warning, ✕ error, with how to fix it):
     instruction files, and that the launcher and agent commands exist
     (hc for the herdr preset);
   - the data dir is writable and its task files can be read;
-  - for launchers that need a Herdr terminal, that $HC_TERMINAL_ID is set;
+  - for Herdr launchers, where runs open: in the runner's space with
+    $HC_TERMINAL_ID, else in the launcher's "space" (always on a client,
+    whose runs the hub launches over SSH); launchers that need
+    $HC_TERMINAL_ID warn without it;
+  - on a client, launchers that read a variable SSH commands lack
+    ({{env.REX_SESSION}}) warn;
   - the skills are installed (agent-tasks install), and so is any skill the
     config names;
   - the runner's heartbeat (state/ticks.jsonl): a warning if there is none

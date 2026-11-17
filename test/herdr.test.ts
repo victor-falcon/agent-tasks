@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { herdrSpaceId } from "../src/launcher.ts";
 import { join } from "node:path";
 import { at, DEMO_REF, type ExecHome, execTask, makeExecHome } from "./exec-helpers.ts";
 
@@ -22,6 +23,10 @@ function setTerminal(t: string, patch: Record<string, unknown>): void {
   writeFileSync(terminalFile(t), JSON.stringify({ ...info, ...patch }));
 }
 const calls = (sub: string) => home.hcCalls().filter((c) => c[0] === sub);
+const appCallsFile = () => join(home.hcDir, "app-calls.jsonl");
+const appCalls = (): string[][] => (existsSync(appCallsFile()) ? readFileSync(appCallsFile(), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
+const spaces = () => JSON.parse(readFileSync(join(home.hcDir, "spaces.json"), "utf8")).spaces;
+const labelsOf = (run: string[]) => run.slice(0, run.indexOf("--")).filter((_, i, flags) => flags[i - 1] === "--label");
 const finish = (status: string, minutes = 10) => home.cli("finish", DEMO_REF, "--status", status, "--summary", "done", "--now", at(minutes), "--json");
 
 describe("herdr preset", () => {
@@ -162,19 +167,84 @@ describe("herdr preset", () => {
     expect(run.attempts[0]!.session).toMatchObject({ kept_open: true }); // keep_open: on_failure
   });
 
-  test("without $HC_TERMINAL_ID the launch fails with a clear reason", async () => {
-    delete home.env.HC_TERMINAL_ID;
+  test("with $HC_TERMINAL_ID the space is left alone (no rename)", async () => {
     execTask(home, "succeed");
-    const { events } = await home.tick(1);
-    expect(events).toEqual([expect.objectContaining({ type: "failed", reason: "launch_failed", message: expect.stringContaining("$HC_TERMINAL_ID is not set") })]);
-    expect(calls("run")).toEqual([]);
+    await home.tick(1);
+    expect(appCalls()).toEqual([]);
   });
-
   test("a preset can be partly overridden", async () => {
     home.writeConfig({ launcher: { preset: "herdr", close: ["hc", "kill", "--force", "{{handle}}"] }, agent: { command: "clc" } });
     execTask(home, "succeed");
     await home.tick(1);
     await finish("succeeded");
     expect(calls("kill")).toEqual([["kill", "--force", "t2"]]);
+  });
+});
+
+// A client machine (the hub launches over SSH) or a runner outside Herdr:
+// no runner terminal, so runs open in a space of their own on this machine.
+describe("herdr preset without $HC_TERMINAL_ID", () => {
+  beforeEach(() => {
+    delete home.env.HC_TERMINAL_ID;
+  });
+  const AGENT_TASKS = herdrSpaceId("Agent Tasks");
+
+  test("opens the tab in a new \"Agent Tasks\" space, not nested, and names the space", async () => {
+    execTask(home, "succeed");
+    const { events } = await home.tick(1);
+    expect(events).toEqual([expect.objectContaining({ type: "launched", handle: "t2" })]);
+    expect(calls("get")).toEqual([]);
+    const labels = labelsOf(calls("run")[0]!);
+    expect(labels[0]).toBe(`herdr.space=${AGENT_TASKS}`);
+    expect(labels[1]).toMatch(/^herdr\.tab=tb[0-9a-f]{32}$/);
+    expect(labels.slice(2)).toEqual([`agent-tasks.run=${DEMO_REF}`]);
+    expect(calls("send")).toHaveLength(1);
+    expect(appCalls()).toEqual([["ls"], ["do", "space.rename", "--id", AGENT_TASKS, "--name", "Agent Tasks"]]);
+    expect(spaces()).toEqual([{ id: AGENT_TASKS, name: "Agent Tasks", machine: null }]);
+    expect(home.run(DEMO_REF).status).toBe("running");
+  });
+
+  test("reuses a space the window already shows with that name, without renaming it", async () => {
+    writeFileSync(join(home.hcDir, "spaces.json"), JSON.stringify({ spaces: [{ id: "sp-other", name: "Agent Tasks", machine: "vps" }, { id: "sp-mine", name: "Agent Tasks", machine: null }] }));
+    execTask(home, "succeed");
+    await home.tick(1);
+    expect(labelsOf(calls("run")[0]!)[0]).toBe("herdr.space=sp-mine");
+    expect(appCalls()).toEqual([["ls"]]);
+  });
+
+  test("keeps the name the user gave the space an earlier run made", async () => {
+    writeFileSync(join(home.hcDir, "spaces.json"), JSON.stringify({ spaces: [{ id: AGENT_TASKS, name: "Night shift", machine: null }] }));
+    execTask(home, "succeed");
+    await home.tick(1);
+    expect(labelsOf(calls("run")[0]!)[0]).toBe(`herdr.space=${AGENT_TASKS}`);
+    expect(appCalls()).toEqual([["ls"]]);
+  });
+
+  test("launcher.space picks another space", async () => {
+    home.writeConfig({ timezone: "Europe/Madrid", launcher: { preset: "herdr", space: "Night runs" }, agent: { command: "clc" } });
+    execTask(home, "succeed");
+    await home.tick(1);
+    expect(labelsOf(calls("run")[0]!)[0]).toBe(`herdr.space=${herdrSpaceId("Night runs")}`);
+    expect(spaces()).toEqual([{ id: herdrSpaceId("Night runs"), name: "Night runs", machine: null }]);
+  });
+
+  test("without the window the run still starts, in the space derived from the name", async () => {
+    writeFileSync(join(home.hcDir, "app-down"), "");
+    execTask(home, "succeed");
+    const { events } = await home.tick(1);
+    expect(events).toEqual([expect.objectContaining({ type: "launched", handle: "t2" })]);
+    expect(labelsOf(calls("run")[0]!)[0]).toBe(`herdr.space=${AGENT_TASKS}`);
+    expect(home.run(DEMO_REF).status).toBe("running");
+    expect(appCalls()).toEqual([["ls"]]); // no rename retries without a window
+  });
+
+  test("status, read and close need no runner terminal", async () => {
+    execTask(home, "succeed");
+    await home.tick(1);
+    setTerminal("t2", { status: { state: "idle" } });
+    expect((await home.cli("session", "read", DEMO_REF)).stdout).toContain("screen of t2");
+    expect((await finish("succeeded")).code).toBe(0);
+    expect(calls("kill")).toEqual([["kill", "t2"]]);
+    expect(calls("get").every((c) => c[1] === "t2")).toBe(true);
   });
 });

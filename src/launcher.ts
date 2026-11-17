@@ -1,5 +1,6 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync } from "node:fs";
+import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import type { LauncherConfig, ResolvedAgent } from "./config.ts";
 import { AgentTasksError } from "./errors.ts";
@@ -38,6 +39,8 @@ export interface LauncherSpec {
   status_map: string | Record<string, SessionState> | null;
   read: CommandSpec | null;
   attach: CommandSpec | null;
+  /** Where runs open when agent-tasks is not inside a session of the multiplexer, e.g. the herdr preset's space name. */
+  space: string | null;
 }
 
 export class LauncherError extends AgentTasksError {
@@ -50,7 +53,7 @@ export class LauncherError extends AgentTasksError {
 // Presets and validation
 // ---------------------------------------------------------------------------
 
-const LAUNCHER_FIELDS = ["preset", "description", "launch", "then", "background", "handle", "close", "status", "status_map", "read", "attach"] as const;
+const LAUNCHER_FIELDS = ["preset", "description", "launch", "then", "background", "handle", "close", "status", "status_map", "read", "attach", "space"] as const;
 const COMMAND_FIELDS = ["launch", "close", "status", "read", "attach"] as const;
 const STATUS_MAPS = ["herdr"];
 
@@ -119,6 +122,7 @@ export function resolveLauncher(config: LauncherConfig, presetsDir = PRESETS_DIR
       errors.push(`status_map: must be ${STATUS_MAPS.map((m) => `"${m}"`).join(", ")} or an object from output to one of: ${SESSION_STATES.join(", ")}`);
     }
   }
+  if (merged.space !== undefined && merged.space !== null && !(typeof merged.space === "string" && merged.space.trim() !== "")) errors.push("space: must be a non-empty string");
   if (errors.length > 0) throw new LauncherError(`Invalid ${where}:`, errors);
   return {
     name: preset ?? "custom",
@@ -131,6 +135,7 @@ export function resolveLauncher(config: LauncherConfig, presetsDir = PRESETS_DIR
     status_map: (map as LauncherSpec["status_map"] | undefined) ?? null,
     read: (merged.read as CommandSpec | null | undefined) ?? null,
     attach: (merged.attach as CommandSpec | null | undefined) ?? null,
+    space: (merged.space as string | null | undefined) ?? null,
   };
 }
 
@@ -175,8 +180,37 @@ export function agentCommandLine(agent: ResolvedAgent): string {
   return [agent.command, ...agent.args.map(shellQuote)].join(" ");
 }
 
-function shellOf(env: Env): string {
-  return env.SHELL || "/bin/sh";
+/** `$SHELL`, else the user's login shell (SSH commands may run without `$SHELL`), else `/bin/sh`. */
+export function shellOf(env: Env): string {
+  return env.SHELL || systemLoginShell() || "/bin/sh";
+}
+
+let loginShellCache: string | null | undefined;
+
+/**
+ * The user's login shell from the system's user database: `getent passwd`
+ * (Linux), else `dscl` (macOS). Not `os.userInfo().shell`: Bun takes it from
+ * `$SHELL` and says "unknown" without it.
+ */
+export function systemLoginShell(): string | null {
+  if (loginShellCache !== undefined) return loginShellCache;
+  let user: string;
+  try {
+    user = userInfo().username;
+  } catch {
+    return (loginShellCache = null);
+  }
+  const env = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" };
+  const lookups: [string[], (out: string) => string | undefined][] = [
+    [["getent", "passwd", user], (out) => out.trim().split("\n")[0]?.split(":")[6]],
+    [["dscl", ".", "-read", `/Users/${user}`, "UserShell"], (out) => /^UserShell:\s*(\S+)/m.exec(out)?.[1]],
+  ];
+  for (const [argv, parse] of lookups) {
+    const result = exec(argv, { env, timeoutMs: 5_000 });
+    const shell = result.code === 0 ? parse(result.stdout)?.trim() : undefined;
+    if (shell?.startsWith("/")) return (loginShellCache = shell);
+  }
+  return (loginShellCache = null);
 }
 
 /** The agent with its prompt, as an argv: through `<shell> -ic` when `agent.shell` is set (aliases). */
@@ -199,9 +233,57 @@ function runnerSpace(env: Env, terminal: string): string {
   return space;
 }
 
-export function sessionVars(input: SessionInput): Vars {
+/** A space id derived from its name, so every run outside a Herdr terminal opens in the same space. */
+export function herdrSpaceId(name: string): string {
+  return `sp${createHash("sha1").update(`agent-tasks/${name}`).digest("hex").slice(0, 32)}`;
+}
+
+/** This machine's Herdr space for runs, and whether the window shows it. */
+export interface HerdrSpace {
+  id: string;
+  /** `found`: the window shows it; `missing`: it does not (the launch creates it); `unknown`: no window or no `herdr-app`. */
+  state: "found" | "missing" | "unknown";
+}
+
+/**
+ * This machine's Herdr space called `name`, as the window shows it
+ * (`herdr-app ls`): by name, else the one an earlier run made from the name
+ * (even if renamed since). When there is none, the id derived from the name:
+ * Herdr creates a space for an id it does not know when a terminal labeled
+ * with it starts, and the herdr preset names it.
+ */
+export function namedHerdrSpace(env: Env, name: string): HerdrSpace {
+  const derived = herdrSpaceId(name);
+  const result = exec(["herdr-app", "ls"], { env, timeoutMs: 10_000 });
+  let spaces: unknown;
+  try {
+    spaces = result.code === 0 ? (JSON.parse(result.stdout) as { spaces?: unknown }).spaces : undefined;
+  } catch {
+    spaces = undefined;
+  }
+  if (!Array.isArray(spaces)) return { id: derived, state: "unknown" };
+  const local = spaces.filter((s): s is { id: string; name?: unknown } => isObject(s) && typeof s.id === "string" && (s.machine ?? null) === null);
+  const found = local.find((s) => s.name === name) ?? local.find((s) => s.id === derived);
+  return found ? { id: found.id, state: "found" } : { id: derived, state: "missing" };
+}
+
+/** Launcher settings that variables read (the launcher's `space`). */
+export type LauncherVarsSpec = Pick<LauncherSpec, "space">;
+
+/**
+ * What the commands of one launch share: `launch` and its `then` steps
+ * render separately, but must agree on the space.
+ */
+export interface LaunchShared {
+  herdrSpace?: HerdrSpace;
+}
+
+export function sessionVars(input: SessionInput, spec: LauncherVarsSpec, shared: LaunchShared = {}): Vars {
   const { env } = input;
   const terminal = env.HC_TERMINAL_ID || undefined;
+  const space = spec.space ?? undefined;
+  const runnerSpaceId = terminal ? once(() => runnerSpace(env, terminal)) : undefined;
+  const named = space === undefined ? undefined : () => (shared.herdrSpace ??= namedHerdrSpace(env, space));
   return {
     values: {
       run_ref: input.runRef,
@@ -220,7 +302,10 @@ export function sessionVars(input: SessionInput): Vars {
       shell: shellOf(env),
       path: env.PATH || undefined,
       runner_terminal: terminal,
-      runner_space: terminal ? once(() => runnerSpace(env, terminal)) : undefined,
+      runner_space: runnerSpaceId,
+      space,
+      herdr_space: runnerSpaceId ?? (named && (() => named().id)),
+      herdr_new_space_name: terminal ? "" : named && (() => (named().state === "missing" ? space! : "")),
       new_tab_id: once(() => `tb${randomBytes(16).toString("hex")}`),
     },
     env,
@@ -229,6 +314,9 @@ export function sessionVars(input: SessionInput): Vars {
       path: "$PATH is not set",
       runner_terminal: "$HC_TERMINAL_ID is not set; run agent-tasks inside a Herdr terminal to use this launcher",
       runner_space: "$HC_TERMINAL_ID is not set; run agent-tasks inside a Herdr terminal to use this launcher",
+      space: 'the launcher has no "space"',
+      herdr_space: '$HC_TERMINAL_ID is not set and the launcher has no "space" to open runs in',
+      herdr_new_space_name: '$HC_TERMINAL_ID is not set and the launcher has no "space" to open runs in',
     },
   };
 }
@@ -240,16 +328,19 @@ export function commandEnv(input: SessionInput): Env {
 
 /**
  * Renders a command into an argv. A string command runs through `/bin/sh -c`.
- * An argv element that is exactly `{{agent_argv}}` or `{{env_argv}}` expands
- * into several elements (the agent with its prompt; `KEY=value` pairs).
+ * An argv element that is exactly `{{agent_argv}}`, `{{env_argv}}` or
+ * `{{herdr_parent_argv}}` expands into several elements (the agent with its
+ * prompt; `KEY=value` pairs; `--label herdr.parent=<runner's terminal>`, or
+ * nothing outside a Herdr terminal).
  */
-export function renderCommand(cmd: CommandSpec, input: SessionInput, where: string): string[] {
-  const vars = sessionVars(input);
+export function renderCommand(cmd: CommandSpec, input: SessionInput, where: string, spec: LauncherVarsSpec, shared?: LaunchShared): string[] {
+  const vars = sessionVars(input, spec, shared);
   if (typeof cmd === "string") return ["/bin/sh", "-c", render(cmd, vars, where)];
   return cmd.flatMap((arg) => {
     const splat = /^\{\{\s*([a-z_]+)\s*\}\}$/.exec(arg)?.[1];
     if (splat === "agent_argv") return agentArgv(input);
     if (splat === "env_argv") return Object.entries(input.agentEnv).map(([k, v]) => `${k}=${v}`);
+    if (splat === "herdr_parent_argv") return input.env.HC_TERMINAL_ID ? ["--label", `herdr.parent=${input.env.HC_TERMINAL_ID}`] : [];
     return [render(arg, vars, where)];
   });
 }
@@ -357,7 +448,8 @@ export interface LaunchResult {
 /** Runs `launch` (and the `then` steps). Throws LauncherError when no session was started. */
 export function launch(spec: LauncherSpec, input: SessionInput): LaunchResult {
   const env = commandEnv(input);
-  const argv = renderCommand(spec.launch, input, "launcher.launch");
+  const shared: LaunchShared = {};
+  const argv = renderCommand(spec.launch, input, "launcher.launch", spec, shared);
   let handle: string;
   let pid: number | null = null;
   if (spec.background) {
@@ -382,7 +474,7 @@ export function launch(spec: LauncherSpec, input: SessionInput): LaunchResult {
   for (const [i, step] of spec.then.entries()) {
     let result: ExecResult;
     try {
-      result = exec(renderCommand(step, withHandle, `launcher.then[${i}]`), { env, cwd: input.cwd });
+      result = exec(renderCommand(step, withHandle, `launcher.then[${i}]`, spec, shared), { env, cwd: input.cwd });
     } catch (err) {
       return { handle, pid, delivered: false, error: (err as Error).message };
     }
@@ -423,7 +515,7 @@ export interface StatusResult {
  */
 export function sessionStatus(spec: LauncherSpec, input: SessionInput): StatusResult | null {
   if (!spec.status) return null;
-  const result = exec(renderCommand(spec.status, input, "launcher.status"), { env: commandEnv(input) });
+  const result = exec(renderCommand(spec.status, input, "launcher.status", spec), { env: commandEnv(input) });
   const raw = result.stdout.trim();
   if (result.code === 127 || result.code === -1) throw new LauncherError(`the session's state is unknown: ${describeFailure("status", result)}`);
   if (result.code !== 0) return { state: "gone", raw: raw || result.stderr.trim() };
@@ -435,14 +527,14 @@ export function sessionStatus(spec: LauncherSpec, input: SessionInput): StatusRe
 /** Runs `close`. Returns null when the launcher has none. */
 export function closeSession(spec: LauncherSpec, input: SessionInput): { ok: boolean; error: string | null } | null {
   if (!spec.close) return null;
-  const result = exec(renderCommand(spec.close, input, "launcher.close"), { env: commandEnv(input) });
+  const result = exec(renderCommand(spec.close, input, "launcher.close", spec), { env: commandEnv(input) });
   return result.code === 0 ? { ok: true, error: null } : { ok: false, error: describeFailure("close", result) };
 }
 
 /** Runs `read` and returns its output, or null when the launcher has none. Throws when it fails. */
 export function readSession(spec: LauncherSpec, input: SessionInput): string | null {
   if (!spec.read) return null;
-  const result = exec(renderCommand(spec.read, input, "launcher.read"), { env: commandEnv(input) });
+  const result = exec(renderCommand(spec.read, input, "launcher.read", spec), { env: commandEnv(input) });
   if (result.code !== 0) throw new LauncherError(describeFailure("read", result));
   return result.stdout;
 }

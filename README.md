@@ -195,7 +195,7 @@ sends a message to your phone). A task's `notify`, a profile's or
 
 | Preset | Where each run goes | Notes |
 |---|---|---|
-| `herdr` | Its own Herdr tab, nested under the runner | Agent state (working, idle, blocked) from Herdr. Run the runner inside Herdr. |
+| `herdr` | Its own Herdr tab, nested under the runner (without a runner terminal, as on a client machine: in an "Agent Tasks" space, see `space`) | Agent state (working, idle, blocked) from Herdr. Run the runner inside Herdr. |
 | `rex` | Its own Rex window in the runner's session | **Untested against a real Rex.** Needs `rex` and `jq`. |
 | `tmux` | Its own tmux window | tmux has no agent status: blocked agents are only caught by the timeout. tmux 3.0+. |
 | `process` | A child process of the runner, output in the run's log | No terminal and no agent state, so the agent must run non-interactively (`claude --print`). What `init` picks outside a multiplexer; for tests and machines without one. |

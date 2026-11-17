@@ -3,12 +3,12 @@ import { dirname, join } from "node:path";
 import { type Check, fail, ok, warn } from "./checks.ts";
 import { callHub } from "./hub.ts";
 import { BUILTIN_DEFAULTS, isHub, isKnownMachine, type LoadedConfig, localMachine, type UserConfig } from "./config.ts";
-import { configChecks, configuredLaunchers, findExecutable, launcherNeedsTerminal } from "./config-check.ts";
+import { configChecks, configuredLaunchers, findExecutable, launcherEnvVariables, launcherNeedsTerminal, launcherUsesHerdrSpace } from "./config-check.ts";
 import type { Context } from "./context.ts";
 import { defaultMaxDelay, formatDuration, parseDuration } from "./duration.ts";
 import { CLI_BIN, type InstallDirs, installSources, linkStatus, samePath } from "./install.ts";
 import { AgentTasksError } from "./errors.ts";
-import { resolveLauncher } from "./launcher.ts";
+import { herdrSpaceId, namedHerdrSpace, resolveLauncher } from "./launcher.ts";
 import { checkRegisteredMachine, hubCheck, pingMachine, sshMachines } from "./machines.ts";
 import { type Paths, REPO_ROOT, resolveConfigLocation, tildify } from "./paths.ts";
 import { listTasks, readTicks } from "./store.ts";
@@ -72,21 +72,87 @@ function dataChecks(ctx: Context, paths: Paths): Check[] {
   return checks;
 }
 
+/**
+ * Where Herdr launchers open runs. Inside a Herdr terminal (`$HC_TERMINAL_ID`,
+ * the runner's), in its space; elsewhere, in the space named by the
+ * launcher's `space`. A client runs no runner: the hub launches its sessions
+ * over SSH, where `$HC_TERMINAL_ID` is never set, whatever this shell has.
+ */
 function terminalChecks(ctx: Context, loaded: LoadedConfig): Check[] {
+  const client = Boolean(loaded.config.hub);
   const needing: string[] = [];
+  const spaces: { where: string; space: string | null }[] = [];
   for (const { where, launcher } of configuredLaunchers(loaded.config)) {
     try {
-      if (launcherNeedsTerminal(resolveLauncher(launcher))) needing.push(where);
+      const spec = resolveLauncher(launcher);
+      if (launcherNeedsTerminal(spec)) needing.push(where);
+      else if (launcherUsesHerdrSpace(spec)) spaces.push({ where, space: spec.space });
     } catch {
       // An invalid launcher is already reported by the config checks.
     }
   }
-  if (needing.length === 0) return [];
-  const terminal = ctx.env.HC_TERMINAL_ID;
-  if (!terminal) {
-    return [warn("herdr.terminal", `$HC_TERMINAL_ID is not set: ${needing.join(", ")} must run inside a Herdr terminal`, "start agent-tasks runner (and run doctor) from a Herdr terminal")];
+  const checks: Check[] = [];
+  const terminal = client ? undefined : ctx.env.HC_TERMINAL_ID;
+  if (needing.length > 0) {
+    if (client) {
+      checks.push(warn("herdr.terminal", `${needing.join(", ")} need${needing.length > 1 ? "" : "s"} the runner's Herdr terminal ({{runner_terminal}}/{{runner_space}}), but the hub launches this machine's runs over SSH, without one`, 'use { "preset": "herdr" }: it opens runs in a space of their own here'));
+    } else if (!terminal) {
+      checks.push(warn("herdr.terminal", `$HC_TERMINAL_ID is not set: ${needing.join(", ")} must run inside a Herdr terminal`, "start agent-tasks runner (and run doctor) from a Herdr terminal"));
+    } else {
+      checks.push(ok("herdr.terminal", `$HC_TERMINAL_ID is ${terminal}`));
+    }
   }
-  return [ok("herdr.terminal", `$HC_TERMINAL_ID is ${terminal}`)];
+  if (spaces.length === 0) return checks;
+  if (terminal) {
+    if (needing.length === 0) checks.push(ok("herdr.terminal", `$HC_TERMINAL_ID is ${terminal}: runs open in its space, nested under it`));
+    return checks;
+  }
+  const why = client ? "the hub launches this machine's runs over SSH" : "$HC_TERMINAL_ID is not set";
+  const app = findExecutable("herdr-app", ctx.env);
+  for (const { where, space } of spaces) {
+    if (space === null) {
+      checks.push(fail("herdr.space", `${where}: ${why} and the launcher has no "space" to open runs in`, 'set "space" in the launcher, e.g. { "preset": "herdr", "space": "Agent Tasks" }'));
+      continue;
+    }
+    const label = `${where}: ${why}, so runs open in the Herdr space "${space}"`;
+    if (!app) {
+      checks.push(warn("herdr.space", `${label} (${herdrSpaceId(space)}), but herdr-app is not on PATH: the space can't be found by name or named`, "add Herdr's herdr-app to PATH (it comes with the Herdr app)"));
+      continue;
+    }
+    const found = namedHerdrSpace(ctx.env, space);
+    const state = { found: `found: ${found.id}`, missing: "created on the first run", unknown: `${found.id}; the Herdr window is not open, so whether it exists is unknown` }[found.state];
+    checks.push(ok("herdr.space", `${label} (${state})`));
+  }
+  return checks;
+}
+
+/**
+ * On a client, the hub launches this machine's runs over SSH: a launcher
+ * that reads a variable of the runner's environment (`{{env.REX_SESSION}}`)
+ * only works if SSH commands get it too.
+ */
+function clientEnvChecks(loaded: LoadedConfig): Check[] {
+  if (!loaded.config.hub) return [];
+  const checks: Check[] = [];
+  for (const { where, launcher } of configuredLaunchers(loaded.config)) {
+    let names: string[];
+    try {
+      names = launcherEnvVariables(resolveLauncher(launcher));
+    } catch {
+      continue; // Reported by the config checks.
+    }
+    if (names.length === 0) continue;
+    const vars = names.map((n) => `$${n}`).join(", ");
+    const plural = names.length > 1;
+    checks.push(
+      warn(
+        "launcher.ssh_env",
+        `${where} uses ${vars}, but the hub launches this machine's runs over SSH, where ${plural ? "they are" : "it is"} usually not set`,
+        `make SSH commands get ${vars} (e.g. in ~/.zshenv), or use a launcher that works without ${plural ? "them" : "it"}: herdr, tmux or process`,
+      ),
+    );
+  }
+  return checks;
 }
 
 function skillChecks(ctx: Context, loaded: LoadedConfig | null, dirs: InstallDirs): Check[] {
@@ -163,7 +229,7 @@ export function doctorChecks(ctx: Context, dirs: InstallDirs): Check[] {
   // A client keeps no data and runs no runner: those are the hub's.
   const hub = loaded?.config.hub;
   if (loaded && !hub) checks.push(...dataChecks(ctx, ctx.paths));
-  if (loaded) checks.push(...terminalChecks(ctx, loaded));
+  if (loaded) checks.push(...terminalChecks(ctx, loaded), ...clientEnvChecks(loaded));
   checks.push(...skillChecks(ctx, loaded, dirs));
   if (loaded && hub) checks.push(...hubChecks(ctx, hub.ssh));
   if (loaded && !hub) checks.push(...machineChecks(ctx, loaded.config), heartbeatCheck(ctx, ctx.paths, loaded));

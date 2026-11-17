@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { userInfo } from "node:os";
+import { exec, herdrSpaceId, systemLoginShell } from "../src/launcher.ts";
+import { remoteEnv } from "../src/remote.ts";
 import type { Run } from "../src/schema.ts";
 import { DEMO_REF, type ExecHome, execTask, FAKE_AGENT, FAKE_BIN, makeExecHome, pidAlive, REPO, settled, waitFor } from "./exec-helpers.ts";
 
@@ -23,8 +26,8 @@ let hub: ExecHome;
 let mac: Mac;
 let sshDir: string;
 
-function writeHosts(opts: { unreachable?: boolean } = {}): void {
-  const env = {
+function writeHosts(opts: { unreachable?: boolean; env?: Record<string, string | undefined> } = {}): void {
+  const env: Record<string, string | undefined> = {
     HOME: mac.home,
     AGENT_TASKS_HOME: mac.dataDir,
     AGENT_TASKS_CONFIG: mac.configFile,
@@ -32,7 +35,9 @@ function writeHosts(opts: { unreachable?: boolean } = {}): void {
     PATH: [FAKE_BIN, dirname(process.execPath), "/usr/bin", "/bin"].join(":"),
     SHELL: "/bin/sh",
     FAKE_SSH_DIR: sshDir,
+    ...opts.env,
   };
+  for (const [k, v] of Object.entries(env)) if (v === undefined) delete env[k];
   // A host missing from hosts.json fails like one that is down (exit 255).
   writeFileSync(join(sshDir, "hosts.json"), JSON.stringify(opts.unreachable ? {} : { "mac-mini": env }));
 }
@@ -165,6 +170,61 @@ describe("a run on another machine", () => {
     await hub.tick(14);
     await waitFor(() => !pidAlive(pid), "the agent to be killed");
     expect(hub.run(DEMO_REF).attempts[0]!.session!.closed_at).not.toBeNull();
+  });
+});
+
+// The mac runs Herdr: the hub launches over SSH, where there is no runner
+// terminal ($HC_TERMINAL_ID) and SHELL may be unset.
+describe("a run on another machine with the herdr preset", () => {
+  let macHc: string;
+  let loginShell: string;
+  beforeEach(() => {
+    macHc = join(mac.home, "hc");
+    mkdirSync(macHc, { recursive: true });
+    // The mac user's login shell: `-lc` runs a command with the PATH its profile sets.
+    loginShell = join(mac.home, "login-sh");
+    writeFileSync(loginShell, `#!/bin/sh\n[ "$1" = -lc ] && PATH="/opt/login/bin:$PATH" && export PATH && shift && exec /bin/sh -c "$@"\nexec /bin/sh "$@"\n`, { mode: 0o755 });
+    writeHosts({ env: { FAKE_HC_DIR: macHc, SHELL: loginShell } });
+    const config = JSON.parse(readFileSync(mac.configFile, "utf8"));
+    writeFileSync(mac.configFile, JSON.stringify({ ...config, launcher: { preset: "herdr" }, agent: { command: "clc" } }));
+  });
+  const macHcCalls = (sub: string): string[][] =>
+    readFileSync(join(macHc, "calls.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((c: string[]) => c[0] === sub);
+
+  test("opens the tab in the mac's \"Agent Tasks\" space, with the login shell's PATH", async () => {
+    macTask("succeed");
+    const { events } = await hub.tick(1);
+    expect(events).toEqual([expect.objectContaining({ type: "launched", run_ref: DEMO_REF })]);
+    expect(hub.run(DEMO_REF).attempts[0]!.session).toMatchObject({ launcher: "herdr", machine: "mac", handle: "t2" });
+
+    const run = macHcCalls("run")[0]!;
+    const sep = run.indexOf("--");
+    const labels = run.slice(0, sep).filter((_, i, flags) => flags[i - 1] === "--label");
+    expect(labels[0]).toBe(`herdr.space=${herdrSpaceId("Agent Tasks")}`);
+    expect(labels.some((l) => l.startsWith("herdr.parent="))).toBe(false);
+    const command = run.slice(sep + 1);
+    const path = command.find((a) => a.startsWith("PATH="))!.slice("PATH=".length).split(":");
+    expect(path.slice(0, 2)).toEqual([join(mac.home, ".local", "bin"), "/opt/login/bin"]);
+    expect(command.slice(-2)).toEqual([loginShell, "-i"]);
+    expect(macHcCalls("send")).toEqual([["send", "t2", ` clc '/mac-skill ${DEMO_REF}'; exit`]]);
+    expect(JSON.parse(readFileSync(join(macHc, "spaces.json"), "utf8")).spaces).toEqual([{ id: herdrSpaceId("Agent Tasks"), name: "Agent Tasks", machine: null }]);
+
+    // Status, read and close work there too, without a runner terminal.
+    expect((await hub.cli("session", "status", DEMO_REF, "--json")).json()).toMatchObject({ state: "working", launcher: "herdr", machine: "mac" });
+    expect((await hub.cli("session", "read", DEMO_REF, "--json")).json().output).toContain("screen of t2");
+    expect((await hub.cli("session", "close", DEMO_REF, "--json")).code).toBe(0);
+    expect(macHcCalls("kill")).toEqual([["kill", "t2"]]);
+  });
+
+  test("without SHELL over SSH, the user's login shell from the system is used", () => {
+    const env = remoteEnv({ HOME: mac.home, PATH: "/usr/bin:/bin" });
+    const passwd = exec(["getent", "passwd", userInfo().username], { env: { PATH: "/usr/bin:/bin" } });
+    const expected = passwd.code === 0 ? passwd.stdout.trim().split(":")[6] : systemLoginShell();
+    expect(env.SHELL).toBe(expected || "/bin/sh");
+    expect(env.SHELL).toStartWith("/");
+    const path = env.PATH!.split(":");
+    expect(path[0]).toBe(join(mac.home, ".local", "bin"));
+    expect(path).toContain("/usr/bin");
   });
 });
 

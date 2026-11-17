@@ -337,15 +337,40 @@ describe("doctor", () => {
     expect(check.hint).toContain("PATH");
   });
 
-  test("no heartbeat and no $HC_TERMINAL_ID are warnings, not failures", async () => {
+  test("no heartbeat is a warning, not a failure", async () => {
     await readyMachine();
-    delete home.env.HC_TERMINAL_ID;
     writeFileSync(home.paths.ticksFile, "");
     const r = await doctor("--json");
     expect(r.code).toBe(0);
     const byId = Object.fromEntries(r.json().checks.map((c: any) => [c.id, c.status]));
     expect(byId["runner.heartbeat"]).toBe("warn");
-    expect(byId["herdr.terminal"]).toBe("warn");
+  });
+
+  test("without $HC_TERMINAL_ID the herdr preset opens runs in its space, and doctor says which", async () => {
+    await readyMachine();
+    delete home.env.HC_TERMINAL_ID;
+    writeFileSync(join(fakeBin, "herdr-app"), `#!/bin/sh\nexec ${join(REPO, "test", "fixtures", "bin", "herdr-app")} "$@"\n`, { mode: 0o755 });
+    home.env.FAKE_HC_DIR = join(home.root, "hc");
+    mkdirSync(home.env.FAKE_HC_DIR, { recursive: true });
+    const r = await doctor("--json");
+    expect(r.code).toBe(0);
+    const checks = r.json().checks;
+    expect(checks.find((c: any) => c.id === "herdr.terminal")).toBeUndefined();
+    expect(checks.find((c: any) => c.id === "herdr.space")).toMatchObject({ status: "ok", message: 'launcher: $HC_TERMINAL_ID is not set, so runs open in the Herdr space "Agent Tasks" (created on the first run)' });
+
+    writeFileSync(join(home.root, "hc", "spaces.json"), JSON.stringify({ spaces: [{ id: "sp-at", name: "Agent Tasks", machine: null }] }));
+    expect((await doctor()).stdout).toContain('runs open in the Herdr space "Agent Tasks" (found: sp-at)');
+
+    writeFileSync(join(home.root, "hc", "app-down"), "");
+    expect((await doctor()).stdout).toContain("the Herdr window is not open, so whether it exists is unknown");
+  });
+
+  test("a custom launcher that needs the runner's terminal warns without $HC_TERMINAL_ID", async () => {
+    await readyMachine();
+    delete home.env.HC_TERMINAL_ID;
+    home.writeConfig({ launcher: { preset: "herdr", launch: ["hc", "run", "--label", "herdr.space={{runner_space}}", "--", "sh"] }, agent: { command: "claude" } });
+    const r = await doctor("--json");
+    expect(r.json().checks.find((c: any) => c.id === "herdr.terminal")).toMatchObject({ status: "warn", message: expect.stringContaining("$HC_TERMINAL_ID is not set") });
   });
 
   test("manual ticks don't count as a runner heartbeat", async () => {

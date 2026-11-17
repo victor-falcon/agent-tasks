@@ -279,6 +279,23 @@ describe("doctor across machines", () => {
     expect(byId(checks, "data.writable")).toEqual([]);
   });
 
+  test("on a client with the herdr preset: runs open in its space, even when doctor runs inside a Herdr terminal", async () => {
+    s.client.writeConfig({ machine: "mac", hub: { ssh: "hub" }, launcher: { preset: "herdr", space: "Hub runs" } });
+    s.client.env.HC_TERMINAL_ID = "t9";
+    s.client.env.FAKE_HC_DIR = join(s.client.root, "hc");
+    const checks = (await s.cli("doctor", "--json")).json().checks;
+    expect(byId(checks, "herdr.terminal")).toEqual([]);
+    expect(byId(checks, "herdr.space")).toEqual([
+      expect.objectContaining({ status: "ok", message: 'launcher: the hub launches this machine\'s runs over SSH, so runs open in the Herdr space "Hub runs" (created on the first run)' }),
+    ]);
+  });
+
+  test("on a client, a launcher that reads the runner's environment warns", async () => {
+    s.client.writeConfig({ machine: "mac", hub: { ssh: "hub" }, launcher: { preset: "rex" } });
+    const checks = (await s.cli("doctor", "--json")).json().checks;
+    expect(byId(checks, "launcher.ssh_env")).toEqual([expect.objectContaining({ status: "warn", message: expect.stringContaining("launcher uses $REX_SESSION, but the hub launches") })]);
+  });
+
   test("on a client not registered on the hub: how to join", async () => {
     s.hub.writeConfig({ ...HUB_CONFIG, machines: {} });
     const checks = (await s.cli("doctor", "--json")).json().checks;

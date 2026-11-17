@@ -46,7 +46,7 @@ function liveSession(ctx: Context, run: Run, ref: string): Live {
   if (!spec.attach) {
     throw new LauncherError(`the ${spec.name} launcher has no attach command; read the session's screen with "agent-tasks session read ${ref}" or follow it with "agent-tasks log ${ref} --follow"`);
   }
-  return { session, machine, where: "here", argv: renderCommand(spec.attach, session.input, "launcher.attach") };
+  return { session, machine, where: "here", argv: renderCommand(spec.attach, session.input, "launcher.attach", spec) };
 }
 
 /** The payload `remote attach` gets: what the session's machine needs to find it. */

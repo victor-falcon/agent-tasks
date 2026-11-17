@@ -6,7 +6,7 @@ import { launcherChecks, launcherName } from "./config-check.ts";
 import type { Context } from "./context.ts";
 import { AgentTasksError } from "./errors.ts";
 import { attemptSessionInput } from "./execution.ts";
-import { commandEnv, handOverTerminal, LauncherError, type LauncherSpec, renderCommand, resolveLauncher, type SessionInput } from "./launcher.ts";
+import { commandEnv, exec, handOverTerminal, LauncherError, type LauncherSpec, renderCommand, resolveLauncher, type SessionInput, shellOf } from "./launcher.ts";
 import { homeDir, resolvePath, type Env } from "./paths.ts";
 import { REMOTE_PROTOCOL } from "./ssh.ts";
 import { type AgentSpec, Checker, checkAgent, isObject, TASK_ID_RE } from "./schema.ts";
@@ -61,13 +61,32 @@ function resolveHere(ctx: Context, task: { cwd: string; agent?: AgentSpec | stri
 }
 
 /**
- * The environment of the launcher here. SSH sessions run a non-interactive
- * shell without ~/.local/bin in PATH; the agent needs it to call agent-tasks.
+ * The environment of the launcher here. SSH runs commands in a non-interactive
+ * shell: PATH is minimal (often without ~/.local/bin, which the agent needs to
+ * call agent-tasks) and SHELL may be unset. PATH gets the folders the user's
+ * login shell adds (its profile, e.g. Homebrew's), so the launcher's programs
+ * (hc, tmux…) and the agent are found; then ~/.local/bin if missing. The
+ * interactive shell the presets start adds what its rc files set.
  */
-function remoteEnv(env: Env): Env {
+export function remoteEnv(env: Env): Env {
+  const shell = shellOf(env);
+  const path = mergePaths(loginShellPath(env, shell), env.PATH ?? "");
   const bin = join(homeDir(env), ".local", "bin");
-  const path = env.PATH ?? "";
-  return path.split(":").includes(bin) ? env : { ...env, PATH: path ? `${bin}:${path}` : bin };
+  return { ...env, PATH: path.split(":").includes(bin) ? path : path ? `${bin}:${path}` : bin, SHELL: shell };
+}
+
+/** PATH as the user's login shell sets it, or "" when it can't be read. */
+function loginShellPath(env: Env, shell: string): string {
+  const result = exec([shell, "-lc", "/usr/bin/env"], { env, cwd: homeDir(env), timeoutMs: 10_000 });
+  if (result.code !== 0) return "";
+  const line = result.stdout.split("\n").findLast((l) => l.startsWith("PATH="));
+  return line ? line.slice("PATH=".length) : "";
+}
+
+/** `first`'s folders, then those of `second` that are not in it. */
+function mergePaths(first: string, second: string): string {
+  const seen = new Set<string>();
+  return [...first.split(":"), ...second.split(":")].filter((p) => p !== "" && !seen.has(p) && seen.add(p)).join(":");
 }
 
 /** Where a background launcher's output goes on this machine (the hub keeps its own log). */
@@ -242,7 +261,7 @@ export async function attachHere(ctx: Context, payload: Record<string, unknown>)
       `the ${spec.name} launcher on machine "${localMachine(ctx.config.config)}" has no attach command; read the session's screen with "agent-tasks session read ${p.run_ref}" or follow it with "agent-tasks log ${p.run_ref} --follow"`,
     );
   }
-  const argv = renderCommand(spec.attach, input, "launcher.attach");
+  const argv = renderCommand(spec.attach, input, "launcher.attach", spec);
   const code = await handOverTerminal(argv, { cwd: input.cwd, env: commandEnv(input) });
   return { code, argv, launcher: spec.name };
 }

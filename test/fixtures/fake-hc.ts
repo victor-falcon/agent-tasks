@@ -4,6 +4,7 @@
 // `$FAKE_HC_DIR/fail-<subcommand>` makes that subcommand exit 1.
 // `$FAKE_HC_DIR/screen-<t>` is what `hc read` prints for terminal t, and
 // `$FAKE_HC_DIR/attach-exit` the exit code of `hc attach` (default 0).
+// `hc run` adds an unknown `herdr.space` to $FAKE_HC_DIR/spaces.json.
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -32,6 +33,14 @@ switch (sub) {
         labels[k!] = v.join("=");
       }
     });
+    // Like Herdr, a space id the window does not know becomes a new, unnamed space (see fake-herdr-app.ts).
+    const space = labels["herdr.space"];
+    const spacesFile = join(dir, "spaces.json");
+    const spaces = existsSync(spacesFile) ? JSON.parse(readFileSync(spacesFile, "utf8")).spaces : [];
+    if (space && !spaces.some((s: { id: string }) => s.id === space)) {
+      const cwd = flags[flags.indexOf("--cwd") + 1] ?? "";
+      writeFileSync(spacesFile, JSON.stringify({ spaces: [...spaces, { id: space, name: cwd.split("/").pop(), machine: null }] }));
+    }
     const address = `t${readdirSync(terminals).length + 2}`;
     const info = { address, state: "live", status: null, exit_code: null, labels, parent: null, argv: sep === -1 ? [] : rest.slice(sep + 1) };
     writeFileSync(file(address), JSON.stringify(info));
