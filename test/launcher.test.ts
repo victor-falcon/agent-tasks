@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentArgv, exec, extractHandle, LauncherError, listPresets, renderCommand, resolveLauncher, sessionName, type SessionInput, sessionStatus } from "../src/launcher.ts";
+import { agentArgv, exec, extractHandle, launchEnv, LauncherError, listPresets, renderCommand, resolveLauncher, sessionName, type SessionInput, sessionStatus } from "../src/launcher.ts";
 import { render, shellQuote, TemplateError } from "../src/template.ts";
 
 function input(overrides: Partial<SessionInput> = {}): SessionInput {
@@ -133,5 +133,33 @@ describe("presets", () => {
       'handle: must be "json:.<path>" or "regex:<pattern>"',
       'status_map: must be "herdr" or an object from output to one of: working, idle, blocked, exited, gone',
     ]);
+  });
+});
+
+describe("launch environment", () => {
+  // A login shell whose profile adds /opt/login/bin, like Homebrew's.
+  function fakeHome(): { home: string; shell: string } {
+    const home = mkdtempSync(join(tmpdir(), "agent-tasks-launch-env-"));
+    const shell = join(home, "login-sh");
+    writeFileSync(shell, `#!/bin/sh\n[ "$1" = -lc ] && PATH="/opt/login/bin:$PATH" && export PATH && shift && exec /bin/sh -c "$@"\nexec /bin/sh "$@"\n`, { mode: 0o755 });
+    return { home, shell };
+  }
+
+  test("a minimal PATH (an app such as Herdr's panel started agent-tasks) gets ~/.local/bin and the login shell's folders", () => {
+    const { home, shell } = fakeHome();
+    const path = launchEnv({ HOME: home, SHELL: shell, PATH: "/usr/bin:/bin" }).PATH!.split(":");
+    expect(path).toEqual([join(home, ".local", "bin"), "/usr/bin", "/bin", "/opt/login/bin"]);
+  });
+
+  test("a PATH that has ~/.local/bin (a terminal) is left as it is", () => {
+    const { home, shell } = fakeHome();
+    const env = { HOME: home, SHELL: shell, PATH: `/usr/bin:${join(home, ".local", "bin")}` };
+    expect(launchEnv(env)).toBe(env);
+  });
+
+  test("loginFirst (SSH) puts the login shell's folders first", () => {
+    const { home, shell } = fakeHome();
+    const path = launchEnv({ HOME: home, SHELL: shell, PATH: "/usr/bin:/bin" }, { loginFirst: true }).PATH!.split(":");
+    expect(path).toEqual([join(home, ".local", "bin"), "/opt/login/bin", "/usr/bin", "/bin"]);
   });
 });

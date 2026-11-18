@@ -4,7 +4,7 @@ import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import type { LauncherConfig, ResolvedAgent } from "./config.ts";
 import { AgentTasksError } from "./errors.ts";
-import { type Env, REPO_ROOT } from "./paths.ts";
+import { type Env, homeDir, REPO_ROOT } from "./paths.ts";
 import { withSigint } from "./sigint.ts";
 import { readJson } from "./store.ts";
 import { isObject } from "./schema.ts";
@@ -183,6 +183,48 @@ export function agentCommandLine(agent: ResolvedAgent): string {
 /** `$SHELL`, else the user's login shell (SSH commands may run without `$SHELL`), else `/bin/sh`. */
 export function shellOf(env: Env): string {
   return env.SHELL || systemLoginShell() || "/bin/sh";
+}
+
+/**
+ * The environment launchers run in. agent-tasks may be started with a minimal
+ * PATH: by an app (Herdr's agent-tasks panel runs it through herdr-core), a
+ * scheduler or SSH. Such a PATH often lacks ~/.local/bin (where `hc` and
+ * agent-tasks itself are) and the folders the user's profile adds (e.g.
+ * Homebrew's), so the launcher's programs and the agent are not found. When
+ * ~/.local/bin is missing, PATH gets the login shell's folders and
+ * ~/.local/bin; a PATH that has it (a normal terminal) is left as it is, so
+ * the login shell is not started on every command. `loginFirst` puts the
+ * login shell's folders first and always reads them (SSH, see remoteEnv).
+ * The interactive shell the presets start adds what its rc files set.
+ */
+export function launchEnv(env: Env, opts: { loginFirst?: boolean } = {}): Env {
+  const shell = shellOf(env);
+  const bin = join(homeDir(env), ".local", "bin");
+  const current = env.PATH ?? "";
+  if (!opts.loginFirst && current.split(":").includes(bin)) return env;
+  const login = loginShellPath(env, shell);
+  const path = opts.loginFirst ? mergePaths(login, current) : mergePaths(current, login);
+  return { ...env, PATH: path.split(":").includes(bin) ? path : path ? `${bin}:${path}` : bin, SHELL: shell };
+}
+
+const loginPathCache = new Map<string, string>();
+
+/** PATH as the user's login shell sets it, or "" when it can't be read. Read once per process. */
+function loginShellPath(env: Env, shell: string): string {
+  const key = [shell, env.HOME ?? "", env.PATH ?? ""].join("\0");
+  const cached = loginPathCache.get(key);
+  if (cached !== undefined) return cached;
+  const result = exec([shell, "-lc", "/usr/bin/env"], { env, cwd: homeDir(env), timeoutMs: 10_000 });
+  const line = result.code === 0 ? result.stdout.split("\n").findLast((l) => l.startsWith("PATH=")) : undefined;
+  const path = line ? line.slice("PATH=".length) : "";
+  loginPathCache.set(key, path);
+  return path;
+}
+
+/** `first`'s folders, then those of `second` that are not in it. */
+function mergePaths(first: string, second: string): string {
+  const seen = new Set<string>();
+  return [...first.split(":"), ...second.split(":")].filter((p) => p !== "" && !seen.has(p) && seen.add(p)).join(":");
 }
 
 let loginShellCache: string | null | undefined;
