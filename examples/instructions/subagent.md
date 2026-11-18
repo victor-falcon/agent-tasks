@@ -12,7 +12,8 @@ Write what an agent can't guess about your machine and habits. Examples:
   picks the right account for each project. It's a shell alias, so run it in
   an interactive shell.
 - Don't run detached scripts (`nohup`, `setsid`).
-- Don't read credentials; the environment comes from direnv.
+- Don't read credentials other than the keychain items a task names; the
+  environment comes from direnv.
 - Write reports in English and keep them short.
 
 Check what a subagent would get with:

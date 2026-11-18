@@ -35,6 +35,91 @@ Write them for someone who has never seen this project or conversation:
 - the done criteria, and what to do when blocked or when there is nothing to do;
 - anything it must not do (e.g. "don't push", "don't upgrade anything").
 
+### Tasks that need credentials
+
+When the work needs a token, password or API key that the task's folder
+doesn't already provide (direnv, a CLI that is already logged in…), keep the
+secret in a password store on the machine the task runs on, and write in the
+instructions **how to fetch it**, never the secret itself. Tasks,
+instructions, `config.json` and profile `env` are plain files that get shown,
+logged and sent around.
+
+Which store depends on that machine (`agent-tasks show <id>` says which one):
+
+- **macOS**: the login Keychain, with `security` (steps below). It only works
+  in a logged-in desktop session: over SSH the keychain is locked
+  ("User interaction is not allowed").
+- **Linux and WSL**: `pass` (GPG). Entry names like `<service>/<account>`,
+  e.g. `pass insert reddit/victoor89` to store (prompts, nothing echoed) and
+  `pass show reddit/victoor89 | head -1` to read inline. For unattended runs
+  gpg-agent must cache the passphrase (`default-cache-ttl` and
+  `max-cache-ttl` in `~/.gnupg/gpg-agent.conf`); the user unlocks it once
+  per boot with `pass show <entry> >/dev/null` in a terminal. A locked key
+  makes `pass` fail when there is no terminal: tell the agent to finish as
+  failed with that command in the summary. Check an entry exists with
+  `test -f ~/.password-store/<entry>.gpg`, which doesn't decrypt it.
+
+The same rules apply to both: ask the user to store the secret themselves,
+check it exists without reading it, and in the instructions read it inline.
+
+Keychain steps (macOS):
+
+1. Pick a keychain item name: `agent-tasks.<task-or-service>`, e.g.
+   `agent-tasks.sentry-token`. Reuse an existing one if another task already
+   needs the same secret.
+2. Check whether it exists, without reading the value (on the task's
+   machine: prefix with `ssh <host>` for another machine):
+
+   ```sh
+   security find-generic-password -a "$USER" -s agent-tasks.sentry-token >/dev/null 2>&1 && echo found || echo missing
+   ```
+
+3. If it's missing, **don't ask the user to paste the secret into the
+   conversation**, and don't run the command that stores it with the value
+   as an argument. Give the user this command to run themselves (`-w` last,
+   with no value, makes `security` ask for it without echoing it or leaving
+   it in the shell history):
+
+   ```sh
+   security add-generic-password -U -a "$USER" -s agent-tasks.sentry-token -l "agent-tasks: Sentry API token" -w
+   ```
+
+   In Claude Code they can type it with a `!` prefix. For a task on another
+   machine, it must be stored on that machine: `ssh -t <host> 'security
+   add-generic-password … -w'`. Check again (step 2) once they say it's done.
+4. In the instructions, say which item to read, how, and how to use it
+   without exposing it: read it inline in the command that needs it, never
+   print it, write it to a file, put it in the summary or commit it. For
+   example:
+
+   > The Sentry API token is in the macOS keychain, item
+   > `agent-tasks.sentry-token`. Use it only inline, in the command that
+   > needs it:
+   > `SENTRY_AUTH_TOKEN="$(security find-generic-password -a "$USER" -s agent-tasks.sentry-token -w)" sentry-cli issues list …`.
+   > Never echo it, write it to a file or include it in the summary or any
+   > output. If the item is missing or the keychain refuses (locked, access
+   > denied), finish as failed saying which item is missing; don't look for
+   > the token anywhere else.
+
+Some authentication can't be stored at all because it needs the person
+every time or every few months: a bank consent with strong customer
+authentication (e.g. Enable Banking / PSD2 sessions), a 2FA code, an OAuth
+login in a browser. Store what can be stored (API keys, the app's private key,
+the session id) and write in the instructions how the agent recognises that
+the person is needed (an expired session or consent, a 401, a login page) and
+what to do then: never try to get around it; either ask the user and wait (the
+run shows as blocked and they get a notification) with exactly what they have
+to do, such as the authorisation URL to open, or finish as `failed` with that
+same explanation. Offer `--notify blocked,failed` for these tasks so the user
+finds out.
+
+A secret typed into a page through the Playwright MCP needs care: the MCP
+echoes back the code it runs, and typing a value shows it in the tool call.
+Have a script read the secret and serve it once on a random `127.0.0.1` URL,
+and write a Playwright script that holds only that URL and fetches the value
+from it at run time (`browser_run_code_unsafe` with `filename`; it can't read
+files itself, but it has `fetch`).
+
 ## 3. Create it
 
 With flags:

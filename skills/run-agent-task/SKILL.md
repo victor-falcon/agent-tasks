@@ -41,3 +41,12 @@ Rules:
   machine (the hub): `task` and `finish` reach it by themselves, and
   `--output-file` is read on this machine and sent along.
 - Don't start other agents or schedule new tasks unless the task says so.
+- Credentials: read only the ones the task names, the way it says (usually
+  a keychain or `pass` entry, read inline in the command that needs it).
+  Never print a secret, write it to a file, commit it, or put it in the
+  summary or the output file. If it's missing or the store refuses (a locked
+  keychain or GPG key), finish as `failed` naming the missing item; don't
+  hunt for it elsewhere. If the service needs the person (an expired bank
+  consent, a 2FA code, a browser login), don't try to get around it: do what
+  the task says for that case, or ask and wait, telling them exactly what to
+  do (e.g. the URL to open).
