@@ -11,6 +11,7 @@ details behind them.
 - [Commands](#commands)
 - [The dashboard](#the-dashboard)
 - [When a run ends](#when-a-run-ends)
+- [Tasks that need credentials](#tasks-that-need-credentials)
 - [Configuration](#configuration)
 - [Multiple machines](#multiple-machines)
 - [Presets](#presets)
@@ -245,6 +246,60 @@ Notifications go to the `notifiers` in the config: a desktop notification by
 default, for `failed`, `timed_out` and `blocked`, or any command (e.g. one
 that sends a message to your phone). See
 [roadmap/runner.md](roadmap/runner.md#notifications-notifiers).
+
+## Tasks that need credentials
+
+Never put a token or password in a task's instructions, in `config.json` or
+in a profile's `env`: they are plain files that get printed, logged and sent
+between machines. Keep the secret in a password store on the machine the task
+runs on, and write in the instructions how to fetch it: the macOS Keychain on
+a Mac, `pass` on Linux and WSL.
+
+**macOS.** Store it yourself (`-w` last, with no value, asks for it without echoing it or
+leaving it in your shell history):
+
+```sh
+security add-generic-password -U -a "$USER" -s agent-tasks.sentry-token -l "agent-tasks: Sentry API token" -w
+```
+
+Then, in the task's instructions:
+
+> The Sentry API token is in the macOS keychain, item
+> `agent-tasks.sentry-token`. Use it only inline, in the command that needs
+> it: `SENTRY_AUTH_TOKEN="$(security find-generic-password -a "$USER" -s agent-tasks.sentry-token -w)" sentry-cli …`.
+> Never print it, write it to a file or put it in the summary. If the item is
+> missing or the keychain refuses, finish as failed naming the item.
+
+The `schedule-agent-task` skill does this for you: it checks whether the item
+exists (without reading it) and, if not, gives you the command to store it
+instead of asking for the secret in the chat. For a task on another machine,
+store the secret there. The keychain must be unlocked when the run starts: a
+Mac you're logged into is fine, but over SSH it is locked, so a task on
+another machine can't read a Mac's keychain through `ssh`.
+
+**Linux and WSL.** Use [`pass`](https://www.passwordstore.org/): create a GPG
+key (`gpg --full-generate-key`), `pass init <key-id>`, then
+`pass insert sentry/token` (it prompts without echoing). The instructions read
+it inline: `SENTRY_AUTH_TOKEN="$(pass show sentry/token | head -1)" sentry-cli …`.
+Runs have no terminal to ask for the GPG passphrase, so let gpg-agent keep it
+in `~/.gnupg/gpg-agent.conf`:
+
+```
+default-cache-ttl 34560000
+max-cache-ttl 34560000
+```
+
+and unlock it once per boot with `pass show sentry/token >/dev/null` in a
+terminal. While it's locked, `pass` fails at once and the run should finish as
+failed saying so.
+
+Some authentication needs you every time or every few months (a bank consent
+with strong customer authentication, such as an Enable Banking session, a 2FA
+code, a browser login). Store what can be stored, and say in the instructions
+how the agent recognises that you're needed and what to do then: ask and
+wait with the exact step for you (e.g. the authorisation URL), which shows the
+run as blocked and notifies you, or finish as failed with that explanation.
+Add `--notify blocked,failed` so you hear about it.
 
 ## Configuration
 

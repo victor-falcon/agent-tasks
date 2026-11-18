@@ -323,7 +323,7 @@ there as short bullet points, outside the comment. Suggest:
 - which command to use if it needs to start another agent (sub-sub-agents),
   and how (e.g. an alias that needs an interactive shell);
 - things never to do on this machine (e.g. no detached processes, no
-  reading credentials, no pushing to main, no installing global packages);
+  reading credentials other than the keychain items a task names, no pushing to main, no installing global packages);
 - language and format of reports.
 
 Leave the file empty (only comments) if the user has nothing to add. Check
