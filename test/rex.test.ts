@@ -34,7 +34,7 @@ describe("rex preset (fake rex)", () => {
       session: "s-test",
       argv: [
         "/usr/bin/env",
-        `PATH=${home.env.PATH}`,
+        `PATH=${join(home.env.HOME!, ".local", "bin")}:${home.env.PATH}`,
         `AGENT_TASKS_HOME=${home.dataDir}`,
         `AGENT_TASKS_CONFIG=${home.configFile}`,
         `AGENT_TASKS_RUN=${DEMO_REF}`,

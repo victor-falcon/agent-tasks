@@ -48,7 +48,7 @@ describe("herdr preset", () => {
     expect(labels.slice(2)).toEqual(["herdr.parent=t1", `agent-tasks.run=${DEMO_REF}`]);
     expect(run.slice(sep + 1)).toEqual([
       "/usr/bin/env",
-      `PATH=${home.env.PATH}`,
+      `PATH=${join(home.env.HOME!, ".local", "bin")}:${home.env.PATH}`,
       `AGENT_TASKS_HOME=${home.dataDir}`,
       `AGENT_TASKS_CONFIG=${home.configFile}`,
       `AGENT_TASKS_RUN=${DEMO_REF}`,
