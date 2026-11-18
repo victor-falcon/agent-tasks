@@ -41,7 +41,9 @@ export function makeExecHome(): ExecHome {
   mkdirSync(project, { recursive: true });
   for (const tool of ["hc", "tmux", "rex"] as const) mkdirSync(fakeDir(tool), { recursive: true });
   Object.assign(home.env, {
-    PATH: [join(REPO, "bin"), FAKE_BIN, dirname(process.execPath), process.env.PATH].join(":"),
+    // With ~/.local/bin, as in a terminal: launchEnv leaves the PATH as it is
+    // (no login shell, whose profile differs between machines).
+    PATH: [join(REPO, "bin"), FAKE_BIN, dirname(process.execPath), join(home.env.HOME!, ".local", "bin"), process.env.PATH].join(":"),
     SHELL: "/bin/sh",
     FAKE_HC_DIR: hcDir,
     FAKE_TMUX_DIR: fakeDir("tmux"),

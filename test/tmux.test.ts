@@ -40,7 +40,7 @@ describe("tmux preset (fake tmux)", () => {
       cwd: home.project,
       argv: [
         "/usr/bin/env",
-        `PATH=${join(home.env.HOME!, ".local", "bin")}:${home.env.PATH}`,
+        `PATH=${home.env.PATH}`,
         `AGENT_TASKS_HOME=${home.dataDir}`,
         `AGENT_TASKS_CONFIG=${home.configFile}`,
         `AGENT_TASKS_RUN=${DEMO_REF}`,
