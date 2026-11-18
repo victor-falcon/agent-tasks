@@ -4,7 +4,8 @@ import { formatSource, knownMachines, type Resolution } from "./config.ts";
 import type { Context } from "./context.ts";
 import { AgentTasksError, NotFoundError } from "./errors.ts";
 import { launchEnv, type LauncherSpec, resolveLauncher, sessionName, type SessionInput } from "./launcher.ts";
-import { resolvePath } from "./paths.ts";
+import { type Env, resolvePath } from "./paths.ts";
+import { pidAlive, readRunnerLock } from "./runner-lock.ts";
 import { MachineUnreachableError } from "./ssh.ts";
 import type { Attempt, KeepOpen, Run, RunStatus, SessionRecord, Task, Trigger } from "./schema.ts";
 import { parseRunRef, runRef, runSlotId } from "./slot.ts";
@@ -219,7 +220,21 @@ export function attemptSessionInput(ctx: Context, info: AttemptInfo, resolution:
 
 /** Everything the launcher needs for one attempt of a run. */
 export function sessionInput(ctx: Context, task: Task, resolution: Resolution, run: Run, attempt: Attempt): SessionInput {
-  return attemptSessionInput(ctx, attemptInfo(ctx, task, run, attempt), resolution, launchEnv(ctx.env));
+  return attemptSessionInput(ctx, attemptInfo(ctx, task, run, attempt), resolution, localLaunchEnv(ctx));
+}
+
+/**
+ * The environment of a launch here (see launchEnv). Outside a Herdr terminal
+ * (Herdr's agent-tasks panel, a script), a run started by hand belongs with
+ * the scheduled ones: when the live runner runs in a Herdr terminal, its
+ * terminal stands in for $HC_TERMINAL_ID, so the run opens in its space,
+ * nested under it, as it would from the TUI.
+ */
+function localLaunchEnv(ctx: Context): Env {
+  const env = launchEnv(ctx.env);
+  if (env.HC_TERMINAL_ID) return env;
+  const lock = readRunnerLock(ctx.paths);
+  return lock?.terminal && pidAlive(lock.pid) ? { ...env, HC_TERMINAL_ID: lock.terminal } : env;
 }
 
 /** The launcher-independent facts of an attempt of a run stored here. */

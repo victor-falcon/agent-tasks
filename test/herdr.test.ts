@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { herdrSpaceId } from "../src/launcher.ts";
 import { join } from "node:path";
 import { at, DEMO_REF, type ExecHome, execTask, makeExecHome } from "./exec-helpers.ts";
@@ -236,6 +236,25 @@ describe("herdr preset without $HC_TERMINAL_ID", () => {
     expect(labelsOf(calls("run")[0]!)[0]).toBe(`herdr.space=${AGENT_TASKS}`);
     expect(home.run(DEMO_REF).status).toBe("running");
     expect(appCalls()).toEqual([["ls"]]); // no rename retries without a window
+  });
+
+  test("a run started outside Herdr (the agent-tasks panel) opens under the live runner's terminal", async () => {
+    mkdirSync(home.paths.stateDir, { recursive: true });
+    writeFileSync(join(home.paths.stateDir, "runner.lock"), JSON.stringify({ pid: process.pid, terminal: "t1", started_at: at(0), every: "1m" }));
+    execTask(home, "succeed");
+    await home.tick(1);
+    expect(calls("get")[0]).toEqual(["get", "t1", "--json"]);
+    const labels = labelsOf(calls("run")[0]!);
+    expect(labels[0]).toBe("herdr.space=sp-test");
+    expect(labels.slice(2)).toEqual(["herdr.parent=t1", `agent-tasks.run=${DEMO_REF}`]);
+  });
+
+  test("a runner lock whose process is gone is ignored", async () => {
+    mkdirSync(home.paths.stateDir, { recursive: true });
+    writeFileSync(join(home.paths.stateDir, "runner.lock"), JSON.stringify({ pid: 2 ** 22 + 12345, terminal: "t1", started_at: at(0), every: "1m" }));
+    execTask(home, "succeed");
+    await home.tick(1);
+    expect(labelsOf(calls("run")[0]!)[0]).toBe(`herdr.space=${AGENT_TASKS}`);
   });
 
   test("status, read and close need no runner terminal", async () => {

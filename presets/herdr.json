@@ -1,5 +1,5 @@
 {
-  "description": "Each run in its own Herdr tab. Inside a Herdr terminal ($HC_TERMINAL_ID, the runner's), in the runner's space and nested under it; elsewhere (a client machine reached over SSH, a runner outside Herdr), in this machine's space named after \"space\" (default \"Agent Tasks\"), created when missing. Starts an interactive shell and types the agent command into it, so shell aliases loaded at the first prompt (such as clc) work. The shell exits with the agent, so a terminal whose agent quit without finish is detected.",
+  "description": "Each run in its own Herdr tab. Inside a Herdr terminal ($HC_TERMINAL_ID, the runner's), in the runner's space and nested under it (a run started outside Herdr, e.g. from Herdr's agent-tasks panel, goes under the live runner's terminal the same way); elsewhere (a client machine reached over SSH, a runner outside Herdr), in this machine's space named after \"space\" (default \"Agent Tasks\"), created when missing. Starts an interactive shell and types the agent command into it, so shell aliases loaded at the first prompt (such as clc) work. The shell exits with the agent, so a terminal whose agent quit without finish is detected.",
   "space": "Agent Tasks",
   "launch": [
     "hc", "run", "--bg", "--json", "--no-parent", "--no-notify", "--keep",
