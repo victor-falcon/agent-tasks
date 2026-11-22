@@ -2,7 +2,7 @@ import type { CliRenderer, KeyEvent, Renderable } from "@opentui/core";
 import type { BindingParser, KeyStrokeInput, Keymap } from "@opentui/keymap";
 import { registerDefaultKeys, registerEnabledFields, registerMetadataFields, registerNeovimDisambiguation } from "@opentui/keymap/addons";
 import { createOpenTuiKeymap } from "@opentui/keymap/opentui";
-import { parseKeys } from "../../tui/keys.ts";
+import { parseKeys } from "./notation.ts";
 import type { Action } from "./actions.ts";
 import type { Keymap as TuiKeymap } from "./config.ts";
 

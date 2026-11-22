@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { commands } from "../src/commands/index.ts";
+import { createContext } from "../src/context.ts";
+import { dependenciesCheck } from "../src/doctor.ts";
 import { makeTask, makeTempHome, runCli, type TempHome } from "./helpers.ts";
 
 const REPO = resolve(import.meta.dir, "..");
@@ -335,6 +338,33 @@ describe("doctor", () => {
     expect(check.status).toBe("error");
     expect(check.message).toContain("hc");
     expect(check.hint).toContain("PATH");
+  });
+
+  test("dependencies: missing or at another version than package.json pins says to run bun install", () => {
+    const root = join(home.root, "checkout");
+    const sink = { write: () => {} };
+    const ctx = createContext({ now: new Date(), json: false, env: home.env, cwd: home.root, stdout: sink, stderr: sink, commands });
+    expect(dependenciesCheck(ctx, root).status).toBe("warn"); // no package.json: nothing to compare with
+    const native = `@opentui/core-${process.platform}-${process.arch}`;
+    const pkg = (name: string, version: string, extra: object = {}) => {
+      mkdirSync(join(root, "node_modules", name), { recursive: true });
+      writeFileSync(join(root, "node_modules", name, "package.json"), JSON.stringify({ name, version, ...extra }));
+    };
+    mkdirSync(root);
+    writeFileSync(join(root, "package.json"), JSON.stringify({ dependencies: { "@opentui/core": "0.9.7", croner: "^11.0.1" } }));
+    const check = dependenciesCheck(ctx, root);
+    expect(check.status).toBe("error");
+    expect(check.hint).toBe("run: cd ~/checkout && bun install");
+    expect(check.details).toEqual(["@opentui/core: not installed", "croner: not installed"]);
+    // An old OpenTUI, its native package left at the old version too.
+    pkg("@opentui/core", "0.9.5", { optionalDependencies: { [native]: "0.9.5", [`${native}-musl`]: "0.9.5", "@opentui/core-other-os": "0.9.5" } });
+    pkg(native, "0.9.5");
+    pkg("croner", "11.2.0"); // a range is bun's to resolve
+    expect(dependenciesCheck(ctx, root).details).toEqual(["@opentui/core: 0.9.5 installed, 0.9.7 wanted"]);
+    pkg("@opentui/core", "0.9.7", { optionalDependencies: { [native]: "0.9.7", [`${native}-musl`]: "0.9.7" } });
+    expect(dependenciesCheck(ctx, root).details).toEqual([`${native} or ${native}-musl: not installed at 0.9.7 (OpenTUI's native library)`]);
+    pkg(`${native}-musl`, "0.9.7"); // either variant will do
+    expect(dependenciesCheck(ctx, root)).toEqual({ id: "dependencies", status: "ok", message: "dependencies installed (2)" });
   });
 
   test("no heartbeat is a warning, not a failure", async () => {

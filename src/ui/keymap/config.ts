@@ -1,17 +1,25 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ConfigError } from "../../errors.ts";
-import { type Binding, KeymapError, parseKeys, TUI_CONFIG_FILE } from "../../tui/keys.ts";
+import { type Binding, parseKeys } from "./notation.ts";
 import { VIEW_KEYS } from "../views/keys.ts";
 import { ACTIONS, type Action, DEFAULT_KEYS } from "./actions.ts";
 import { isNewAction } from "./new-actions.ts";
 import type { ViewKeys } from "./spec.ts";
 
-// tui.toml for the new dashboard: the old file format ([keys] with the same
-// action names, Vim notation, the same errors), plus the new actions and a
-// top-level `mouse = false`. The notation and the error messages are the old
-// module's (parseKeys), so a file that worked before works here and a broken
-// one fails with the same words.
+// tui.toml in the config folder: [keys] (action = key or list of keys, in
+// Vim notation) and a top-level `mouse = false`. The action names of the
+// first dashboard keep their meaning, so a file written for it still loads,
+// and fails with the same words when broken.
+
+export const TUI_CONFIG_FILE = "tui.toml";
+
+/** Bindings that can't be used; `loadTuiConfig` reports them as a config error of tui.toml. */
+export class KeymapError extends Error {
+  constructor(readonly details: string[]) {
+    super(`invalid key bindings: ${details.join("; ")}`);
+  }
+}
 
 export type Keymap = Record<Action, Binding[]>;
 
@@ -62,7 +70,7 @@ function clash(a: Binding, b: Binding): boolean {
 }
 
 /**
- * A tui.toml written for the old dashboard may already use a key that a new
+ * A tui.toml written for the first dashboard may already use a key that a new
  * action takes by default (`retry = "u"`, `attach = "1"`). The user's choice
  * wins: the new action loses that default key in the views where both are
  * bound (it keeps it if the user set the new action too, and then a clash is

@@ -15,7 +15,7 @@ does the work, reports what it did and closes itself. You get a notification
 with its summary. If it fails, gets stuck on a question or your laptop was
 asleep, that's recorded too, and you can ask your agent what happened.
 
-![The agent-tasks runner dashboard: tasks running, the next runs, recent results with the agent's summary, and the runner's events](doc/images/dashboard.png)
+![The agent-tasks dashboard: runs that need attention, runs in progress, the next runs and recent results, with a preview of the selected run](doc/images/dashboard.png)
 
 Works with Claude Code (or any agent you start from a terminal), on macOS
 and Linux, and best inside a terminal multiplexer: Herdr, tmux or Rex.
@@ -83,11 +83,13 @@ You don't need to learn any command. Ask:
 
 ## Watch it work
 
-The runner tab is also a live dashboard (the screenshot above): what's
-running, what's next, recent results with the agent's summary. Open a run to
-read its output, attach to its tab, retry it or run a task now, with Vim
-keys (`?` lists them). Open the same dashboard anywhere with
-`agent-tasks top`, or get a one-screen check with `agent-tasks status`.
+The runner tab is also a live dashboard (the screenshot above): what needs
+you, what's running, what's next, recent results with the agent's summary,
+and tabs for every task, the whole run history and the runner itself. Open a
+run to read its output, attach to its tab, retry it or run a task now, with
+Vim keys, the mouse or a command palette (`:`; `?` lists the keys). Open the
+same dashboard anywhere with `agent-tasks top`, or get a one-screen check
+with `agent-tasks status`.
 
 When an agent is stuck on a question, the run shows as blocked and you get
 a notification; `agent-tasks attach <run_ref>` (or `a` in the dashboard)

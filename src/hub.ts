@@ -27,7 +27,7 @@ export function isOldHubRejection(code: number | null, output: string): boolean 
 export function oldHubError(hubAlias: string): AgentTasksError {
   return new AgentTasksError(
     "protocol_mismatch",
-    `the hub "${hubAlias}" runs an older agent-tasks that does not know this client's protocol (${REMOTE_PROTOCOL}); update agent-tasks on the hub (git pull in its agent-tasks checkout)`,
+    `the hub "${hubAlias}" runs an older agent-tasks that does not know this client's protocol (${REMOTE_PROTOCOL}); update agent-tasks on the hub (git pull, then bun install, in its agent-tasks checkout)`,
   );
 }
 

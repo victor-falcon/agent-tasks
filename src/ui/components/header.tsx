@@ -5,7 +5,7 @@ import { runnerDownReason } from "../../output/banner.ts";
 import { RUN_MARKS } from "../../output/symbols.ts";
 import { clockTime } from "../../output/time.ts";
 import { displayTimezone } from "../../task-info.ts";
-import type { Dashboard } from "../../tui/snapshot.ts";
+import type { Dashboard } from "../../dashboard.ts";
 import { useApp } from "../context.ts";
 import { type Segment, truncate } from "./cells.ts";
 import { Line } from "./line.tsx";

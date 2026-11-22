@@ -62,6 +62,8 @@ export interface RunnerDeps {
   onStarted?(): void;
   /** True while the dashboard owns the screen: lines only go to runner.log (which the dashboard shows). */
   screenHidden?(): boolean;
+  /** Settles once the dashboard has given the screen back (it leaves asynchronously), so the final line lands on the real screen. */
+  screenBack?(): Promise<void>;
 }
 
 /** Waits `ms` or until `signal` aborts, whichever comes first. */
@@ -315,6 +317,7 @@ class Runner {
       releaseRunnerLock(this.paths, this.lock.pid);
       const final: StatusInfo = { ...this.status, health: this.opts.once ? this.status.health : "stopped", next_tick: null };
       const stoppedAt = this.deps.now();
+      await this.deps.screenBack?.().catch(() => {});
       this.out.final(stoppedAt, final, { type: "runner_stopped", at: this.stamp(stoppedAt), ticks: this.ticks, last_tick: this.status.last_tick ? this.stamp(this.status.last_tick) : null, running: this.status.running, today: this.status.today });
     }
     return exitCode;

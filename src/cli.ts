@@ -127,7 +127,7 @@ function checkClientProtocol(value: string): void {
   const update = theirs < REMOTE_PROTOCOL ? "the client" : "this hub";
   throw new AgentTasksError(
     "protocol_mismatch",
-    `the client speaks agent-tasks protocol ${theirs} and this hub speaks ${REMOTE_PROTOCOL}; update agent-tasks on ${update} (git pull in its agent-tasks checkout)`,
+    `the client speaks agent-tasks protocol ${theirs} and this hub speaks ${REMOTE_PROTOCOL}; update agent-tasks on ${update} (git pull, then bun install, in its agent-tasks checkout)`,
   );
 }
 

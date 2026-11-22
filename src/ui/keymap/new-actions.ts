@@ -6,10 +6,10 @@ import { TASK_ACTIONS } from "../views/task/keys.ts";
 import { TASKS_ACTIONS } from "../views/tasks/keys.ts";
 import type { ActionDefs } from "./defs.ts";
 
-// Actions only the new dashboard has, with their default keys: the global
-// ones here, and each view's own in its keys.ts (a view adds an action there,
-// not here). The old dashboard's tui.toml loader asks `isNewAction` to skip
-// these names, so one tui.toml serves both.
+// Actions the first dashboard did not have, with their default keys: the
+// global ones here, and each view's own in its keys.ts (a view adds an action
+// there, not here). A tui.toml written for the first dashboard never sets
+// them, so its keys win over their defaults (config.ts, yieldToUser).
 
 const GLOBAL_NEW_ACTIONS = {
   next_tab: { desc: "Next tab", keys: ["gt"] },
@@ -38,7 +38,7 @@ export const NEW_ACTIONS = Object.fromEntries(defs.map(([name, def]) => [name, d
 
 export const NEW_DEFAULT_KEYS = Object.fromEntries(defs.map(([name, def]) => [name, def.keys])) as Record<NewAction, readonly string[]>;
 
-/** Whether `name` is an action of the new dashboard only (the old one ignores it in tui.toml). */
+/** Whether `name` is an action the first dashboard did not have. */
 export function isNewAction(name: string): boolean {
   return Object.hasOwn(NEW_ACTION_DEFS, name);
 }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { listTasks } from "../src/store.ts";
-import { buildDashboard } from "../src/tui/snapshot.ts";
+import { buildDashboard } from "../src/dashboard.ts";
 import { commands } from "../src/commands/index.ts";
 import { createContext } from "../src/context.ts";
 import { buildKeymap } from "../src/ui/keymap/config.ts";

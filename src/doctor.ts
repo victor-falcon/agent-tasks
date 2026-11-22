@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type Check, fail, ok, warn } from "./checks.ts";
 import { callHub } from "./hub.ts";
@@ -19,6 +19,44 @@ function bunCheck(ctx: Context): Check {
   const onPath = findExecutable("bun", ctx.env);
   if (!onPath) return fail("bun", `bun ${Bun.version} runs this command, but bun is not on PATH`, "add bun's folder to PATH: bin/agent-tasks starts with #!/usr/bin/env bun");
   return ok("bun", `bun ${Bun.version} (${tildify(onPath, ctx.env)})`);
+}
+
+/** A package.json in `dir`, or null when it is not there or can't be read. */
+function readPackage(dir: string): { version?: string; dependencies?: Record<string, string>; optionalDependencies?: Record<string, string> } | null {
+  try {
+    return JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The checkout's dependencies are installed, at the versions package.json
+ * pins. A `git pull` without `bun install` leaves them behind; the dashboard
+ * (OpenTUI, with a native library per platform) is then the first thing to
+ * break, so the native package for this platform is checked too.
+ */
+export function dependenciesCheck(ctx: Context, root = REPO_ROOT): Check {
+  const shown = tildify(root, ctx.env);
+  const pkg = readPackage(root);
+  if (!pkg) return warn("dependencies", `can't read ${shown}/package.json: dependencies not checked`);
+  const installed = (name: string) => readPackage(join(root, "node_modules", name))?.version ?? null;
+  const problems: string[] = [];
+  const wanted = Object.entries(pkg.dependencies ?? {});
+  for (const [name, spec] of wanted) {
+    const version = installed(name);
+    if (version === null) problems.push(`${name}: not installed`);
+    // Only exact pins are compared: a range (^11.0.1) is bun's to resolve.
+    else if (/^\d+\.\d+\.\d+$/.test(spec) && version !== spec) problems.push(`${name}: ${version} installed, ${spec} wanted`);
+  }
+  // OpenTUI's native library: one of its optional packages for this platform (linux-x64, or linux-x64-musl…), at its version.
+  const core = readPackage(join(root, "node_modules", "@opentui", "core"));
+  const natives = Object.keys(core?.optionalDependencies ?? {}).filter((name) => name.startsWith(`@opentui/core-${process.platform}-${process.arch}`));
+  if (core?.version && natives.length > 0 && !natives.some((name) => installed(name) === core.version)) {
+    problems.push(`${natives.join(" or ")}: not installed at ${core.version} (OpenTUI's native library)`);
+  }
+  if (problems.length > 0) return fail("dependencies", `dependencies of ${shown} are missing or out of date`, `run: cd ${shown} && bun install`, problems);
+  return ok("dependencies", `dependencies installed (${wanted.length})`);
 }
 
 function cliOnPathCheck(ctx: Context): Check {
@@ -225,7 +263,7 @@ function machineChecks(ctx: Context, config: UserConfig): Check[] {
 export function doctorChecks(ctx: Context, dirs: InstallDirs): Check[] {
   const config = configChecks(ctx);
   const { loaded } = config;
-  const checks = [bunCheck(ctx), cliOnPathCheck(ctx), ...config.checks];
+  const checks = [bunCheck(ctx), dependenciesCheck(ctx), cliOnPathCheck(ctx), ...config.checks];
   // A client keeps no data and runs no runner: those are the hub's.
   const hub = loaded?.config.hub;
   if (loaded && !hub) checks.push(...dataChecks(ctx, ctx.paths));

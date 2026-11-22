@@ -1,7 +1,7 @@
 import { visibleWidth } from "../output/table.ts";
 
 // Text that fits the screen: escape sequences and control characters out of
-// captured logs, long lines wrapped, styled lines cut at the width.
+// captured logs, long lines wrapped.
 
 const ANSI = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[PX^_][^\x1b]*\x1b\\|[@-Z\\-_])/g;
 
@@ -51,37 +51,4 @@ export function wrap(text: string, width: number): string[] {
     if (current.trim() !== "") out.push(current.trimEnd());
   }
   return out;
-}
-
-const ESCAPE_AT = /^\x1b\[[0-9;]*m/;
-
-/**
- * A styled line cut to `width` visible columns (with `…` when cut) and
- * padded with spaces to exactly `width`. Color codes don't count and are
- * closed at the end.
- */
-export function fit(text: string, width: number): string {
-  if (width <= 0) return "";
-  const full = visibleWidth(text);
-  if (full <= width) return text + " ".repeat(width - full);
-  let out = "";
-  let used = 0;
-  let i = 0;
-  let styled = false;
-  while (i < text.length) {
-    const esc = ESCAPE_AT.exec(text.slice(i));
-    if (esc) {
-      out += esc[0];
-      i += esc[0].length;
-      styled = true;
-      continue;
-    }
-    const ch = String.fromCodePoint(text.codePointAt(i)!);
-    const chWidth = visibleWidth(ch);
-    if (used + chWidth > width - 1) break;
-    out += ch;
-    used += chWidth;
-    i += ch.length;
-  }
-  return `${out}…${styled ? "\x1b[0m" : ""}${" ".repeat(Math.max(0, width - used - 1))}`;
 }

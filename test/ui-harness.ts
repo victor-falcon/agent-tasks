@@ -1,7 +1,7 @@
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import { commands } from "../src/commands/index.ts";
 import { createContext } from "../src/context.ts";
-import type { CommandRunner } from "../src/tui/app.ts";
+import type { CommandRunner } from "../src/ui/exec.ts";
 import { buildKeymap, type TuiConfig } from "../src/ui/keymap/config.ts";
 import { type AppHandle, mountApp } from "../src/ui/main.tsx";
 import type { TempHome } from "./helpers.ts";

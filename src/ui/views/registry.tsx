@@ -1,3 +1,5 @@
+import { Line } from "../components/line.tsx";
+import { useViewKeys } from "../keymap/layer.ts";
 import type { Route, TabId } from "../state.ts";
 import { OVERVIEW_TAB } from "./overview/index.tsx";
 import { RUN_VIEW } from "./run/index.tsx";
@@ -6,7 +8,6 @@ import { SYSTEM_TAB } from "./system/index.tsx";
 import { TASK_VIEW } from "./task/index.tsx";
 import { TASKS_TAB } from "./tasks/index.tsx";
 import type { TabDef, ViewDef } from "./types.ts";
-import { Placeholder } from "./placeholder.tsx";
 
 // Every view of the dashboard: the four tabs (roots) and the details a view
 // can open on top of them (`ui.push({ view: "run", params: { ref } })`). Each
@@ -23,7 +24,14 @@ export const DETAILS: Record<string, ViewDef> = { run: RUN_VIEW, task: TASK_VIEW
 /** Shown for a route nobody registered: a typo in `ui.push` shows up instead of falling back silently. */
 const UNKNOWN: ViewDef = {
   keys: RUN_VIEW.keys,
-  component: (props) => <Placeholder keys={props.keys} what={`A view named "${JSON.stringify(props.params)}"`} cli="(none: this is a bug)" />,
+  component: (props) => {
+    useViewKeys(props.keys, {});
+    return (
+      <box flexGrow={1} paddingLeft={2} paddingTop={1}>
+        <Line segments={[{ text: `No view for ${JSON.stringify(props.params)}: this is a bug.`, color: "bold" }]} />
+      </box>
+    );
+  },
 };
 
 /** The definition of the view a route shows. */

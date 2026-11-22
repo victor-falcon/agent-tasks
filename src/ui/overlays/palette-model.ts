@@ -1,6 +1,6 @@
 import { isInProgress } from "../../run-info.ts";
 import type { Task } from "../../schema.ts";
-import type { Dashboard, DashRun } from "../../tui/snapshot.ts";
+import type { Dashboard, DashRun } from "../../dashboard.ts";
 import { RETRYABLE, type Target } from "../actions.ts";
 import { ACTIONS, type Action, COUNTED_ACTIONS } from "../keymap/actions.ts";
 import type { Keymap } from "../keymap/config.ts";

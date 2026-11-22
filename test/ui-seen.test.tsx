@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { writeRun } from "../src/store.ts";
 import { type HeaderInput, headerSegments } from "../src/ui/components/header.tsx";
 import { createSeen } from "../src/ui/seen.ts";
-import { buildDashboard } from "../src/tui/snapshot.ts";
+import { buildDashboard } from "../src/dashboard.ts";
 import { commands } from "../src/commands/index.ts";
 import { createContext } from "../src/context.ts";
 import { PAGE_SIZE } from "../src/ui/views/runs/model.ts";

@@ -185,33 +185,46 @@ Upcoming
 
 `agent-tasks runner` on a terminal shows a live dashboard;
 `agent-tasks top` shows the same one without running the scheduler, from
-another tab or another machine. It has:
+another tab or another machine. The header has the runner's health, when it
+ticked and ticks next, and today's counts. Four tabs (`1`–`4`, or
+`gt`/`gT`):
 
-- **Header**: the runner's health, when it ticked and ticks next, and
-  today's counts (succeeded, failed, missed, blocked).
-- **Running**: runs in progress, and which are blocked waiting for you.
-- **Next**: the next run of every task, with its schedule and machine.
-- **Recent**: recent results with the agent's summary. Open one (`<CR>`) to
-  read its result first: the summary and the file the agent passed to
-  `--output-file`. Its details, attempts, events and the log captured from
-  its session are folded below: `j`/`k` move between sections (scrolling
-  through a long open one) and `<CR>` opens or folds the selected one
-  (`zR` opens them all, `zM` folds them all). A run with no result yet
-  opens on its log.
-- **Events**: what the runner did (`state/runner.log`): launches, results
-  with their summary, restarts and warnings. It takes the room Recent does
-  not need.
+- **Overview**: **Needs attention** (blocked runs, and failures and missed
+  runs of the last 24 hours you haven't seen), **Running**, **Next** and
+  **Recent**, with a preview of the selection on wide terminals.
+- **Tasks**: every task with its schedule, next run and last results.
+- **Runs**: the whole history, newest first.
+- **System**: the runner, its events (`state/runner.log`), machines,
+  `doctor`'s checks and unreadable files.
 
-It uses Vim keys: `j`/`k`, `gg`/`G`, `<C-d>`/`<C-u>`, `<Tab>` between
-panels, `<CR>` or `l` to open a run, `j`/`k` between its sections and
-`<CR>` to open or fold one, `h`, `q`
-or `<Esc>` to go back, `a` attach, `r` retry, `R` run now, `p` pause or
-resume, `?` for the full list. Change them in `~/.config/agent-tasks/tui.toml`
-(see [examples/tui.example.toml](../examples/tui.example.toml)).
-`agent-tasks runner --plain` prints one line per event instead.
-`agent-tasks top --json` prints the dashboard's data once, including
-`data_dir`, the data folder a UI can watch to know when to ask again. On a
-client, `top` runs on the hub, so that path is the hub's.
+`<CR>` or `l` opens a run or a task; `h`, `q` or `<Esc>` goes back. A run
+opens on its result (the summary and the file the agent passed to
+`--output-file`), with its details, attempts, events and captured log folded
+below: `j`/`k` move between sections, `<CR>` folds or opens one, `/`
+searches the log. A task opens on its schedule, with its instructions, runs
+and resolved settings beside it (`[`/`]`).
+
+It uses Vim keys (`j`/`k`, `5j`, `gg`/`G`, `<C-d>`/`<C-u>`, `<Tab>` between
+sections), and the mouse: a click selects, a double click opens, the wheel
+scrolls. `a` attaches, `r` retries, `R` runs a task now, `p` pauses or
+resumes (`u` undoes it). `/` filters a list, `:` or `<C-p>` opens a command
+palette with every action, task and recent run, and after a prefix such as
+`g` a popup lists what can follow. `?` lists the keys of the view.
+
+A failure leaves Needs attention once you open it, or press `x` on it. That
+"seen" state is kept in `state/tui.json`, on the machine running the
+dashboard, so every dashboard open there agrees. The colors are your
+terminal's palette (light or dark theme alike); `NO_COLOR` turns them off.
+
+Keys can be changed in `~/.config/agent-tasks/tui.toml`, where
+`mouse = false` leaves the mouse to the terminal; every action and its
+default keys are in [examples/tui.example.toml](../examples/tui.example.toml),
+and `agent-tasks config check` validates it. `agent-tasks runner --plain`
+prints one line per event instead; `top` piped or redirected prints what
+`agent-tasks status` prints (use `status` in scripts: its exit code says
+when something needs you). `agent-tasks top --json` prints the dashboard's
+data once, including `data_dir`, the data folder a UI can watch to know when
+to ask again. On a client, `top` runs on the hub, so that path is the hub's.
 
 ## When a run ends
 
@@ -408,7 +421,10 @@ git -C ~/.local/share/agent-tasks-src pull
 cd ~/.local/share/agent-tasks-src && bun install
 ```
 
-Restart the runner after updating. To uninstall, run
+`bun install` is not optional: the dashboard needs its dependencies
+(OpenTUI, which ships a native library per platform) at the versions
+`package.json` pins, and `agent-tasks doctor` says when they are missing or
+out of date. Restart the runner after updating. To uninstall, run
 `agent-tasks install --uninstall` (it removes only the links it created),
 then delete the checkout. Your config (`~/.config/agent-tasks/`) and data
 (`~/.local/share/agent-tasks/`) are left alone; delete them too if you
@@ -436,5 +452,7 @@ AGENT_TASKS_E2E_HERDR=1 bun test test/e2e
 ```
 
 Each CLI command lives in its own file under `src/commands/` and is
-registered in `src/commands/index.ts`. The design docs are in
+registered in `src/commands/index.ts`. The dashboard is in `src/ui/` (OpenTUI
+with Solid; one folder per view under `src/ui/views/`), and the data it shows
+in `src/dashboard.ts`. The design docs are in
 [roadmap/](roadmap/README.md).

@@ -5,10 +5,9 @@ import { isDuration } from "../duration.ts";
 import { UsageError } from "../errors.ts";
 import { interruptibleSleep, runRunner } from "../runner.ts";
 import { releaseRunnerLock } from "../runner-lock.ts";
-import { selfCommand } from "../tui/app.ts";
-import { canShowDashboard, loadKeymap, startDashboard } from "../tui/index.ts";
+import { selfCommand } from "../ui/exec.ts";
 import { loadTuiConfig } from "../ui/keymap/config.ts";
-import { startNewDashboard } from "../ui/load.ts";
+import { type AppHandle, canShowDashboard, dashboardFailed, startDashboard } from "../ui/load.ts";
 import type { Command } from "./types.ts";
 
 /** Ctrl-C, kill, and the terminal tab closing. */
@@ -25,11 +24,10 @@ the notifiers in the config (by default, a desktop notification for
 failed, timed_out and blocked). Leave it open in a terminal tab. A tick that
 fails is shown as ⚠ and the runner carries on.
 
-On a terminal it shows the dashboard of "agent-tasks top": runs in
-progress, what's next, recent results (open one to read its summary,
-output and log), the runner's events, with Vim keys (? lists them; they can
-be changed in tui.toml in the config folder). q or Ctrl-C stops the runner
-after the current tick.
+On a terminal it shows the dashboard of "agent-tasks top" (what needs
+attention, tasks, runs, the runner's events), with Vim keys and the mouse
+(? lists the keys; tui.toml in the config folder changes them). q or Ctrl-C
+stops the runner after the current tick.
 
 With --plain, or when the screen is not a terminal, it prints one line per
 event instead (with a status line at the bottom on a terminal). With
@@ -46,20 +44,22 @@ Options:
   --quiet             Events only: no tick lines and no status line (no dashboard)
   --plain             One line per event instead of the dashboard`,
   async run(ctx, args) {
-    // --next: the new dashboard (src/ui), not documented until it replaces the old one.
+    // --next opened this dashboard while the first one was the default; kept so scripts that pass it
+    // still work (it can go a release after the swap).
     const { values } = parseCommandArgs(args, { every: { type: "string" }, once: { type: "boolean" }, quiet: { type: "boolean" }, plain: { type: "boolean" }, next: { type: "boolean" } }, { maxPositionals: 0 });
     const every = values.every ?? ctx.config.config.runner?.every ?? BUILTIN_DEFAULTS.runner_every;
     if (!isDuration(every)) throw new UsageError(`--every: invalid duration "${every}" (expected e.g. 30s, 5m or 1h)`);
 
     const dashboard = !values.plain && !values.once && !values.quiet && !ctx.json && canShowDashboard(ctx.stdout);
     // Read before starting, so a broken tui.toml stops here and not with the screen taken.
-    const next = dashboard && values.next === true;
-    const keymap = dashboard && !next ? loadKeymap(ctx.paths.configDir) : null;
-    const nextConfig = next ? loadTuiConfig(ctx.paths.configDir) : null;
-    // The old dashboard (Tui) or the new one (AppHandle, which gives the terminal back asynchronously: `closed`).
-    let tui = null as { stop(): void; readonly isRunning: boolean; closed?: Promise<void> } | null;
-    /** The new dashboard while it starts (it is async): waited for before giving the terminal back. */
+    const config = dashboard ? loadTuiConfig(ctx.paths.configDir) : null;
+    // Set from a callback, so `as` keeps TypeScript from narrowing it to null.
+    let tui = null as AppHandle | null;
+    /** The dashboard while it starts (it is async): waited for before giving the terminal back. */
     let starting: Promise<void> | null = null;
+    // The screen is the dashboard's from the start (it opens asynchronously, after the first lines are
+    // written) until it has given the terminal back; lines meanwhile only go to runner.log.
+    let screenTaken = config !== null;
 
     // The clock is the real time, shifted so that the first tick happens at `--now`.
     const offset = ctx.now.getTime() - Date.now();
@@ -88,20 +88,25 @@ Options:
           stdout: ctx.stdout,
           pid: process.pid,
           onStarted: () => {
-            if (nextConfig) {
-              starting = startNewDashboard({ title: "agent-tasks runner", config: nextConfig, now, context, env: ctx.env, exec: selfCommand(ctx.env), watchDir: ctx.paths.dataDir, onQuit: stop }).then(
-                (handle) => {
-                  tui = handle;
-                  if (controller.signal.aborted) handle.stop(); // stopped while it was starting
-                },
-                (err) => void ctx.stderr.write(`agent-tasks: the dashboard could not start (${(err as Error).message}); carrying on without it\n`),
-              );
-              return;
-            }
-            if (!keymap) return;
-            tui = startDashboard({ title: "agent-tasks runner", keymap, now, context, env: ctx.env, watchDir: ctx.paths.dataDir, onQuit: stop });
+            if (!config) return;
+            starting = startDashboard({ title: "agent-tasks runner", config, now, context, env: ctx.env, exec: selfCommand(ctx.env), watchDir: ctx.paths.dataDir, onQuit: stop }).then(
+              (handle) => {
+                tui = handle;
+                if (controller.signal.aborted) handle.stop(); // stopped while it was starting
+              },
+              (err) => {
+                screenTaken = false;
+                ctx.stderr.write(`agent-tasks: ${dashboardFailed(err)}; carrying on without it\n`);
+              },
+            );
           },
-          screenHidden: () => tui?.isRunning === true,
+          screenHidden: () => screenTaken,
+          screenBack: async () => {
+            await starting;
+            tui?.stop();
+            await tui?.closed;
+            screenTaken = false;
+          },
         },
       );
     } finally {
