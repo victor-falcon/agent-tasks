@@ -22,7 +22,14 @@ const GLOBAL_NEW_ACTIONS = {
   dismiss: { desc: "Dismiss the messages at the bottom right", keys: ["<Esc>"] },
 } as const satisfies ActionDefs;
 
-export const NEW_ACTION_DEFS = { ...GLOBAL_NEW_ACTIONS, ...OVERVIEW_ACTIONS, ...TASKS_ACTIONS, ...RUNS_ACTIONS, ...SYSTEM_ACTIONS, ...RUN_ACTIONS, ...TASK_ACTIONS } as const satisfies ActionDefs;
+/** List actions more than one list view takes (Tasks, Runs): the `/` filter bar, cycling a list's filter, copying the selection's id. */
+const LIST_NEW_ACTIONS = {
+  filter: { desc: "Filter the list by text (Enter keeps it, Esc clears it)", keys: ["/"] },
+  cycle_filter: { desc: "Cycle the list's filter", keys: ["f"] },
+  copy: { desc: "Copy the selected id to the clipboard", keys: ["y"] },
+} as const satisfies ActionDefs;
+
+export const NEW_ACTION_DEFS = { ...GLOBAL_NEW_ACTIONS, ...LIST_NEW_ACTIONS, ...OVERVIEW_ACTIONS, ...TASKS_ACTIONS, ...RUNS_ACTIONS, ...SYSTEM_ACTIONS, ...RUN_ACTIONS, ...TASK_ACTIONS } as const satisfies ActionDefs;
 
 export type NewAction = keyof typeof NEW_ACTION_DEFS;
 

@@ -39,6 +39,8 @@ export interface AppOptions {
   handOver?: HandOver;
   /** Runs a program with the terminal (the pager): Bun.spawn unless replaced (tests). */
   spawn?: (argv: string[]) => Promise<number>;
+  /** Puts text on the clipboard (`y`): OSC 52 through the renderer unless replaced (tests). */
+  copy?: (text: string) => boolean;
 }
 
 export interface AppHandle {
@@ -82,7 +84,7 @@ export async function mountApp(renderer: CliRenderer, opts: AppOptions): Promise
     quit,
     spawn: opts.spawn,
     env: opts.env,
-    copy: (text) => renderer.copyToClipboardOSC52(text),
+    copy: opts.copy ?? ((text) => renderer.copyToClipboardOSC52(text)),
   });
   const cycle = (by: number) => () => ui.setTab(TAB_IDS[(TAB_IDS.indexOf(ui.tab()) + by + TAB_IDS.length) % TAB_IDS.length]!);
   const globalHandlers: App["globalHandlers"] = {

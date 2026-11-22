@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { localMachine } from "../config.ts";
+import { resolvePath, tildify } from "../paths.ts";
 import { isInProgress } from "../run-info.ts";
 import type { CommandRunner } from "../tui/app.ts";
 import type { DashRun } from "../tui/snapshot.ts";
@@ -32,6 +35,13 @@ export interface ActionsOptions {
   env?: Record<string, string | undefined>;
 }
 
+/** A task as the task actions need it. */
+export interface TaskRef {
+  id: string;
+  cwd: string;
+  machine: string;
+}
+
 export interface Actions {
   attach(target: Target | null): Promise<void>;
   retry(target: Target | null): void;
@@ -43,6 +53,12 @@ export interface Actions {
   openInPager(path: string): Promise<void>;
   /** Copies `text` to the clipboard; `what` names it in the toast (`ref`, `summary`). */
   copy(text: string, what: string): void;
+  /** Archives a task (`agent-tasks rm`), after asking. */
+  archive(taskId: string): void;
+  /** Hands the terminal to a shell in the task's folder; back to the dashboard when it exits. */
+  openFolder(task: TaskRef): Promise<void>;
+  /** A sticky error toast that says how to dismiss it (for a view's own refusals). */
+  error(text: string): void;
   /** Undoes the newest toast that can be undone. */
   undo(): void;
   quit(): void;
@@ -51,6 +67,7 @@ export interface Actions {
 }
 
 const RETRYABLE = ["failed", "timed_out", "missed"];
+
 
 function taskOf(target: Target): string {
   return target.kind === "run" ? target.run.task_id : target.taskId;
@@ -106,6 +123,36 @@ export function createActions(opts: ActionsOptions): Actions {
 
   return {
     background,
+    error,
+    archive(taskId) {
+      ui.ask({
+        title: `Archive ${taskId}?`,
+        consequence: "It stops running; its run history is kept, and it can be restored.",
+        onYes: () => void background(["rm", taskId], `archiving ${taskId}`).then(({ code, first }) => report(code, first, `archiving ${taskId}`)),
+      });
+    },
+    async openFolder(task) {
+      const ctx = store.ctx();
+      if (!ctx) return;
+      const here = localMachine(ctx.config.config);
+      if (task.machine !== here) {
+        error(`${task.id} runs on ${task.machine}: its folder is there, not on ${here}`);
+        return;
+      }
+      const dir = resolvePath(task.cwd, ctx.env, ctx.cwd);
+      if (!existsSync(dir)) {
+        error(`${tildify(dir, ctx.env)} does not exist`);
+        return;
+      }
+      const shell = opts.env?.SHELL || process.env.SHELL || "/bin/sh";
+      // The folder goes as $1 (spaces and quotes in it are safe); the shell gets the terminal, as the pager does.
+      // A shell that exits non-zero (its last command failed) is not an error worth a key press.
+      await opts.suspend(async () => {
+        process.stdout.write(`agent-tasks: ${shell} in ${dir}; exit it to go back to the dashboard.\n`);
+        await spawn(["sh", "-c", 'cd "$1" && exec "$2"', "sh", dir, shell]);
+        return 0;
+      });
+    },
     async attach(target) {
       if (!target) return;
       if (target.kind !== "run" || !isInProgress(target.run.status)) {

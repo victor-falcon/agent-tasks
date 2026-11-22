@@ -42,7 +42,7 @@ export interface PersonalInstructions {
   content: string | null;
 }
 
-function personalInstructions(ctx: Context, resolution: Resolution): PersonalInstructions[] {
+export function personalInstructions(ctx: Context, resolution: Resolution): PersonalInstructions[] {
   const fromConfig = ctx.config.config.instructions?.subagent?.length ?? 0;
   return resolution.instructions.map((path, i) => ({
     path,

@@ -6,6 +6,8 @@ import type { Color } from "../../output/style.ts";
 export interface Segment {
   text: string;
   color?: Color;
+  /** A cell in more than one color (a strip of results `■■✕`): its pieces, whose texts make up `text`. */
+  parts?: readonly Segment[];
 }
 
 const GAP = "  ";
@@ -28,7 +30,10 @@ export function alignRow(cells: readonly Segment[], widths: readonly number[], m
     const cell = cells[i]!;
     const padded = i === last ? cell.text : cell.text + " ".repeat(widths[i]! - width(cell.text));
     if (out.length > 0) out.push({ text: GAP });
-    out.push({ text: padded, color: cell.color });
+    if (cell.parts) {
+      out.push(...cell.parts.map((p) => ({ text: p.text, color: p.color })));
+      if (padded !== cell.text) out.push({ text: padded.slice(cell.text.length) });
+    } else out.push({ text: padded, color: cell.color });
   }
   const cut: Segment[] = [];
   for (const segment of out) {

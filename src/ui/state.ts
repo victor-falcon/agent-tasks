@@ -60,8 +60,18 @@ export interface UiState {
   answer(yes: boolean): void;
   help: Accessor<boolean>;
   setHelp(open: boolean): void;
-  /** An overlay takes the keys: the views' layers are off. */
+  /** A text field (the `/` filter bar) has the keys: the views' layers are off while it does. */
+  typing: Accessor<boolean>;
+  setTyping(on: boolean): void;
+  /** An overlay or a text field takes the keys: the views' layers are off. */
   modal: Accessor<boolean>;
+  /**
+   * State of a view that must outlive its component (filters, sort order, the
+   * sub-tab of a detail): views are unmounted while a detail is open on top
+   * of them, and coming back must find them as they were. One signal per
+   * `key`, created with `initial` the first time.
+   */
+  viewState<T>(key: string, initial: T): [Accessor<T>, (value: T) => void];
   dispose(): void;
 }
 
@@ -73,6 +83,8 @@ export function createUiState(initialTab: TabId = "overview"): UiState {
   const [busy, setBusy] = createSignal<readonly Busy[]>([]);
   const [confirm, setConfirm] = createSignal<Confirm | null>(null);
   const [help, setHelp] = createSignal(false);
+  const [typing, setTyping] = createSignal(false);
+  const viewStates = new Map<string, [Accessor<unknown>, (value: unknown) => void]>();
   const timers = new Map<number, ReturnType<typeof setTimeout>>();
   let nextId = 1;
 
@@ -127,7 +139,18 @@ export function createUiState(initialTab: TabId = "overview"): UiState {
     },
     help,
     setHelp,
-    modal: () => confirm() !== null || help(),
+    typing,
+    setTyping,
+    modal: () => confirm() !== null || help() || typing(),
+    viewState<T>(key: string, initial: T) {
+      let state = viewStates.get(key);
+      if (!state) {
+        const [get, set] = createSignal<unknown>(initial);
+        state = [get, (value) => set(() => value)];
+        viewStates.set(key, state);
+      }
+      return state as [Accessor<T>, (value: T) => void];
+    },
     dispose() {
       for (const t of timers.values()) clearTimeout(t);
       timers.clear();

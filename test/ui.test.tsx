@@ -145,7 +145,7 @@ describe("frame", () => {
     await press("2");
     await Bun.sleep(450); // `2` also starts a count (`2j`): it runs alone after a moment
     await settle();
-    expect(await screen()).toContain("The Tasks tab is not in the new dashboard yet.");
+    expect(await screen()).toContain("── Tasks (7)");
     await press("g", "t");
     expect(await screen()).toContain("── History (");
     await press("g", "T", "g", "T");
