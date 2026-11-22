@@ -1,15 +1,13 @@
-import { capturedLog } from "../../../commands/log.ts";
 import type { Context } from "../../../context.ts";
 import type { Color } from "../../../output/style.ts";
 import { PENDING_MARK, RUN_MARKS, TASK_MARKS } from "../../../output/symbols.ts";
 import { agendaTime, clockTime, DAY, formatSpan, relativeTime } from "../../../output/time.ts";
-import { isFailure } from "../../../run-info.ts";
 import type { RunStatus } from "../../../schema.ts";
-import { readRunByRef, readTask } from "../../../store.ts";
+import { readTask } from "../../../store.ts";
 import { taskOverview } from "../../../task-info.ts";
-import { type Dashboard, type DashNext, type DashRun, tailLines } from "../../../tui/snapshot.ts";
-import { sanitize } from "../../../tui/text.ts";
+import type { Dashboard, DashNext, DashRun } from "../../../tui/snapshot.ts";
 import type { Target } from "../../actions.ts";
+import { buildRunPreview, type RunPreviewData } from "../../components/run-preview.tsx";
 import type { Seen } from "../../seen.ts";
 
 // What the Overview shows, as plain data (cells with a color name), so it is
@@ -119,35 +117,19 @@ export function targetOf(dash: Dashboard, rowKey: string | null): Target | null 
 // The preview of the selection
 // ---------------------------------------------------------------------------
 
-/** Lines of a failed run's captured log shown in the preview. */
-export const PREVIEW_LOG_LINES = 40;
 /** Next slots and past results shown for a task. */
 export const PREVIEW_SLOTS = 5;
 export const PREVIEW_STRIP = 10;
 
 export type Preview =
   | { kind: "none" }
-  | { kind: "run"; run: DashRun; blocked: boolean; summary: string | null; reason: string | null; log: { path: string; lines: string[] } | null }
+  | ({ kind: "run" } & RunPreviewData)
   | { kind: "task"; next: DashNext; title: string; description: string | null; slots: string[]; strip: RunStatus[] };
 
 export function buildPreview(ctx: Context, dash: Dashboard, rowKey: string | null): Preview {
   const target = targetOf(dash, rowKey);
   if (!target) return { kind: "none" };
-  if (target.kind === "run") {
-    const { run } = target;
-    let log: { path: string; lines: string[] } | null = null;
-    // A failure says why in its log, more than in its summary.
-    if (isFailure(run.status) || (run.status === "missed" && run.attempt > 0)) {
-      try {
-        const stored = readRunByRef(ctx.paths, run.ref);
-        const captured = capturedLog(ctx, stored, stored.attempts.at(-1));
-        if (captured?.exists) log = { path: captured.path, lines: sanitize(tailLines(captured.path, PREVIEW_LOG_LINES).join("\n")).split("\n") };
-      } catch {
-        // The run file is being rewritten: the summary is enough for now.
-      }
-    }
-    return { kind: "run", run, blocked: run.status === "blocked", summary: run.summary, reason: run.reason, log };
-  }
+  if (target.kind === "run") return { kind: "run", ...buildRunPreview(ctx, target.run) };
   const next = dash.next.find((n) => n.task_id === target.taskId)!;
   try {
     const task = readTask(ctx.paths, target.taskId);

@@ -1,0 +1,45 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`Runs tab columns, chips and the preview (160 columns) 1`] = `
+" agent-tasks top · ● runner every 5m · ticked 10:00 · next 10:05                                                                 today ■3 ✕1 □4 !1   hub: local
+ 1 Overview   2 Tasks   3 Runs   4 System
+  status  all   since  all    34 runs
+── Runs (34) ───────────────────────────────────────────────────────────────────────────│ ◐ running · sentry-summary · 10:01 · for 1m
+› ◐  10:00         sentry-summary      local  1m   1/2                                  │ sentry-summary/20261117T090000Z
+  !  09:30         review-pr-123       local  12m  1/1  asks to confirm the merge       │
+  ✕  09:00         sentry-summary      local  3m   2/2  sentry-cli has no auth          │
+  ◐  08:00         worktree-cleanup    local  4m   1/1                                  │
+  ■  08:00         sentry-summary      local  6m   1/2  3 new issues in notes/sentry.md │
+  □  06:00         inbox-triage        local  –    –    runner_offline                  │
+  □  04:00         sentry-summary      local  –    –    runner_offline                  │
+  □  03:00         sentry-summary      local  –    –    runner_offline                  │
+  □  02:00         sentry-summary      local  –    –    runner_offline                  │
+  ■  01:00         sentry-summary      local  3m   1/2  1 new issue in notes/sentry.md  │
+  ■  00:00         sentry-summary      local  3m   1/2  no new issues                   │
+  ■  Mon 09:00     weekly-deps-report  local  6m   1/1  deps report in notes/deps.md    │
+  ■  Mon 08:00     worktree-cleanup    local  3m   1/1  removed 2 worktrees             │
+  ■  Mon 06:00     inbox-triage        local  3m   1/1  inbox at zero                   │
+  ■  Sun 08:00     worktree-cleanup    local  3m   1/1  removed 2 worktrees             │
+  ■  Sun 06:00     inbox-triage        local  3m   1/1  inbox at zero                   │
+  ■  Sat 08:00     worktree-cleanup    local  3m   1/1  removed 2 worktrees             │
+  ■  Sat 06:00     inbox-triage        local  3m   1/1  inbox at zero                   │
+  ■  Fri 23:00     backup-notes        local  3m   1/1  backed up                       │
+  ✕  Fri 08:00     worktree-cleanup    local  3m   1/1  git worktree prune failed       │
+  ■  Thu 23:00     backup-notes        local  3m   1/1  backed up                       │
+  ■  Thu 08:00     worktree-cleanup    local  3m   1/1  removed 2 worktrees             │
+  ■  Wed 23:00     backup-notes        local  3m   1/1  backed up                       │
+  ■  Nov 11 08:00  worktree-cleanup    local  3m   1/1  removed 2 worktrees             │
+  ■  Nov 10 23:00  backup-notes        local  3m   1/1  backed up                       │
+  ■  Nov 9 09:00   weekly-deps-report  local  6m   1/1  deps report in notes/deps.md    │
+  □  Nov 2 09:00   weekly-deps-report  local  –    –    runner_offline                  │
+  ■  Oct 26 09:00  weekly-deps-report  local  6m   1/1  deps report in notes/deps.md    │
+  ■  Oct 19 09:00  weekly-deps-report  local  6m   1/1  deps report in notes/deps.md    │
+  ■  Oct 12 09:00  weekly-deps-report  local  6m   1/1  deps report in notes/deps.md    │
+  ■  Oct 5 09:00   weekly-deps-report  local  6m   1/1  deps report in notes/deps.md    │
+  ■  Sep 28 09:00  weekly-deps-report  local  6m   1/1  deps report in notes/deps.md    │
+  ■  Sep 21 09:00  weekly-deps-report  local  6m   1/1  deps report in notes/deps.md    │
+  ■  Sep 14 09:00  weekly-deps-report  local  6m   1/1  deps report in notes/deps.md    │
+                                                                                        │
+ j/k move · <CR> open · f status · S since · r retry · a attach · t task · ? keys · q quit
+"
+`;
