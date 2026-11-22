@@ -4,13 +4,13 @@ import { GLOBAL_ACTIONS, GLOBAL_HINTS, LIST_ACTIONS, type ViewKeys } from "../..
 /**
  * Actions only this view has (name → description and default keys). The
  * names are generic where another view may mean the same (`search`,
- * `search_next`, `recheck`), so one tui.toml line remaps them everywhere.
- * `cycle_filter` and `copy` are the Runs tab's actions, bound here too.
+ * `recheck`), so one tui.toml line remaps them everywhere. Bound here too:
+ * `cycle_filter` and `copy` (Runs), `next_match` / `prev_match` (Run detail).
+ * `/` searches here rather than filtering (the shared `filter` action): a
+ * log is read in order, the matches are jumped to.
  */
 export const SYSTEM_ACTIONS = {
   search: { desc: "Search the text shown (⏎ keeps it, <Esc> clears it)", keys: ["/"] },
-  search_next: { desc: "Next match of the search", keys: ["n"] },
-  search_prev: { desc: "Previous match of the search", keys: ["N"] },
   toggle_follow: { desc: "Follow the end of the log as lines arrive (on or off)", keys: ["F"] },
   tick_now: { desc: "Run one tick of the runner now (it may launch due runs)", keys: ["T"] },
   recheck: { desc: "Check again: machines (in Machines) or doctor (elsewhere)", keys: ["c"] },
@@ -21,7 +21,7 @@ export const SYSTEM_ACTIONS = {
 // the footer to keep it on one line at 100 columns; `?` lists them.
 export const SYSTEM_KEYS: ViewKeys = {
   id: "system",
-  actions: [...GLOBAL_ACTIONS, ...LIST_ACTIONS, "cycle_filter", "copy", "search", "search_next", "search_prev", "toggle_follow", "tick_now", "recheck"],
+  actions: [...GLOBAL_ACTIONS, ...LIST_ACTIONS, "cycle_filter", "copy", "search", "next_match", "prev_match", "toggle_follow", "tick_now", "recheck"],
   hints: [
     { actions: ["next_panel"], label: "pane" },
     { actions: ["open"], label: "open" },

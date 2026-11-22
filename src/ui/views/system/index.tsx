@@ -259,9 +259,8 @@ function System(props: ViewProps) {
   const copy = () => {
     const row = selectedEvent();
     if (!row) return;
-    const text = row.ref ?? [row.time, row.mark, row.task, row.what, row.note].filter((t) => t).join(" ");
-    if (renderer.copyToClipboardOSC52(text)) ui.toast(`copied ${row.ref ?? "the line"}`);
-    else ui.toast(`this terminal does not take copies (OSC 52): ${text}`, { error: true });
+    if (row.ref) actions.copy(row.ref, `run ref ${row.ref}`);
+    else actions.copy([row.time, row.mark, row.task, row.what, row.note].filter((t) => t).join(" "), "line");
   };
 
   useViewKeys(props.keys, {
@@ -289,8 +288,8 @@ function System(props: ViewProps) {
     },
     // Esc clears a kept search first, then dismisses the toasts as everywhere.
     dismiss: () => (query() ? setQuery("") : ui.dismiss()),
-    search_next: () => jumpToMatch(1),
-    search_prev: () => jumpToMatch(-1),
+    next_match: () => jumpToMatch(1),
+    prev_match: () => jumpToMatch(-1),
     copy,
     tick_now: tickNow,
     recheck,
@@ -370,7 +369,7 @@ function System(props: ViewProps) {
       { text: ` (${key("cycle_filter")})`, color: "dim" },
     ];
     if (typed !== null) out.push({ text: "  ·  " }, { text: `/${typed}`, color: "yellow" }, { text: "▏" }, { text: "  ⏎ keep · esc clear", color: "dim" });
-    else if (query()) out.push({ text: "  ·  " }, { text: `/${query()}`, color: "yellow" }, { text: `  ${matches().length} match${matches().length === 1 ? "" : "es"} · ${key("search_next")}/${key("search_prev")} · ${key("dismiss")} clear`, color: "dim" });
+    else if (query()) out.push({ text: "  ·  " }, { text: `/${query()}`, color: "yellow" }, { text: `  ${matches().length} match${matches().length === 1 ? "" : "es"} · ${key("next_match")}/${key("prev_match")} · ${key("dismiss")} clear`, color: "dim" });
     return out;
   };
 
