@@ -7,7 +7,7 @@ import { interruptibleSleep, runRunner } from "../runner.ts";
 import { releaseRunnerLock } from "../runner-lock.ts";
 import { selfCommand } from "../ui/exec.ts";
 import { loadTuiConfig } from "../ui/keymap/config.ts";
-import { type AppHandle, canShowDashboard, startDashboard } from "../ui/load.ts";
+import { type AppHandle, canShowDashboard, dashboardFailed, startDashboard } from "../ui/load.ts";
 import type { Command } from "./types.ts";
 
 /** Ctrl-C, kill, and the terminal tab closing. */
@@ -44,7 +44,8 @@ Options:
   --quiet             Events only: no tick lines and no status line (no dashboard)
   --plain             One line per event instead of the dashboard`,
   async run(ctx, args) {
-    // --next opened this dashboard while the first one was the default; kept so scripts that pass it still work.
+    // --next opened this dashboard while the first one was the default; kept so scripts that pass it
+    // still work (it can go a release after the swap).
     const { values } = parseCommandArgs(args, { every: { type: "string" }, once: { type: "boolean" }, quiet: { type: "boolean" }, plain: { type: "boolean" }, next: { type: "boolean" } }, { maxPositionals: 0 });
     const every = values.every ?? ctx.config.config.runner?.every ?? BUILTIN_DEFAULTS.runner_every;
     if (!isDuration(every)) throw new UsageError(`--every: invalid duration "${every}" (expected e.g. 30s, 5m or 1h)`);
@@ -56,6 +57,9 @@ Options:
     let tui = null as AppHandle | null;
     /** The dashboard while it starts (it is async): waited for before giving the terminal back. */
     let starting: Promise<void> | null = null;
+    // The screen is the dashboard's from the start (it opens asynchronously, after the first lines are
+    // written) until it has given the terminal back; lines meanwhile only go to runner.log.
+    let screenTaken = config !== null;
 
     // The clock is the real time, shifted so that the first tick happens at `--now`.
     const offset = ctx.now.getTime() - Date.now();
@@ -90,10 +94,19 @@ Options:
                 tui = handle;
                 if (controller.signal.aborted) handle.stop(); // stopped while it was starting
               },
-              (err) => void ctx.stderr.write(`agent-tasks: the dashboard could not start (${(err as Error).message}); carrying on without it\n`),
+              (err) => {
+                screenTaken = false;
+                ctx.stderr.write(`agent-tasks: ${dashboardFailed(err)}; carrying on without it\n`);
+              },
             );
           },
-          screenHidden: () => tui?.isRunning === true,
+          screenHidden: () => screenTaken,
+          screenBack: async () => {
+            await starting;
+            tui?.stop();
+            await tui?.closed;
+            screenTaken = false;
+          },
         },
       );
     } finally {

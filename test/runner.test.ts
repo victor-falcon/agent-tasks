@@ -364,6 +364,20 @@ describe("terminal output", () => {
     expect(readFileSync(runnerLogPath(home.paths), "utf8")).toContain("▶ demo/20261117T080000Z");
   });
 
+  test("the final line waits until the dashboard has given the screen back", async () => {
+    let shown = true;
+    const h = harness(home, { tty: true, stopAfter: 1 });
+    h.deps.screenHidden = () => shown;
+    h.deps.screenBack = async () => {
+      await Bun.sleep(5); // the renderer leaves the alternate screen asynchronously
+      shown = false;
+    };
+    await h.run();
+    const visible = h.output().replace(/\x1b\][^\x07]*\x07/g, "");
+    expect(visible).not.toContain("agent-tasks runner ·"); // the header went to runner.log only
+    expect(visible).toContain("stopped · last tick 09:00:00");
+  });
+
   test("today's counters add up the events", async () => {
     const events = [
       { type: "succeeded" as const, run_ref: "a/20261117T080000Z", task_id: "a" },

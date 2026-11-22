@@ -21,3 +21,12 @@ export async function startDashboard(opts: AppOptions): Promise<AppHandle> {
   const { startApp } = (await import(join(import.meta.dir, "main.tsx"))) as typeof import("./main.tsx");
   return await startApp(opts);
 }
+
+/**
+ * Why the dashboard did not start, for the terminal. The likely cause after
+ * an update is a `git pull` without `bun install` (OpenTUI missing or at
+ * another version), so the message says how to check.
+ */
+export function dashboardFailed(err: unknown): string {
+  return `the dashboard could not start (${err instanceof Error ? err.message : String(err)}); if agent-tasks was just updated, run bun install in its checkout (agent-tasks doctor checks it)`;
+}

@@ -221,7 +221,8 @@ Keys can be changed in `~/.config/agent-tasks/tui.toml`, where
 default keys are in [examples/tui.example.toml](../examples/tui.example.toml),
 and `agent-tasks config check` validates it. `agent-tasks runner --plain`
 prints one line per event instead; `top` piped or redirected prints what
-`agent-tasks status` prints. `agent-tasks top --json` prints the dashboard's
+`agent-tasks status` prints (use `status` in scripts: its exit code says
+when something needs you). `agent-tasks top --json` prints the dashboard's
 data once, including `data_dir`, the data folder a UI can watch to know when
 to ask again. On a client, `top` runs on the hub, so that path is the hub's.
 

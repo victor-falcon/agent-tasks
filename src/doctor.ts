@@ -21,10 +21,10 @@ function bunCheck(ctx: Context): Check {
   return ok("bun", `bun ${Bun.version} (${tildify(onPath, ctx.env)})`);
 }
 
-/** The installed version of a package in `<root>/node_modules`, or null when it is not there. */
-function installedVersion(root: string, name: string): string | null {
+/** A package.json in `dir`, or null when it is not there or can't be read. */
+function readPackage(dir: string): { version?: string; dependencies?: Record<string, string>; optionalDependencies?: Record<string, string> } | null {
   try {
-    return (JSON.parse(readFileSync(join(root, "node_modules", name, "package.json"), "utf8")) as { version?: string }).version ?? null;
+    return JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
   } catch {
     return null;
   }
@@ -32,22 +32,29 @@ function installedVersion(root: string, name: string): string | null {
 
 /**
  * The checkout's dependencies are installed, at the versions package.json
- * pins. A `git pull` without `bun install` leaves them behind; the
- * dashboard (OpenTUI, with a native library per platform) is then the first
- * thing to break, so its platform package is checked too.
+ * pins. A `git pull` without `bun install` leaves them behind; the dashboard
+ * (OpenTUI, with a native library per platform) is then the first thing to
+ * break, so the native package for this platform is checked too.
  */
 export function dependenciesCheck(ctx: Context, root = REPO_ROOT): Check {
-  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { dependencies?: Record<string, string> };
-  const wanted = Object.entries(pkg.dependencies ?? {});
-  if (wanted.some(([name]) => name === "@opentui/core")) wanted.push([`@opentui/core-${process.platform}-${process.arch}`, "*"]);
+  const shown = tildify(root, ctx.env);
+  const pkg = readPackage(root);
+  if (!pkg) return warn("dependencies", `can't read ${shown}/package.json: dependencies not checked`);
+  const installed = (name: string) => readPackage(join(root, "node_modules", name))?.version ?? null;
   const problems: string[] = [];
+  const wanted = Object.entries(pkg.dependencies ?? {});
   for (const [name, spec] of wanted) {
-    const version = installedVersion(root, name);
+    const version = installed(name);
     if (version === null) problems.push(`${name}: not installed`);
     // Only exact pins are compared: a range (^11.0.1) is bun's to resolve.
     else if (/^\d+\.\d+\.\d+$/.test(spec) && version !== spec) problems.push(`${name}: ${version} installed, ${spec} wanted`);
   }
-  const shown = tildify(root, ctx.env);
+  // OpenTUI's native library: one of its optional packages for this platform (linux-x64, or linux-x64-musl…), at its version.
+  const core = readPackage(join(root, "node_modules", "@opentui", "core"));
+  const natives = Object.keys(core?.optionalDependencies ?? {}).filter((name) => name.startsWith(`@opentui/core-${process.platform}-${process.arch}`));
+  if (core?.version && natives.length > 0 && !natives.some((name) => installed(name) === core.version)) {
+    problems.push(`${natives.join(" or ")}: not installed at ${core.version} (OpenTUI's native library)`);
+  }
   if (problems.length > 0) return fail("dependencies", `dependencies of ${shown} are missing or out of date`, `run: cd ${shown} && bun install`, problems);
   return ok("dependencies", `dependencies installed (${wanted.length})`);
 }

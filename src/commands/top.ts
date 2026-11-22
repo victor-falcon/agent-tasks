@@ -3,7 +3,7 @@ import { type Context, createContext, output } from "../context.ts";
 import { buildDashboard } from "../dashboard.ts";
 import { loadTuiConfig } from "../ui/keymap/config.ts";
 import { selfCommand } from "../ui/exec.ts";
-import { type AppHandle, canShowDashboard, startDashboard } from "../ui/load.ts";
+import { type AppHandle, canShowDashboard, dashboardFailed, startDashboard } from "../ui/load.ts";
 import status from "./status.ts";
 import type { Command } from "./types.ts";
 
@@ -41,11 +41,13 @@ default keys: examples/tui.example.toml):
   retry = "<C-r>"
   run_now = []          # an empty list unbinds an action
 
-With --json, prints the dashboard's data once and exits. When stdout is not
-a terminal (a pipe, a file), prints what \`agent-tasks status\` prints and
-exits 0 (\`status\` is the one whose exit code says if something needs you).`,
+With --json, prints the dashboard's data once and exits. When stdout or
+stdin is not a terminal (a pipe, a file), prints what \`agent-tasks status\`
+prints and exits 0 (use \`status\` in scripts: its exit code says when
+something needs you).`,
   async run(ctx, args) {
-    // --next opened this dashboard while the first one was the default; kept so scripts that pass it still work.
+    // --next opened this dashboard while the first one was the default; kept so scripts that pass it
+    // still work (it can go a release after the swap).
     parseCommandArgs(args, { next: { type: "boolean" } }, { maxPositionals: 0 });
     if (ctx.json) {
       output(ctx, buildDashboard(ctx), "");
@@ -78,16 +80,21 @@ async function showDashboard(ctx: Context): Promise<number> {
   };
   for (const signal of SIGNALS) process.on(signal, done);
   try {
-    handle = await startDashboard({
-      title: "agent-tasks top",
-      config,
-      now,
-      context: (at) => createContext({ now: at, json: false, env: ctx.env, cwd: ctx.cwd, stdout: ctx.stdout, stderr: ctx.stderr, commands: ctx.commands }),
-      env: ctx.env,
-      exec: selfCommand(ctx.env),
-      watchDir: ctx.paths.dataDir,
-      onQuit: done,
-    });
+    try {
+      handle = await startDashboard({
+        title: "agent-tasks top",
+        config,
+        now,
+        context: (at) => createContext({ now: at, json: false, env: ctx.env, cwd: ctx.cwd, stdout: ctx.stdout, stderr: ctx.stderr, commands: ctx.commands }),
+        env: ctx.env,
+        exec: selfCommand(ctx.env),
+        watchDir: ctx.paths.dataDir,
+        onQuit: done,
+      });
+    } catch (err) {
+      ctx.stderr.write(`agent-tasks: ${dashboardFailed(err)}\n`);
+      return 1;
+    }
     if (finished) handle.stop(); // a signal came while it was starting
     await quit;
     await handle.closed;

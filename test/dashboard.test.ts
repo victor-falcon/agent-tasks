@@ -130,15 +130,13 @@ describe.skipIf(!TMUX)("on a terminal (tmux)", () => {
   afterEach(() => void tmux("kill-server"));
   afterAll(() => void tmux("kill-server"));
 
-  /** Starts `agent-tasks <args>` in a fresh 140x40 tmux session; `done` is written when it exits, with its exit code. */
-  function start(args: string): void {
-    const env = Object.entries({ ...home.env, TERM: "xterm-256color" })
-      .filter(([, v]) => v !== undefined)
-      .map(([k, v]) => `${k}='${v}'`)
-      .join(" ");
-    const done = join(home.root, "done");
-    const result = tmux("new-session", "-d", "-x", "140", "-y", "40", "-P", "-F", "#{pane_id}", `env ${env} ${process.execPath} ${bin} ${args}; echo $? > ${done}; sleep 30`);
-    pane = result.stdout.trim();
+  /** Starts `agent-tasks <args>` in a fresh 140x40 tmux session; `done` gets its exit code when it exits. */
+  function start(...args: string[]): void {
+    const q = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`;
+    const env = Object.entries({ ...home.env, TERM: "xterm-256color" }).flatMap(([k, v]) => (v === undefined ? [] : [`export ${k}=${q(v)}`]));
+    const script = join(home.root, "start.sh");
+    writeFileSync(script, [...env, `${q(process.execPath)} ${q(bin)} ${args.map(q).join(" ")}`, `echo $? > ${q(join(home.root, "done"))}`, "sleep 30", ""].join("\n"));
+    pane = tmux("new-session", "-d", "-x", "140", "-y", "40", "-P", "-F", "#{pane_id}", `sh ${q(script)}`).stdout.trim();
   }
 
   const screen = () => tmux("capture-pane", "-p", "-t", pane).stdout;
@@ -159,7 +157,7 @@ describe.skipIf(!TMUX)("on a terminal (tmux)", () => {
 
   test("top opens the dashboard and q gives the terminal back", async () => {
     writeFixture(home.paths);
-    start(`top --now=${FIXTURE_NOW}`);
+    start("top", `--now=${FIXTURE_NOW}`);
     await waitFor(() => screen().includes("Needs attention"), "the Overview");
     expect(screen()).toContain("Overview");
     expect(screen()).toContain("review-pr-123");
@@ -170,13 +168,15 @@ describe.skipIf(!TMUX)("on a terminal (tmux)", () => {
   });
 
   test("runner shows the dashboard while it ticks; q stops it and releases the lock", async () => {
-    start("runner --every 1h");
+    start("runner", "--every", "1h");
     await waitFor(() => screen().includes("Overview"), "the dashboard");
     await waitFor(() => existsSync(join(home.paths.stateDir, "runner.lock")), "the runner's lock");
     tmux("send-keys", "-t", pane, "q");
     await waitFor(() => exitCode() !== null, "the runner to exit");
     expect(exitCode()).toBe(0);
     expect(existsSync(join(home.paths.stateDir, "runner.lock"))).toBe(false);
-    expect(screen()).toContain("● healthy · last tick"); // the runner's final line, once the screen is back
+    // The runner's final line, written once the dashboard has given the screen back (it leaves asynchronously).
+    expect(screen()).toContain("● stopped · last tick");
+    expect(screen()).not.toContain("tick  0 due"); // the lines written while the dashboard had the screen are in runner.log only
   });
 });

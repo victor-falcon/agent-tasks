@@ -86,12 +86,13 @@ describe("tui.toml", () => {
       ['[keys]\nretry = "<Nope>"\n', [`keys.retry: "<Nope>": unknown key <Nope> ${known}`]],
       ["[keys]\nretry = 3\n", ['keys.retry: expected a key or a list of keys, e.g. "j" or ["j", "<Down>"]']],
       ["keys = 3\n", ["keys: must be a table, e.g. [keys]"]],
-      ["not toml [", ["invalid TOML: TOML Parse error: Expected '=' after a key but found 't'"]],
     ];
     for (const [text, expected] of cases) {
       writeToml(text);
       expect(details(() => loadTuiConfig(home.configDir))).toEqual(expected);
     }
+    writeToml("not toml [");
+    expect(details(() => loadTuiConfig(home.configDir))![0]).toStartWith("invalid TOML: "); // then Bun's parser's words
     writeToml('[keys]\nnope = "x"\n');
     expect(details(() => loadTuiConfig(home.configDir))![0]).toStartWith("keys.nope: unknown action (known: down, up,");
     // Conflicts name the view they happen in (every list view binds j).
