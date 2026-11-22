@@ -138,6 +138,7 @@ describe("Needs attention in the Overview", () => {
     await app.press("f", "<CR>");
     expect(await app.screen()).toContain(`${FAILED}  ✕ failed`);
     await app.press("h", "1");
+    await Bun.sleep(450); // `1` also starts a count (`12j`): it runs alone after a moment
     expect(attention(await app.screen())).not.toContain("no auth");
     // It failed again after being seen: back in the list.
     writeRun(home.paths, scheduledRun("sentry-summary", "2026-11-17T09:00:00+01:00", "failed", { summary: "still no auth", attempts: 2, delayMin: 50 }));

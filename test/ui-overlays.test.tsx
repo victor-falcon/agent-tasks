@@ -173,7 +173,7 @@ describe("help", () => {
     const sections = helpSections(OVERVIEW_KEYS, buildKeymap());
     expect(sections.map((s) => s.title)).toEqual(["Moving", "This view", "Everywhere"]);
     expect(sections[0]!.rows.map((r) => r.action)).toContain("down");
-    expect(sections[1]!.rows.map((r) => r.action)).toEqual(["attach", "retry", "run_now", "toggle_pause"]);
+    expect(sections[1]!.rows.map((r) => r.action)).toEqual(["attach", "retry", "run_now", "toggle_pause", "dismiss_attention"]);
     expect(sections[2]!.rows.find((r) => r.action === "palette")?.keys).toBe(": <C-p>");
     const run = helpSections(RUN_KEYS, buildKeymap({ copy_summary: "<C-y>" }));
     expect(run[1]!.rows.find((r) => r.action === "copy_summary")?.keys).toBe("<C-y>");
@@ -352,6 +352,23 @@ describe("palette", () => {
     expect(text).toContain("Close the view (back to where you were)");
     await press(..."attach".split(""), "<CR>");
     expect(paletteRows(await screen())[0]).toStartWith("review-pr-123/20261117T083000Z");
+  });
+
+  test("each view's own actions are offered: System's tick, recheck, follow, search; the Overview's dismiss", async () => {
+    const { screen, press, handle } = await start({ height: 60 });
+    await press(":", ..."dismiss".split(""));
+    expect(paletteRows(await screen())[0]).toMatch(/^Dismiss the selected failure from Needs attention.* x$/);
+    await press("<Esc>", "4");
+    await Bun.sleep(450);
+    expect(handle.app.ui.tab()).toBe("system");
+    for (const action of ["tick_now", "recheck", "toggle_follow", "search"]) {
+      await press(":", ...action.split(""));
+      expect(paletteRows(await screen())[0]).toContain(action);
+      await press("<Esc>");
+    }
+    await press(":", ..."tick".split(""), "<CR>");
+    expect(await screen()).toContain("tick");
+    expect(handle.app.ui.confirm()).not.toBeNull(); // T runs a tick only after asking
   });
 
   test("a click outside it closes it, and does not reach the view behind", async () => {
