@@ -69,7 +69,9 @@ export interface UiState {
    * State of a view that must outlive its component (filters, sort order, the
    * sub-tab of a detail): views are unmounted while a detail is open on top
    * of them, and coming back must find them as they were. One signal per
-   * `key`, created with `initial` the first time.
+   * `key`, created with `initial` the first time; a key always holds the same
+   * type (prefix it with the view: `tasks:sort`). They live as long as the
+   * dashboard: a few small values per view or task opened.
    */
   viewState<T>(key: string, initial: T): [Accessor<T>, (value: T) => void];
   dispose(): void;

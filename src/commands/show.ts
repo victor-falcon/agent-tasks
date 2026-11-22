@@ -42,6 +42,7 @@ export interface PersonalInstructions {
   content: string | null;
 }
 
+/** Also read by the new dashboard's Task detail (src/ui/views/task/model.ts). */
 export function personalInstructions(ctx: Context, resolution: Resolution): PersonalInstructions[] {
   const fromConfig = ctx.config.config.instructions?.subagent?.length ?? 0;
   return resolution.instructions.map((path, i) => ({

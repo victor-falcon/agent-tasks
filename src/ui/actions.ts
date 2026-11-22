@@ -53,8 +53,8 @@ export interface Actions {
   openInPager(path: string): Promise<void>;
   /** Copies `text` to the clipboard; `what` names it in the toast (`ref`, `summary`). */
   copy(text: string, what: string): void;
-  /** Archives a task (`agent-tasks rm`), after asking. */
-  archive(taskId: string): void;
+  /** Archives a task (`agent-tasks rm`), after asking; `running`: a run of it is in progress (rm leaves it going). */
+  archive(taskId: string, running?: boolean): void;
   /** Hands the terminal to a shell in the task's folder; back to the dashboard when it exits. */
   openFolder(task: TaskRef): Promise<void>;
   /** A sticky error toast that says how to dismiss it (for a view's own refusals). */
@@ -67,7 +67,6 @@ export interface Actions {
 }
 
 const RETRYABLE = ["failed", "timed_out", "missed"];
-
 
 function taskOf(target: Target): string {
   return target.kind === "run" ? target.run.task_id : target.taskId;
@@ -124,10 +123,10 @@ export function createActions(opts: ActionsOptions): Actions {
   return {
     background,
     error,
-    archive(taskId) {
+    archive(taskId, running = false) {
       ui.ask({
         title: `Archive ${taskId}?`,
-        consequence: "It stops running; its run history is kept, and it can be restored.",
+        consequence: `It is not scheduled any more; its run history is kept${running ? ", and the run in progress goes on" : ""}. It can be restored.`,
         onYes: () => void background(["rm", taskId], `archiving ${taskId}`).then(({ code, first }) => report(code, first, `archiving ${taskId}`)),
       });
     },

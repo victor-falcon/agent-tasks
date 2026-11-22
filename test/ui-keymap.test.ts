@@ -79,6 +79,7 @@ describe("tui.toml", () => {
   test("conflicts are checked within each view, as the keys it listens to", () => {
     writeToml('[keys]\nundo = "j"\n');
     // Reported for each view that binds both.
+    // Reported for each view that binds both.
     expect(details(() => loadTuiConfig(home.configDir))).toEqual(["overview", "tasks", "runs", "task"].map((view) => `"j" is bound to both undo and down in the ${view} view`));
     // `back` lives in the detail views, `dismiss` in the roots: both on <Esc> is fine.
     expect(() => buildKeymap({ back: "<Esc>", dismiss: "<Esc>" })).not.toThrow();

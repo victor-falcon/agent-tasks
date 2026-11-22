@@ -7,7 +7,7 @@ import { createContext } from "../src/context.ts";
 import { archiveTask, readTask } from "../src/store.ts";
 import type { CommandRunner } from "../src/tui/app.ts";
 import { alignRow, columnWidths } from "../src/ui/components/cells.ts";
-import { matchesQuery } from "../src/ui/components/filter-bar.tsx";
+import { matchesQuery } from "../src/ui/components/filter.ts";
 import { buildKeymap } from "../src/ui/keymap/config.ts";
 import { type AppHandle, mountApp } from "../src/ui/main.tsx";
 import { instructionsOf, readTaskItem, runSections, settingRows } from "../src/ui/views/task/model.ts";
@@ -134,7 +134,7 @@ const settle = () => Bun.sleep(5);
 
 describe("Tasks model", () => {
   const items = () => loadTaskItems(context()).items;
-  const all = { state: "all" as const, machine: null, matches: () => true };
+  const all = { state: "all" as const, machine: null, query: "" };
   const ids = (list: readonly TaskItem[]) => list.map((i) => i.task.id);
 
   test("every task, saved and archived, with its state, next slots and last results", () => {
@@ -155,8 +155,8 @@ describe("Tasks model", () => {
     expect(ids(filterTasks(list, { ...all, state: "archived" }))).toEqual(["old-digest"]);
     expect(filterTasks(list, { ...all, state: "active" }).every((i) => i.state === "active")).toBe(true);
     expect(filterTasks(list, { ...all, machine: "elsewhere" })).toEqual([]);
-    expect(ids(filterTasks(list, { ...all, matches: (...f) => matchesQuery("digest send", f) }))).toEqual(["old-digest"]); // id + description
-    expect(ids(filterTasks(list, { ...all, matches: (...f) => matchesQuery("~/notes", f) }))).toEqual(["backup-notes", "old-digest"]); // folder
+    expect(ids(filterTasks(list, { ...all, query: "digest send" }))).toEqual(["old-digest"]); // id + description
+    expect(ids(filterTasks(list, { ...all, query: "~/notes" }))).toEqual(["backup-notes", "old-digest"]); // folder
   });
 
   test("matchesQuery: every word somewhere, ignoring case; empty matches all", () => {
@@ -255,9 +255,16 @@ describe("Tasks tab", () => {
     expect(text).not.toContain("Last 5 results");
   });
 
-  test("f cycles the state filter, m the machine, s the sort; they survive opening a task", async () => {
+  test("f cycles the state filter, s the sort; they survive opening a task", async () => {
+    home.writeTask({ ...readTask(home.paths, "inbox-triage"), id: "far-away", machine: "mac" });
     const { screen, press } = await start();
-    expect(listedIds(await screen())).toHaveLength(8);
+    expect(listedIds(await screen())).toHaveLength(9);
+    // With two machines, m goes through them.
+    await press("m");
+    expect(listedIds(await screen())).not.toContain("far-away");
+    await press("m");
+    expect(listedIds(await screen())).toEqual(["far-away"]);
+    await press("m");
     await press("f"); // active
     let text = await screen();
     expect(text).toContain("── Tasks · active");
@@ -269,13 +276,10 @@ describe("Tasks tab", () => {
     expect(text).toContain("── Archived (1)");
     expect(listedIds(text)).toEqual(["old-digest"]);
     await press("f", "s"); // all, by id
-    expect(listedIds(await screen())).toEqual(["backup-notes", "inbox-triage", "release-notes", "review-pr-123", "sentry-summary", "weekly-deps-report", "worktree-cleanup", "old-digest"]);
-    await press("m");
-    expect(await screen()).toContain("machine local");
+    expect(listedIds(await screen())).toEqual(["backup-notes", "far-away", "inbox-triage", "release-notes", "review-pr-123", "sentry-summary", "weekly-deps-report", "worktree-cleanup", "old-digest"]);
     await press("<CR>", "q");
     text = await screen();
     expect(text).toContain("sort id");
-    expect(text).toContain("machine local");
     expect(selectedRow(text)).toStartWith("- old-digest"); // the selection followed it through the filters
   });
 
@@ -336,6 +340,18 @@ describe("Tasks tab", () => {
     expect(await screen()).toContain("copied task id sentry-summary");
   });
 
+  test("m with every task on one machine says so; a filter that hides everything says it is the filter", async () => {
+    const { screen, press, type } = await start();
+    expect(await screen()).not.toContain("machine all"); // no machine chip with one machine
+    await press("m");
+    expect(await screen()).toContain("every task runs on local: nothing to filter");
+    await press("<Esc>", "/");
+    await type("zzz");
+    const text = await screen();
+    expect(text).toContain("no tasks match the filters");
+    expect(text).not.toContain("ask an agent");
+  });
+
   test("an archived task can't be run, paused or archived again", async () => {
     const { screen, press, calls } = await start();
     await press("G"); // old-digest, the last row
@@ -343,6 +359,7 @@ describe("Tasks tab", () => {
     for (const key of ["R", "p", "D"]) {
       await press(key);
       expect(await screen()).toContain("old-digest is archived");
+      expect(await screen()).toContain("agent-tasks resume old-digest");
       await press("<Esc>");
     }
     expect(calls).toEqual([]);
@@ -355,7 +372,7 @@ describe("Tasks tab", () => {
   });
 
   test("o hands the terminal to a shell in the task's folder; a missing folder or another machine says why", async () => {
-    const { screen, press, shells, handle: h } = await start();
+    const { screen, press, type, shells, handle: h } = await start();
     await press("o");
     await settle();
     expect(await screen()).toContain("~/Projects/foo does not exist");
@@ -365,6 +382,15 @@ describe("Tasks tab", () => {
     await settle();
     expect(shells).toEqual([join(home.root, "Projects", "foo")]);
     expect(h.app.ui.tab()).toBe("tasks");
+    // A task of another machine: its folder is there.
+    home.writeTask({ ...readTask(home.paths, "inbox-triage"), id: "far-away", machine: "mac" });
+    h.app.store.reload();
+    await press("<Esc>", "/");
+    await type("far-away");
+    await press("<CR>", "o");
+    await settle();
+    expect(await screen()).toContain("far-away runs on mac: its folder is there, not on local");
+    expect(shells).toHaveLength(1);
   });
 
   test("mouse: a click selects, a double click opens, a click on a chip changes it", async () => {
@@ -377,6 +403,13 @@ describe("Tasks tab", () => {
     text = await screen();
     expect(text).toContain("Inbox triage · inbox-triage · active");
     expect(text).toContain("Instructions");
+    await s.mockMouse.click(10, 0); // nothing there
+    s.mockInput.pressKey("q");
+    await Bun.sleep(5);
+    text = await screen();
+    const chips = text.split("\n")[2]!;
+    await s.mockMouse.click(chips.indexOf("sort") + 1, 2);
+    expect(await screen()).toContain("s sort id");
   });
 });
 

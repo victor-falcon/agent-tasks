@@ -6,7 +6,7 @@ import { loadTaskArg } from "../store.ts";
 import { formatNotify } from "./show.ts";
 import type { Command } from "./types.ts";
 
-/** How each resolved value is shown, in display order. Typed so a new key cannot be forgotten. */
+/** How each resolved value is shown, in display order. Typed so a new key cannot be forgotten. Also the Task detail's Settings (src/ui/views/task/model.ts). */
 export const FORMATTERS: Record<ResolvedKey, (r: Resolution, ctx: Context) => string> = {
   agent: (r) => [r.agent.command, ...r.agent.args].join(" ") + (r.agent.shell ? " (shell)" : ""),
   launcher: (r) => JSON.stringify(r.launcher),

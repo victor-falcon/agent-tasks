@@ -1,6 +1,7 @@
 import { reactiveMatcherFromSignal } from "@opentui/keymap/solid";
 import { type Accessor, createSignal, onCleanup, Show } from "solid-js";
 import { useApp } from "../context.ts";
+import { matchesQuery } from "./filter.ts";
 import { keyHint } from "../keymap/config.ts";
 import { Line } from "./line.tsx";
 
@@ -16,6 +17,7 @@ import { Line } from "./line.tsx";
 //
 //   const filter = useFilter("runs");                 // state kept per view
 //   const rows = () => all().filter((r) => filter.matches(r.task_id, r.summary));
+//                                          // (or matchesQuery(filter.query(), …) in a pure model)
 //   useViewKeys(props.keys, { filter: filter.open, … }); // `filter` is bound to `/`
 //   <FilterBar filter={filter} />                     // above the list
 //
@@ -38,18 +40,6 @@ export interface Filter {
   matches(...fields: readonly (string | null | undefined)[]): boolean;
 }
 
-/**
- * Whether every word of `query` is in one of `fields`, ignoring case: `sen
- * fail` matches a row whose id has "sen" and whose summary has "fail". An
- * empty query matches everything.
- */
-export function matchesQuery(query: string, fields: readonly (string | null | undefined)[]): boolean {
-  const words = query.toLowerCase().split(/\s+/).filter((w) => w !== "");
-  if (words.length === 0) return true;
-  const haystack = fields.filter((f) => f).map((f) => f!.toLowerCase());
-  return words.every((w) => haystack.some((f) => f.includes(w)));
-}
-
 /** The filter of the view `view`: its text survives the view (kept in the UI state). */
 export function useFilter(view: string): Filter {
   const { ui } = useApp();
@@ -59,7 +49,7 @@ export function useFilter(view: string): Filter {
     setEditing(false);
     ui.setTyping(false);
   };
-  // A view closed while its bar has the keys (it can't, today: the keys are the bar's) must not leave them off.
+  // The view can go while the bar has the keys (a click on another tab): give the keys back to the views.
   onCleanup(() => editing() && ui.setTyping(false));
   return {
     query,

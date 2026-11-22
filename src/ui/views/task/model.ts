@@ -60,3 +60,18 @@ export function settingRows(ctx: Context, item: TaskItem): SettingRow[] {
 export function runSections(item: TaskItem, now: Date, timezone: string): ListSection[] {
   return [{ id: "runs", title: "Runs", rows: [...item.runs].reverse().map((r) => ({ key: `runs:${r.ref}`, cells: runCells(r, now, timezone) })), empty: "no runs yet" }];
 }
+
+/** The line above the instructions: which version is shown. */
+export function instructionsNote(instructions: Pick<Instructions, "personal">, asAgent: boolean): string {
+  if (!asAgent) return "As written in the task.";
+  const n = instructions.personal;
+  return `As the agent receives them: the template, the task's instructions${n === 0 ? "" : ` and ${n} personal file${n === 1 ? "" : "s"}`}.`;
+}
+
+/** Widest value shown before it is cut (agent commands, launchers can be long). */
+const VALUE_WIDTH = 56;
+
+/** Column widths of the Settings table. */
+export function settingsColumns(rows: readonly SettingRow[]): { key: number; value: number } {
+  return { key: Math.max(0, ...rows.map((r) => r.key.length)), value: Math.min(VALUE_WIDTH, Math.max(0, ...rows.map((r) => Bun.stringWidth(r.value)))) };
+}
