@@ -2,7 +2,8 @@ import { type Accessor, createSignal } from "solid-js";
 
 // The UI's own state, apart from the data: which tab and view are shown (each
 // tab keeps its stack of opened details, so coming back finds it as it was),
-// the selection of each view by identity, the overlays (confirm, help) and
+// the selection of each view by identity, the overlays (confirm, help, the
+// command palette) and
 // what goes in the footer (background commands, toasts).
 
 export const TAB_IDS = ["overview", "tasks", "runs", "system"] as const;
@@ -60,6 +61,9 @@ export interface UiState {
   answer(yes: boolean): void;
   help: Accessor<boolean>;
   setHelp(open: boolean): void;
+  /** The command palette (`:`) is open. */
+  palette: Accessor<boolean>;
+  setPalette(open: boolean): void;
   /** A text field (the `/` filter bar) has the keys: the views' layers are off while it does. */
   typing: Accessor<boolean>;
   setTyping(on: boolean): void;
@@ -85,6 +89,7 @@ export function createUiState(initialTab: TabId = "overview"): UiState {
   const [busy, setBusy] = createSignal<readonly Busy[]>([]);
   const [confirm, setConfirm] = createSignal<Confirm | null>(null);
   const [help, setHelp] = createSignal(false);
+  const [palette, setPalette] = createSignal(false);
   const [typing, setTyping] = createSignal(false);
   const viewStates = new Map<string, [Accessor<unknown>, (value: unknown) => void]>();
   const timers = new Map<number, ReturnType<typeof setTimeout>>();
@@ -141,9 +146,11 @@ export function createUiState(initialTab: TabId = "overview"): UiState {
     },
     help,
     setHelp,
+    palette,
+    setPalette,
     typing,
     setTyping,
-    modal: () => confirm() !== null || help() || typing(),
+    modal: () => confirm() !== null || help() || palette() || typing(),
     viewState<T>(key: string, initial: T) {
       let state = viewStates.get(key);
       if (!state) {

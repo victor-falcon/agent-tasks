@@ -18,7 +18,7 @@ export interface ViewKeys {
 }
 
 /** What works on every root tab. */
-export const GLOBAL_ACTIONS: readonly Action[] = ["tab_overview", "tab_tasks", "tab_runs", "tab_system", "next_tab", "prev_tab", "refresh", "help", "undo", "dismiss", "quit"];
+export const GLOBAL_ACTIONS: readonly Action[] = ["tab_overview", "tab_tasks", "tab_runs", "tab_system", "next_tab", "prev_tab", "refresh", "help", "palette", "undo", "dismiss", "quit"];
 
 /** Moving in a list of rows split in sections. */
 export const LIST_ACTIONS: readonly Action[] = ["down", "up", "first", "last", "half_page_down", "half_page_up", "next_panel", "prev_panel", "open"];

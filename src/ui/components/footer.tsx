@@ -8,8 +8,8 @@ import { Line } from "./line.tsx";
 
 // The bottom line: the keys that work in the current view (their first key
 // in tui.toml, so a remapped key shows as remapped), then on the right the
-// keys typed so far of a longer binding (`g…`) and a spinner while a command
-// runs in the background.
+// keys typed so far of a longer binding (`g…`) or of a count (`15…`) and a
+// spinner while a command runs in the background.
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_MS = 100;
@@ -35,7 +35,8 @@ export function Footer() {
   const left = (): Segment[] => [{ text: hintText(app.config.keymap, viewOf(app.ui.route()).keys.hints), color: "dim" }];
   const right = (): Segment[] => {
     const out: Segment[] = [];
-    if (pending()) out.push({ text: `${pending()}… `, color: "yellow" });
+    const typed = app.count.typed() + pending();
+    if (typed) out.push({ text: `${typed}… `, color: "yellow" });
     const busy = app.ui.busy();
     if (busy.length > 0) out.push({ text: `${SPINNER[frame()]} ${busy.at(-1)!.text}${busy.length > 1 ? ` (+${busy.length - 1})` : ""}`, color: "cyan" });
     const error = app.store.loadError();

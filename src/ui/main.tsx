@@ -6,8 +6,10 @@ import type { CommandRunner } from "../tui/app.ts";
 import { createActions } from "./actions.ts";
 import { Frame } from "./app.tsx";
 import { type App, AppContext } from "./context.ts";
+import { COUNTED_ACTIONS } from "./keymap/actions.ts";
 import type { TuiConfig } from "./keymap/config.ts";
-import { createAppKeymap } from "./keymap/vim.ts";
+import { createCount } from "./keymap/count.ts";
+import { createAppKeymap, isKey } from "./keymap/vim.ts";
 import { createSeen } from "./seen.ts";
 import { createUiState, TAB_IDS } from "./state.ts";
 import { createStore } from "./store.ts";
@@ -59,6 +61,10 @@ export async function mountApp(renderer: CliRenderer, opts: AppOptions): Promise
   const keymap = createAppKeymap(renderer);
   const store = createStore(opts);
   const ui = createUiState();
+  const count = createCount(keymap, {
+    enabled: () => !ui.modal(),
+    counted: (event) => COUNTED_ACTIONS.some((action) => opts.config.keymap[action].some((b) => isKey(event, b.text))),
+  });
   let running = true;
 
   const stop = () => {
@@ -66,6 +72,7 @@ export async function mountApp(renderer: CliRenderer, opts: AppOptions): Promise
     running = false;
     store.stop();
     ui.dispose();
+    count.dispose();
     renderer.destroy();
   };
   const quit = () => {
@@ -95,6 +102,7 @@ export async function mountApp(renderer: CliRenderer, opts: AppOptions): Promise
     prev_tab: cycle(-1),
     refresh: () => store.reload(),
     help: () => ui.setHelp(true),
+    palette: () => ui.setPalette(true),
     undo: () => actions.undo(),
     dismiss: () => ui.dismiss(),
     back: () => void ui.pop(),
@@ -102,7 +110,7 @@ export async function mountApp(renderer: CliRenderer, opts: AppOptions): Promise
   };
 
   const seen = createSeen({ file: seenFile(opts), now: opts.now, changed: store.version });
-  const app: App = { title: opts.title, renderer, store, ui, actions, theme, config: opts.config, keymap, seen, globalHandlers };
+  const app: App = { title: opts.title, renderer, store, ui, actions, theme, config: opts.config, keymap, count, seen, globalHandlers };
 
   // Ctrl-C always quits, whatever tui.toml says and whatever is open.
   keymap.intercept(

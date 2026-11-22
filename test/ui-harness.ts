@@ -19,7 +19,7 @@ export interface Started {
   calls: { args: string[]; interactive: boolean }[];
   /** The screen as text, trailing spaces trimmed. */
   screen(): Promise<string>;
-  /** Presses keys in order (`<CR>`, `<Tab>`, `<Esc>`, `G` for shift+g, plain characters). */
+  /** Presses keys in order (`<CR>`, `<Tab>`, `<Esc>`, `<Up>`/`<Down>`, `<C-x>`, `G` for shift+g, plain characters). */
   press(...keys: string[]): Promise<void>;
   stop(): void;
 }
@@ -65,7 +65,9 @@ export async function startApp(home: TempHome, now: Date, opts: StartOptions = {
       else if (key === "<Esc>") {
         setup.mockInput.pressEscape();
         await Bun.sleep(60); // a lone Esc is only told from Alt+key after a moment
-      } else if (/^[A-Z]$/.test(key)) setup.mockInput.pressKey(key.toLowerCase(), { shift: true });
+      } else if (key === "<Up>" || key === "<Down>") setup.mockInput.pressArrow(key === "<Up>" ? "up" : "down");
+      else if (/^<C-.>$/.test(key)) setup.mockInput.pressKey(key[3]!, { ctrl: true });
+      else if (/^[A-Z]$/.test(key)) setup.mockInput.pressKey(key.toLowerCase(), { shift: true });
       else setup.mockInput.pressKey(key);
       await Bun.sleep(1);
     }

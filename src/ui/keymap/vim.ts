@@ -6,15 +6,15 @@ import { parseKeys } from "../../tui/keys.ts";
 
 // tui.toml's Vim notation on @opentui/keymap: `gg`, `G`, `<C-d>`, `<CR>`,
 // `<C-w>j`… become key strokes the way the terminal reports them (`G` is
-// shift+g, `<CR>` is return), and `{count}j` takes a count. Bindings come
-// from tui.toml already checked by parseKeys, so this parser never sees an
-// invalid key.
+// shift+g, `<CR>` is return). Bindings come from tui.toml already checked by
+// parseKeys, so this parser never sees an invalid key. Counts (`15j`) are
+// not the keymap's: see count.ts.
 
 export type AppKeymap = Keymap<Renderable, KeyEvent>;
 
 /** Vim's `timeoutlen`: how long a key that starts a longer binding waits for the rest. */
 export const SEQUENCE_TIMEOUT_MS = 1000;
-/** How long a key that is a binding *and* starts a longer one (`1` and `12j`) waits before running alone. */
+/** How long a key that is a binding *and* starts a longer one (`1` and `12j`, see count.ts) waits before running alone. */
 export const AMBIGUOUS_TIMEOUT_MS = 400;
 
 const SPECIAL_NAMES: Record<string, string> = {
@@ -57,40 +57,32 @@ function keyLength(input: string, index: number): number {
   return String.fromCodePoint(input.codePointAt(index)!).length;
 }
 
-/** Parses one key of Vim notation at a time; `{count}` is left to the default parser. */
+/** Parses one key of Vim notation at a time. */
 const vimParser: BindingParser = (ctx) => {
   const { input, index } = ctx;
-  if (input[index] === "{") return undefined;
   const length = keyLength(input, index);
   const text = input.slice(index, index + length);
   const [key] = parseKeys(text);
   return { parts: [ctx.parseObjectKey(strokeOf(key!), { display: key! })], nextIndex: index + length };
 };
 
-/** A count before a motion (`5j`): one to four digits, not starting with 0. */
-function registerCount(keymap: AppKeymap): void {
-  keymap.registerSequencePattern({
-    name: "count",
-    min: 1,
-    max: 4,
-    match(event) {
-      if (event.ctrl || event.meta || !/^[0-9]$/.test(event.name)) return undefined;
-      return { value: event.name };
-    },
-    finalize: (values) => {
-      const n = Number((values as string[]).join(""));
-      return n > 0 ? n : 1;
-    },
-  });
-}
+/**
+ * Set (keymap.setData) while the which-key popup lists what can follow a
+ * half-typed sequence: the sequence then waits for its next key instead of
+ * timing out under the user's eyes (overlays/which-key.tsx).
+ */
+export const HOLD_SEQUENCE = "sequence.hold";
 
-/** Forgets a half-typed sequence (`g` of `gg`) after a while, like Vim. */
+/** Forgets a half-typed sequence (`g` of `gg`) after a while, like Vim, unless the which-key popup holds it. */
 function registerSequenceTimeout(keymap: AppKeymap): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const off = keymap.on("pendingSequence", (sequence) => {
     if (timer) clearTimeout(timer);
     timer = null;
-    if (sequence.length > 0) timer = setTimeout(() => keymap.clearPendingSequence(), SEQUENCE_TIMEOUT_MS);
+    if (sequence.length > 0)
+      timer = setTimeout(() => {
+        if (keymap.getData(HOLD_SEQUENCE) !== true) keymap.clearPendingSequence();
+      }, SEQUENCE_TIMEOUT_MS);
   });
   return () => {
     if (timer) clearTimeout(timer);
@@ -98,7 +90,7 @@ function registerSequenceTimeout(keymap: AppKeymap): () => void {
   };
 }
 
-/** The app's keymap on `renderer`: Vim notation, counts, `enabled` layers, sequence timeouts. */
+/** The app's keymap on `renderer`: Vim notation, `enabled` layers, sequence timeouts. */
 export function createAppKeymap(renderer: CliRenderer): AppKeymap {
   const keymap = createOpenTuiKeymap(renderer);
   registerDefaultKeys(keymap);
@@ -106,13 +98,15 @@ export function createAppKeymap(renderer: CliRenderer): AppKeymap {
   registerEnabledFields(keymap);
   registerMetadataFields(keymap);
   registerNeovimDisambiguation(keymap, { timeoutMs: AMBIGUOUS_TIMEOUT_MS });
-  registerCount(keymap);
   const offTimeout = registerSequenceTimeout(keymap);
   renderer.once("destroy", offTimeout);
   return keymap;
 }
 
-/** `{count}j`: the counted form of a single-key binding, or null for a sequence (`gj` takes no count). */
-export function countedBinding(text: string): string | null {
-  return parseKeys(text).length === 1 ? `{count}${text}` : null;
+/** Whether `event` is the single key `text` of tui.toml (`j`, `G`, `<C-d>`, `<Down>`); false for a sequence (`gg`). */
+export function isKey(event: KeyEvent, text: string): boolean {
+  const keys = parseKeys(text);
+  if (keys.length !== 1) return false;
+  const stroke = strokeOf(keys[0]!);
+  return event.name === stroke.name && event.ctrl === (stroke.ctrl ?? false) && event.shift === (stroke.shift ?? false) && !event.meta;
 }

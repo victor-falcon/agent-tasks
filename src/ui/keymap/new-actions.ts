@@ -20,6 +20,7 @@ const GLOBAL_NEW_ACTIONS = {
   tab_system: { desc: "Go to the System tab", keys: ["4"] },
   undo: { desc: "Undo the last pause or resume (while its toast shows)", keys: ["u"] },
   dismiss: { desc: "Dismiss the messages at the bottom right", keys: ["<Esc>"] },
+  palette: { desc: "Open the command palette: actions, tasks and runs", keys: [":", "<C-p>"] },
 } as const satisfies ActionDefs;
 
 /** The `/` filter bar (components/filter-bar.tsx), for any list view. `cycle_filter` and `copy` are the Runs view's generic actions (views/runs/keys.ts). */
