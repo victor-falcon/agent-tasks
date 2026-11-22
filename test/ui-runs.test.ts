@@ -190,7 +190,7 @@ describe("Runs tab", () => {
     expect(selectedRow(text)).toStartWith("✕ 09:00 sentry-summary");
     await press("j", "t");
     expect(await screen()).toContain("worktree-cleanup");
-    expect(await screen()).toContain("is not in the new dashboard yet.");
+    expect(await screen()).toContain("Worktree cleanup · worktree-cleanup · active"); // the Task detail
     await press("h");
     text = await screen();
     expect(selectedRow(text)).toStartWith("✕ Fri 08:00 worktree-cleanup");
