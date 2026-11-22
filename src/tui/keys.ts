@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ConfigError } from "../errors.ts";
+import { isNewAction } from "../ui/keymap/new-actions.ts";
 
 // Key bindings of the dashboard (`agent-tasks top`, and `runner` on a
 // terminal). Keys are written in Vim notation (`j`, `G`, `gg`, `<C-d>`,
@@ -290,12 +291,14 @@ export function loadKeymap(configDir: string): { keymap: Keymap; file: string | 
     throw new ConfigError(file, [`invalid TOML: ${(err as Error).message}`]);
   }
   const root = parsed as Record<string, unknown>;
-  const unknown = Object.keys(root).filter((k) => k !== "keys");
+  // `mouse` and the new dashboard's actions belong to src/ui (see src/ui/keymap/config.ts, which validates them).
+  const unknown = Object.keys(root).filter((k) => k !== "keys" && k !== "mouse");
   if (unknown.length > 0) throw new ConfigError(file, unknown.map((k) => `${k}: unknown setting (only [keys] is read)`));
   const keys = root.keys ?? {};
   if (typeof keys !== "object" || keys === null || Array.isArray(keys)) throw new ConfigError(file, ["keys: must be a table, e.g. [keys]"]);
+  const ours = Object.fromEntries(Object.entries(keys).filter(([action]) => !isNewAction(action)));
   try {
-    return { keymap: buildKeymap(keys as Record<string, unknown>), file };
+    return { keymap: buildKeymap(ours), file };
   } catch (err) {
     if (err instanceof KeymapError) throw new ConfigError(file, err.details);
     throw err;
