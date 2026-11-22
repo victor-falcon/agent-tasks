@@ -62,7 +62,11 @@ export interface Actions {
   /** Undoes the newest toast that can be undone. */
   undo(): void;
   quit(): void;
-  /** Runs an agent-tasks command in the background with a spinner; its exit code, first line and whole output (for `--json`). */
+  /**
+   * Runs an agent-tasks command in the background with a spinner and reloads;
+   * gives its exit code, first line and whole output (for `--json`). The
+   * caller says how it went (`report`, or a toast of its own).
+   */
   background(args: string[], doing: string): Promise<{ code: number; first: string; output: string }>;
   /** The toast that ends a background command: its first line, or the error (which stays until dismissed). */
   report(code: number, first: string, doing: string): void;

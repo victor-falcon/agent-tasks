@@ -274,8 +274,8 @@ export const CHECK_MARKS: Record<CheckStatus, Segment> = { ok: { text: "✓", co
 /** A check as lines: its mark and message, its details, and the fix. */
 export function checkLines(c: Check): Segment[][] {
   return [
-    [CHECK_MARKS[c.status], { text: " " }, { text: c.message, color: c.status === "ok" ? undefined : "bold" }],
-    ...(c.details ?? []).map((d) => [{ text: `  - ${d}`, color: "dim" as const }]),
+    [{ ...CHECK_MARKS[c.status], text: `${CHECK_MARKS[c.status].text} ` }, { text: c.message, color: c.status === "ok" ? undefined : "bold" }],
+    ...(c.details ?? []).map((d) => [{ text: "  - ", color: "dim" as const }, { text: d, color: "dim" as const }]),
     ...(c.hint ? [[{ text: "  fix: ", color: "dim" as const }, { text: c.hint }]] : []),
   ];
 }
@@ -294,7 +294,11 @@ export function hasMachines(config: UserConfig): boolean {
   return isHub(config) && sshMachines(config).length > 0;
 }
 
-/** The machine a check is about (`machine <name> (ssh …)`), or null. */
+/**
+ * The machine a check is about, or null. A Check carries no machine field,
+ * so this reads the message registeredMachineCheck writes
+ * (`machine <name> (ssh <alias>)…`), for doctor and machines check alike.
+ */
 export function machineOfCheck(c: Check): string | null {
   if (c.id !== "machines.reachable") return null;
   return /^machine (\S+) \(ssh /.exec(c.message)?.[1] ?? null;
@@ -329,6 +333,7 @@ export function machineLines(m: MachineRow, tz: string, now: Date, checking: boo
   const head: Segment[] = [{ text: m.name, color: "bold" }, { text: `  ssh ${m.ssh}`, color: "dim" }];
   if (!m.check) return [[{ text: "· ", color: "dim" }, ...head, { text: checking ? "  checking…" : "  not checked yet", color: "dim" }]];
   const c = m.check;
+  // registeredMachineCheck (src/machines.ts) warns only when the machine is unreachable; anything else wrong is an error.
   const unreachable = c.status === "warn";
   const state: Segment[] = unreachable
     ? [{ text: "unreachable", color: "yellow" }]
@@ -337,7 +342,7 @@ export function machineLines(m: MachineRow, tz: string, now: Date, checking: boo
       : [{ text: c.message.replace(/^machine \S+ \(ssh [^)]*\):? ?/, ""), color: "red" }];
   const when = m.at ? `checked ${clockTime(m.at, tz)} (${relativeTime(m.at, now)})${checking ? " · checking…" : ""}` : "";
   return [
-    [CHECK_MARKS[c.status], { text: " " }, ...head],
+    [{ ...CHECK_MARKS[c.status], text: `${CHECK_MARKS[c.status].text} ` }, ...head],
     [{ text: "  " }, ...state, { text: `  ${when}`, color: "dim" }],
     ...(c.status !== "ok" && c.hint ? [[{ text: "  fix: ", color: "dim" as const }, { text: c.hint }]] : []),
   ];

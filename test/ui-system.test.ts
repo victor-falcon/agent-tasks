@@ -241,6 +241,22 @@ describe("the tab", () => {
     await s.press("F");
     expect(await s.screen()).toContain("● following");
     expect(s.handle.app.ui.selection("system")).toContain(REVIEW_REF);
+    // G at the end follows again too.
+    await s.press("g", "g");
+    expect(await s.screen()).toContain("○ not following");
+    await s.press("G");
+    expect(await s.screen()).toContain("● following");
+  });
+
+  test("a level that hides the cursor's line moves it to the line now at its place, not to the end", async () => {
+    writeFixture(home.paths);
+    writeLog();
+    const s = await openSystem();
+    await s.press("k", "k", "k");
+    expect(s.handle.app.ui.selection("system")).toContain("launched in t-1");
+    // Second of five, hidden by "warnings and errors": the second of those three.
+    await s.press("f");
+    expect(s.handle.app.ui.selection("system")).toContain("the launcher took 40s");
   });
 
   test("a new line arrives while following: the cursor moves to it", async () => {
@@ -269,21 +285,26 @@ describe("the tab", () => {
     expect(text).toContain("level: all");
     await s.press("<CR>");
     text = await s.screen();
-    expect(text).toContain("/sentry  2 matches · n/N");
-    expect(s.handle.app.ui.selection("system")).toContain("launched in t-1");
-    await s.press("n");
+    expect(text).toContain("/sentry  2 matches · n/N · <Esc> clear");
+    // From the end of the log (following), ⏎ goes to the nearest match above.
     expect(s.handle.app.ui.selection("system")).toContain("failed (exit 1)");
     await s.press("n");
     expect(s.handle.app.ui.selection("system")).toContain("launched in t-1");
+    await s.press("n");
+    expect(s.handle.app.ui.selection("system")).toContain("failed (exit 1)");
     await s.press("N");
-    expect(s.handle.app.ui.selection("system")).toContain("failed (exit 1)");
-    await s.press("/", "<Esc>");
+    expect(s.handle.app.ui.selection("system")).toContain("launched in t-1");
+    // Esc clears the kept search.
+    await s.press("<Esc>");
     expect(await s.screen()).not.toContain("/sentry");
+    // A typed search Esc'd away is gone too.
+    await s.press("/", "x", "<Esc>");
+    expect(await s.screen()).not.toContain("/x");
   });
 
   test("T asks before ticking, then runs agent-tasks tick in the background", async () => {
     writeFixture(home.paths);
-    const s = await openSystem();
+    const s = await openSystem({ exec: fakeCli() });
     await s.press("T");
     expect(await s.screen()).toContain("It may launch the runs that are due.");
     await s.press("n");
@@ -335,6 +356,11 @@ describe("the tab", () => {
     await s.setup.mockMouse.click(20, y);
     await s.screen();
     expect(s.handle.app.ui.selection("system")).toContain("failed (exit 1)");
+    expect(await s.screen()).toContain("○ not following");
+    // The wheel up in the events stops following too.
+    await s.press("F");
+    expect(await s.screen()).toContain("● following");
+    await s.setup.mockMouse.scroll(20, y, "up");
     expect(await s.screen()).toContain("○ not following");
     await s.setup.mockMouse.doubleClick(20, y);
     expect(s.handle.app.ui.route()).toEqual({ view: "run", params: { ref: SENTRY_REF } });

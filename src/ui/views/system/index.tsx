@@ -75,7 +75,8 @@ function System(props: ViewProps) {
   createEffect(() => kept.set(app, { focus: focus(), filter: filter(), follow: follow(), query: query() }));
 
   // The doctor runs once, the first time the tab opens; then on `c`.
-  if (!checks.doctor.result() && !checks.doctor.running() && !checks.doctor.error()) checks.doctor.run();
+  // (Quietly: no toast unless something fails, since nobody asked.)
+  if (!checks.doctor.result() && !checks.doctor.running() && !checks.doctor.error()) checks.doctor.run({ quiet: true });
 
   const tz = () => {
     const ctx = store.ctx();
@@ -108,7 +109,13 @@ function System(props: ViewProps) {
   });
   const problems = () => store.dash()?.errors ?? [];
 
-  const panes = createMemo((): PaneId[] => ["runner", "events", ...(showMachines() ? ["machines" as const] : []), "checks", ...(problems().length > 0 ? ["problems" as const] : [])]);
+  const panes = createMemo(() => {
+    const all: PaneId[] = ["runner", "events"];
+    if (showMachines()) all.push("machines");
+    all.push("checks");
+    if (problems().length > 0) all.push("problems");
+    return all;
+  });
   // A pane that went away (no more problems) hands the focus to the events.
   createEffect(() => {
     if (!panes().includes(focus())) setFocus("events");
@@ -119,14 +126,19 @@ function System(props: ViewProps) {
   const [selected, setSelected] = createSignal<string | null>(ui.selection("system"));
   createEffect(() => ui.select("system", selected()));
   // Following: the cursor sticks to the last line as lines arrive. Otherwise
-  // it stays on its line, or the nearest one when its line is filtered out.
+  // it stays on its line, or goes to the line now at its place when its line
+  // is filtered out (or rolled out of the tail).
   createEffect(
-    on(events, (rows) => {
+    on(events, (rows, before) => {
       if (rows.length === 0) return setSelected(null);
-      if (follow() || selected() === null || !rows.some((r) => r.key === selected())) setSelected(rows.at(-1)!.key);
+      const current = selected();
+      if (follow() || current === null) return setSelected(rows.at(-1)!.key);
+      if (rows.some((r) => r.key === current)) return;
+      const at = (before ?? []).findIndex((r) => r.key === current);
+      setSelected(rows[Math.max(0, Math.min(rows.length - 1, at))]!.key);
     }),
   );
-  createEffect(on(follow, (on) => on && events().length > 0 && setSelected(events().at(-1)!.key)));
+  createEffect(on(follow, (following) => following && events().length > 0 && setSelected(events().at(-1)!.key)));
 
   const scrolls: Partial<Record<PaneId, ScrollBoxRenderable>> = {};
   createEffect(
@@ -180,8 +192,10 @@ function System(props: ViewProps) {
 
   // --- search ---------------------------------------------------------------
 
-  const jumpToMatch = (direction: 1 | -1, from = selected()) => {
-    const key = stepMatch(events(), matches(), from, direction);
+  /** `here`: the cursor's line if it matches, else the nearest match above it (a log is read from its end). */
+  const jumpToMatch = (direction: 1 | -1 | "here") => {
+    const from = selected();
+    const key = direction === "here" ? (from !== null && matches().includes(from) ? from : stepMatch(events(), matches(), from, -1)) : stepMatch(events(), matches(), from, direction);
     if (key === null) {
       if (searching()) ui.toast(`no line matches "${searching()}"`);
       return;
@@ -210,7 +224,7 @@ function System(props: ViewProps) {
             setDraft(null);
             setQuery(typed);
           });
-          if (typed !== "") jumpToMatch(1);
+          if (typed !== "") jumpToMatch("here");
         } else if (e.name === "backspace") {
           setDraft(typed.slice(0, -1));
         } else if (!e.ctrl && !e.meta && e.sequence.length === 1 && e.sequence >= " ") {
@@ -227,12 +241,21 @@ function System(props: ViewProps) {
     if (focus() === "machines") checks.machines.run();
     else checks.doctor.run();
   };
-  const tickNow = () =>
+  let ticking = false;
+  const tickNow = () => {
+    if (ticking) return void ui.toast("a tick is already running");
     ui.ask({
       title: "Run one tick now?",
       consequence: "It may launch the runs that are due.",
-      onYes: () => void actions.background(["tick"], "ticking").then(({ code, first }) => actions.report(code, first, "ticking")),
+      onYes: () => {
+        ticking = true;
+        void actions
+          .background(["tick"], "ticking")
+          .then(({ code, first }) => actions.report(code, first, "ticking"))
+          .finally(() => (ticking = false));
+      },
     });
+  };
   const copy = () => {
     const row = selectedEvent();
     if (!row) return;
@@ -245,7 +268,8 @@ function System(props: ViewProps) {
     down: (n) => motion(() => moveEvent(n), () => scrollFocused(n)),
     up: (n) => motion(() => moveEvent(-n), () => scrollFocused(-n)),
     first: () => motion(() => selectEvent(events()[0]?.key ?? null), () => scrollFocused("top")),
-    last: () => motion(() => selectEvent(events().at(-1)?.key ?? null), () => scrollFocused("bottom")),
+    // In the events, going to the end follows it again.
+    last: () => motion(() => setFollow(true), () => scrollFocused("bottom")),
     half_page_down: () => motion(() => moveEvent(halfPage()), () => scrollFocused(halfPage())),
     half_page_up: () => motion(() => moveEvent(-halfPage()), () => scrollFocused(-halfPage())),
     next_panel: () => cyclePane(1),
@@ -263,6 +287,8 @@ function System(props: ViewProps) {
       setFocus("events");
       setDraft("");
     },
+    // Esc clears a kept search first, then dismisses the toasts as everywhere.
+    dismiss: () => (query() ? setQuery("") : ui.dismiss()),
     search_next: () => jumpToMatch(1),
     search_prev: () => jumpToMatch(-1),
     copy,
@@ -290,6 +316,8 @@ function System(props: ViewProps) {
         title={` ${p.title} `}
         titleAlignment="left"
         onMouseDown={() => setFocus(p.id)}
+        // Scrolling up through the events to read them stops following (or the next line would pull the view back down).
+        onMouseScroll={(e: MouseEvent) => p.id === "events" && e.scroll?.direction === "up" && setFollow(false)}
       >
         <scrollbox ref={(el: ScrollBoxRenderable) => (scrolls[p.id] = el)} flexGrow={1} scrollY scrollX={false} paddingLeft={1} paddingRight={1}>
           {p.children}
@@ -299,7 +327,29 @@ function System(props: ViewProps) {
   };
 
   /** Lines of segments; Index, so a reload (or the clock) updates them in place. */
-  const Lines = (p: { all: readonly Segment[][]; wrap?: boolean }) => <Index each={p.all}>{(segments) => <Line segments={segments()} wrap={p.wrap} />}</Index>;
+  /**
+   * Lines of segments; Index, so a reload (or the clock) updates them in
+   * place. Wrapped, a line's first segment (`✓ `, `  fix: `) is a hanging
+   * indent: the rest wraps beside it, not under it.
+   */
+  const Lines = (p: { all: readonly Segment[][]; wrap?: boolean }) => (
+    <Index each={p.all}>
+      {(segments) =>
+        p.wrap && segments().length > 1 ? (
+          <box flexDirection="row" flexShrink={0}>
+            <box width={Bun.stringWidth(segments()[0]!.text)} flexShrink={0}>
+              <Line segments={[segments()[0]!]} />
+            </box>
+            <box flexGrow={1} flexShrink={1}>
+              <Line segments={segments().slice(1)} wrap />
+            </box>
+          </box>
+        ) : (
+          <Line segments={segments()} wrap={p.wrap} />
+        )
+      }
+    </Index>
+  );
 
   const runnerContent = createMemo((): Segment[][] => {
     const info = runner();
@@ -320,7 +370,7 @@ function System(props: ViewProps) {
       { text: ` (${key("cycle_filter")})`, color: "dim" },
     ];
     if (typed !== null) out.push({ text: "  ·  " }, { text: `/${typed}`, color: "yellow" }, { text: "▏" }, { text: "  ⏎ keep · esc clear", color: "dim" });
-    else if (query()) out.push({ text: "  ·  " }, { text: `/${query()}`, color: "yellow" }, { text: `  ${matches().length} match${matches().length === 1 ? "" : "es"} · ${key("search_next")}/${key("search_prev")}`, color: "dim" });
+    else if (query()) out.push({ text: "  ·  " }, { text: `/${query()}`, color: "yellow" }, { text: `  ${matches().length} match${matches().length === 1 ? "" : "es"} · ${key("search_next")}/${key("search_prev")} · ${key("dismiss")} clear`, color: "dim" });
     return out;
   };
 

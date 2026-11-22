@@ -13,8 +13,11 @@ export interface BackgroundCheck {
   /** Why the last run could not be read (the previous result stays), or null. */
   error: Accessor<string | null>;
   running: Accessor<boolean>;
-  /** Runs it in the background (spinner in the footer, a toast at the end); does nothing while it already runs. */
-  run(): void;
+  /**
+   * Runs it in the background (spinner in the footer, a toast at the end;
+   * `quiet`: a toast only when a check fails); does nothing while it already runs.
+   */
+  run(opts?: { quiet?: boolean }): void;
 }
 
 export interface SystemChecks {
@@ -30,7 +33,7 @@ function backgroundCheck(app: App, args: string[], doing: string, label: string)
     result,
     error,
     running,
-    run() {
+    run(opts = {}) {
       if (running()) return;
       setRunning(true);
       void app.actions
@@ -45,7 +48,8 @@ function backgroundCheck(app: App, args: string[], doing: string, label: string)
           }
           setResult({ checks: parsed.checks, at: app.store.now() });
           setError(null);
-          app.ui.toast(`${label}: ${parsed.checks.length === 0 ? "nothing to check" : checksSummary(parsed.checks)}`);
+          const failing = parsed.checks.some((c) => c.status === "error");
+          if (!opts.quiet || failing) app.ui.toast(`${label}: ${parsed.checks.length === 0 ? "nothing to check" : checksSummary(parsed.checks)}`);
         })
         .finally(() => setRunning(false));
     },
