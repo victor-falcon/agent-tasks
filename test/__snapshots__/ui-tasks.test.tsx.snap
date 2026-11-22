@@ -1,0 +1,117 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`Tasks tab the table and the preview (160 columns) 1`] = `
+" agent-tasks top · ● runner every 5m · ticked 10:00 · next 10:05                                                                 today ■3 ✕1 □4 !1   hub: local
+ 1 Overview   2 Tasks   3 Runs   4 System
+  f state all   s sort next run   8 of 8                                                │ ◐ Sentry summary · sentry-summary · active
+── Tasks (7) ───────────────────────────────────────────────────────────────────────────│
+› ◐  sentry-summary      every hour       running 1m   □□■✕◐  ~/Projects/foo            │ Schedule  every hour  cron "0 * * * *" in Europe/Madrid
+  ●  inbox-triage        every day 06:00  in 20h       ■■■□   ~/Projects/foo            │ Machine   local
+  ◐  worktree-cleanup    every day 08:00  running 4m   ✕■■■◐  ~/Projects/bar            │ Folder    ~/Projects/foo
+  ○  release-notes       Nov 20 09:00     in 3d        ·      ~/Projects/foo            │
+  ●  weekly-deps-report  Mon 09:00        in 6d        ■■□■■  ~/Projects/foo            │ Next runs
+  ⏸  backup-notes        every day 23:00  paused       ■■■■   ~/notes                   │   11:00  in 58m
+  !  review-pr-123       Nov 17 09:30     blocked 12m  !      ~/Projects/foo            │   12:00  in 2h
+── Archived (1) ────────────────────────────────────────────────────────────────────────│   13:00  in 3h
+  -  old-digest  every day 23:00  archived  –  ~/notes                                  │   14:00  in 4h
+                                                                                        │   15:00  in 5h
+                                                                                        │
+                                                                                        │ Agent     claude
+                                                                                        │ Timeout   45m
+                                                                                        │ Retries   1
+                                                                                        │ Keep open on_failure
+                                                                                        │
+                                                                                        │ Last 5 results
+                                                                                        │   ◐  10:00  running  1m
+                                                                                        │   ✕  09:00  failed   8m  ×2  sentry-cli has no auth
+                                                                                        │   ■  08:00  ok       6m      3 new issues in notes/sentry.md
+                                                                                        │   □  04:00  missed   –       runner_offline
+                                                                                        │   □  03:00  missed   –       runner_offline
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+ j/k move · <CR> open · / filter · f state · m machine · s sort · R run · p pause · D archive · ? keys · q quit
+"
+`;
+
+exports[`Tasks tab below 120 columns the preview hides and the title shows 1`] = `
+" agent-tasks top · ● runner every 5m · ticked 10:00 · next 10:05               today ■3 ✕1 □4 !1   hub: local
+ 1 Overview   2 Tasks   3 Runs   4 System
+  f state all   s sort next run   8 of 8
+── Tasks (7) ─────────────────────────────────────────────────────────────────────────────────────────────────
+› ◐  sentry-summary      Sentry summary      every hour       running 1m   □□■✕◐  ~/Projects/foo
+  ●  inbox-triage        Inbox triage        every day 06:00  in 20h       ■■■□   ~/Projects/foo
+  ◐  worktree-cleanup    Worktree cleanup    every day 08:00  running 4m   ✕■■■◐  ~/Projects/bar
+  ○  release-notes       Release notes       Nov 20 09:00     in 3d        ·      ~/Projects/foo
+  ●  weekly-deps-report  Weekly deps report  Mon 09:00        in 6d        ■■□■■  ~/Projects/foo
+  ⏸  backup-notes        Backup notes        every day 23:00  paused       ■■■■   ~/notes
+  !  review-pr-123       Review PR 123       Nov 17 09:30     blocked 12m  !      ~/Projects/foo
+── Archived (1) ──────────────────────────────────────────────────────────────────────────────────────────────
+  -  old-digest  Old digest  every day 23:00  archived  –  ~/notes
+
+
+
+
+
+
+
+
+
+
+ j/k move · <CR> open · / filter · f state · m machine · s sort · R run · p pause · D archive · ? keys · q q
+"
+`;
+
+exports[`Task detail Overview: the task, its schedule, next slots and settings 1`] = `
+" agent-tasks top · ● runner every 5m · ticked 10:00 · next 10:05                                                                 today ■3 ✕1 □4 !1   hub: local
+ 1 Overview   2 Tasks   3 Runs   4 System
+ ◐ Sentry summary · sentry-summary · active
+ Overview   Instructions   Runs (11)   Settings
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Id          sentry-summary
+ State       active
+ Folder      ~/Projects/foo  o open a shell there
+ Machine     local
+ Schedule    every hour
+             cron "0 * * * *" in Europe/Madrid
+ Time zone   Europe/Madrid
+
+ Next runs
+   11:00  in 58m
+   12:00  in 2h
+   13:00  in 3h
+   14:00  in 4h
+   15:00  in 5h
+
+ Agent       claude
+ Timeout     45m
+ Retries     1
+ Keep open   on_failure
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ <Esc> back · [/] part · j/k scroll/move · i as the agent gets it · R run · p pause · D archive · o folder · ? keys
+"
+`;
