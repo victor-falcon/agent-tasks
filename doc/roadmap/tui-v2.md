@@ -275,6 +275,6 @@ also `top --json`) in `src/dashboard.ts`. Merged in this order:
 6. #33 Persisted attention seen state, `/` filter in Runs, header at narrow
    widths.
 7. #34 Command palette, which-key, scrolling help and Vim counts.
-8. Swap: `top` and `runner` open the new app, `src/tui/` removed, docs
+8. #35 Swap: `top` and `runner` open the new app, `src/tui/` removed, docs
    updated. `--next` is accepted and ignored; `top` without a terminal
    prints what `status` prints.
