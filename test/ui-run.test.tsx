@@ -7,7 +7,7 @@ import { commands } from "../src/commands/index.ts";
 import { createContext } from "../src/context.ts";
 import type { Run } from "../src/schema.ts";
 import { readRunByRef, writeRun } from "../src/store.ts";
-import type { CommandRunner } from "../src/tui/app.ts";
+import type { CommandRunner } from "../src/ui/exec.ts";
 import { buildKeymap } from "../src/ui/keymap/config.ts";
 import { type AppHandle, mountApp } from "../src/ui/main.tsx";
 import { buildRunModel, type Geometry, logSegments, matchRows, moveInRun, nextMatch, readShown, reveal } from "../src/ui/views/run/model.ts";

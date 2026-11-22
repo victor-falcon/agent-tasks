@@ -18,7 +18,7 @@ export const RUN_ACTIONS = {
 export const RUN_KEYS: ViewKeys = {
   id: "run",
   actions: [
-    // `q` and `<Esc>` go back here, as in the old dashboard's run view.
+    // `q` and `<Esc>` go back here (q does not quit from a run).
     ...GLOBAL_ACTIONS.filter((a) => a !== "quit" && a !== "dismiss"),
     "back",
     "down",

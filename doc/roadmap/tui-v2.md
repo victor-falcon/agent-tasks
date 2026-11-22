@@ -1,7 +1,7 @@
 # TUI v2: design
 
-> Status: decided (see Decisions at the end). Mockups of every view live in
-> a design canvas outside the repo; the
+> Status: implemented (see [Implementation](#implementation) at the end).
+> Mockups of every view live in a design canvas outside the repo; the
 > canvas still shows a task editor and a live session tail, both dropped:
 > this file is the source of truth for behavior.
 
@@ -260,3 +260,21 @@ the new ones. `{count}j` works (keymap counts).
 6. The attention "seen" state is persisted (`state/tui.json`, local to the
    machine running the TUI).
 7. Colors adapt to the terminal's palette (ANSI 16, no truecolor).
+
+## Implementation
+
+The new dashboard lives in `src/ui/`; the data it reads (`buildDashboard`,
+also `top --json`) in `src/dashboard.ts`. Merged in this order:
+
+1. #28 Foundation: OpenTUI + Solid frame, Overview and keymap (behind
+   `--next`).
+2. #29 Runs tab: paged history, filter chips, preview, actions.
+3. #30 Run detail: sections, folds, log search, actions.
+4. #31 Tasks tab, Task detail and the shared `/` filter bar.
+5. #32 System tab: runner, events, machines, checks, problems.
+6. #33 Persisted attention seen state, `/` filter in Runs, header at narrow
+   widths.
+7. #34 Command palette, which-key, scrolling help and Vim counts.
+8. Swap: `top` and `runner` open the new app, `src/tui/` removed, docs
+   updated. `--next` is accepted and ignored; `top` without a terminal
+   prints what `status` prints.

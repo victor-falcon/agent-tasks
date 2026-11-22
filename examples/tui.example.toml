@@ -1,34 +1,87 @@
-# Key bindings of the dashboard (`agent-tasks top`, and `agent-tasks runner`
-# on a terminal). Copy to ~/.config/agent-tasks/tui.toml and keep only what
-# you change: an action you set replaces its default keys, `[]` unbinds it.
+# Settings of the dashboard (`agent-tasks top`, and `agent-tasks runner` on a
+# terminal). Copy to ~/.config/agent-tasks/tui.toml and keep only what you
+# change: an action you set replaces its default keys, `[]` unbinds it.
+# `agent-tasks config check` validates the file.
 #
 # Keys use Vim notation: j, G, gg (one key after the other), <C-d>, <CR>,
 # <Esc>, <Tab>, <S-Tab>, <BS>, <Space>, <Up>, <Down>, <Left>, <Right>,
 # <Home>, <End>, <PageUp>, <PageDown>, <C-w>j, <lt> for "<". Ctrl-C always
-# quits. Press ? in the dashboard to see the keys in use.
+# quits. Press ? in the dashboard to see the keys of the view you are in.
 #
-# These are the defaults:
+# This file is generated from the keymap (test/ui-keymap.test.ts): these are
+# the defaults.
+
+# The mouse is on: clicks select, a double click opens, the wheel scrolls.
+# Uncomment to leave it to the terminal (to select text, for one):
+# mouse = false
 
 [keys]
-down = ["j", "<Down>"]
-up = ["k", "<Up>"]
-first = ["gg", "<Home>"]
-last = ["G", "<End>"]
-half_page_down = ["<C-d>", "<PageDown>"]
-half_page_up = ["<C-u>", "<PageUp>"]
-next_panel = ["<Tab>", "<C-w>j"]
-prev_panel = ["<S-Tab>", "<C-w>k"]
-open = ["<CR>", "l"]           # open the selected run (a task in Next: its latest run)
-back = ["<Esc>", "h", "q"]     # close the run
-next_section = ["}"]           # in a run: Result, Output, Details, Attempts, Events, Log
-prev_section = ["{"]
-toggle_section = ["<CR>", "<Space>", "za"]  # fold or open the selected section
-open_sections = ["zR"]
-fold_sections = ["zM"]
-attach = ["a"]                 # running or blocked runs
-retry = ["r"]                  # failed, timed-out or missed runs (asks first)
-run_now = ["R"]                # asks first
-toggle_pause = ["p"]
-refresh = ["<C-l>"]
-help = ["?"]
-quit = ["q"]                   # in a run, q goes back (see back)
+# Everywhere
+tab_overview = ["1"]      # Go to the Overview tab
+tab_tasks = ["2"]         # Go to the Tasks tab
+tab_runs = ["3"]          # Go to the Runs tab
+tab_system = ["4"]        # Go to the System tab
+next_tab = ["gt"]         # Next tab
+prev_tab = ["gT"]         # Previous tab
+refresh = ["<C-l>"]       # Reload everything now
+help = ["?"]              # Show the keys
+palette = [":", "<C-p>"]  # Open the command palette: actions, tasks and runs
+undo = ["u"]              # Undo the last pause or resume (while its toast shows)
+dismiss = ["<Esc>"]       # Dismiss the messages at the bottom right
+quit = ["q"]              # Quit
+
+# Moving in a list
+down = ["j", "<Down>"]                    # Move down / scroll down
+up = ["k", "<Up>"]                        # Move up / scroll up
+first = ["gg", "<Home>"]                  # Go to the first row / the top
+last = ["G", "<End>"]                     # Go to the last row / the bottom
+half_page_down = ["<C-d>", "<PageDown>"]  # Half a page down
+half_page_up = ["<C-u>", "<PageUp>"]      # Half a page up
+next_panel = ["<Tab>", "<C-w>j"]          # Next section
+prev_panel = ["<S-Tab>", "<C-w>k"]        # Previous section
+open = ["<CR>", "l"]                      # Open the selected run or task
+
+# Overview tab
+attach = ["a"]             # Attach to the run's session
+retry = ["r"]              # Retry the run (failed, timed out or missed)
+run_now = ["R"]            # Run the task now
+toggle_pause = ["p"]       # Pause or resume the task
+dismiss_attention = ["x"]  # Dismiss the selected failure from Needs attention (seen, without opening it)
+
+# Tasks tab
+archive = ["D"]         # Archive the task (agent-tasks rm; its runs are kept)
+open_folder = ["o"]     # Open a shell in the task's folder (exit it to come back)
+copy = ["y"]            # Copy the selected item's ref or id
+filter = ["/"]          # Filter the list by text (Enter keeps it, Esc clears it)
+cycle_filter = ["f"]    # Cycle the list's main filter
+filter_machine = ["m"]  # Show only the tasks of one machine (cycles)
+sort = ["s"]            # Sort the tasks: next run, id, last result (cycles)
+
+# Runs tab
+cycle_since = ["S"]  # Cycle how far back the list goes (24h · 7d · 30d · all)
+goto_task = ["t"]    # Go to the selected run's task
+
+# System tab
+search = ["/"]         # Search the text shown (⏎ keeps it, <Esc> clears it)
+next_match = ["n"]     # Next match in the log
+prev_match = ["N"]     # Previous match in the log
+toggle_follow = ["F"]  # Follow the end of the log as lines arrive (on or off)
+tick_now = ["T"]       # Run one tick of the runner now (it may launch due runs)
+recheck = ["c"]        # Check again: machines (in Machines) or doctor (elsewhere)
+
+# Run detail
+back = ["<Esc>", "h", "q"]                  # Close the view (back to where you were)
+next_section = ["}"]                        # Next section of the run
+prev_section = ["{"]                        # Previous section of the run
+toggle_section = ["<CR>", "<Space>", "za"]  # Fold or open the selected section of the run
+open_sections = ["zR"]                      # Open every section of the run
+fold_sections = ["zM"]                      # Fold every section of the run
+close_session = ["c"]                       # Close the run's session (kept open, or still running)
+open_output = ["o"]                         # Open the run's output file in $PAGER
+copy_summary = ["Y"]                        # Copy the run's summary
+search_log = ["/"]                          # Search the run's log
+
+# Task detail
+next_subtab = ["]"]          # Next part of the task (Overview, Instructions, Runs, Settings)
+prev_subtab = ["["]          # Previous part of the task
+toggle_instructions = ["i"]  # Instructions as written / as the agent receives them

@@ -8,7 +8,7 @@ import type { Run, RunStatus } from "../../../schema.ts";
 import { isManualSlotId, isSlotId, parseRunRef, runRef, slotIdToDate } from "../../../slot.ts";
 import { readRun, runPath, taskIdsWithRuns } from "../../../store.ts";
 import { findTask } from "../../../task-info.ts";
-import type { DashRun } from "../../../tui/snapshot.ts";
+import type { DashRun } from "../../../dashboard.ts";
 import type { Segment } from "../../components/cells.ts";
 import { matchesQuery } from "../../components/filter.ts";
 

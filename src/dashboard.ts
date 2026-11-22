@@ -1,13 +1,13 @@
 import { closeSync, existsSync, fstatSync, openSync, readSync } from "node:fs";
-import type { Context } from "../context.ts";
-import { scheduleText } from "../output/schedule-text.ts";
-import { sameDay } from "../output/time.ts";
-import { isFailure, isInProgress, lastActivity } from "../run-info.ts";
-import { contextRunnerHealth, type RunnerHealth } from "../runner-health.ts";
-import { runnerLogPath } from "../runner-lock.ts";
-import type { RunStatus } from "../schema.ts";
-import { listRuns, listTasks, type StoredRun, taskIdsWithRuns } from "../store.ts";
-import { displayTimezone, taskOverview } from "../task-info.ts";
+import type { Context } from "./context.ts";
+import { scheduleText } from "./output/schedule-text.ts";
+import { sameDay } from "./output/time.ts";
+import { isFailure, isInProgress, lastActivity } from "./run-info.ts";
+import { contextRunnerHealth, type RunnerHealth } from "./runner-health.ts";
+import { runnerLogPath } from "./runner-lock.ts";
+import type { RunStatus } from "./schema.ts";
+import { listRuns, listTasks, type StoredRun, taskIdsWithRuns } from "./store.ts";
+import { displayTimezone, taskOverview } from "./task-info.ts";
 
 // What the dashboard shows, read from the data folder in one go: the runner's
 // health, runs in progress, what comes next, recent results and the tail of
@@ -65,7 +65,8 @@ export interface Dashboard {
   errors: string[];
 }
 
-function dashRun({ ref, run }: StoredRun, machine: string | null): DashRun {
+/** A run as a dashboard row; `machine` is the task's, for a run that never started a session. */
+export function dashRun({ ref, run }: Pick<StoredRun, "ref" | "run">, machine: string | null): DashRun {
   const last = run.attempts.at(-1);
   return {
     ref,

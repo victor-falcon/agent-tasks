@@ -3,7 +3,7 @@ import { type Accessor, createSignal } from "solid-js";
 import { DAY } from "../output/time.ts";
 import type { RunStatus } from "../schema.ts";
 import { writeJsonAtomic } from "../store.ts";
-import type { DashRun } from "../tui/snapshot.ts";
+import type { DashRun } from "../dashboard.ts";
 
 // The attention "seen" state: a failure stays in Needs attention until it is
 // seen (opened in Run detail, or dismissed with `x` in the Overview). It is

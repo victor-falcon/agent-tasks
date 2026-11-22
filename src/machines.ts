@@ -59,7 +59,7 @@ export function sshMachines(config: UserConfig): RemoteTarget[] {
   return Object.entries(config.machines ?? {}).flatMap(([machine, entry]) => (entry.ssh !== undefined ? [{ machine, ssh: entry.ssh }] : []));
 }
 
-const UPDATE_HINT = "(git pull in its agent-tasks checkout)";
+const UPDATE_HINT = "(git pull, then bun install, in its agent-tasks checkout)";
 
 /**
  * The hub's check of a machine in its registry: it answers with the same

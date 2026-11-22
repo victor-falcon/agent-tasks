@@ -3,7 +3,7 @@ import { useTerminalDimensions } from "@opentui/solid";
 import { existsSync } from "node:fs";
 import { type Accessor, createEffect, createMemo, createSignal, For, Index, Match, onCleanup, onMount, Show, Switch, untrack } from "solid-js";
 import { displayTimezone } from "../../../task-info.ts";
-import { wrap } from "../../../tui/text.ts";
+import { wrap } from "../../text.ts";
 import { fitText, type Segment } from "../../components/cells.ts";
 import { Line } from "../../components/line.tsx";
 import { useApp } from "../../context.ts";
@@ -18,7 +18,7 @@ import { type Block, buildRunModel, type Geometry, logSegments, matchRows, moveI
 // One run, what it did first: its result (the summary as Markdown) and its
 // --output-file open, then folded sections for the details, the attempts,
 // the events and the captured log. j/k move between sections and scroll
-// through a long open one, as in the old dashboard; `/` searches the log.
+// through a long open one; `/` searches the log.
 // The run is read again on every reload, keeping the folds, the selection
 // and the scroll; leaving and coming back (to its task and back) finds them
 // as they were.

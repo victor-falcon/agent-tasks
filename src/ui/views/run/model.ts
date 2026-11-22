@@ -7,21 +7,21 @@ import { createStyle } from "../../../output/style.ts";
 import { RUN_MARKS } from "../../../output/symbols.ts";
 import { formatSpan } from "../../../output/time.ts";
 import { tildify } from "../../../paths.ts";
-import { attemptDuration, isInProgress, lastActivity, neverStarted } from "../../../run-info.ts";
+import { attemptDuration, isInProgress, neverStarted } from "../../../run-info.ts";
 import type { Run, SessionRecord, Task } from "../../../schema.ts";
 import { runRef, runSlotId } from "../../../slot.ts";
 import { readRunByRef, readTask } from "../../../store.ts";
 import { describeSchedule } from "../../../task-info.ts";
-import type { DashRun } from "../../../tui/snapshot.ts";
-import { sanitize } from "../../../tui/text.ts";
+import { type DashRun, dashRun } from "../../../dashboard.ts";
+import { sanitize } from "../../text.ts";
 import type { Segment } from "../../components/cells.ts";
 
-// What the Run detail shows, as plain data: the same sections as the old
-// dashboard's run view (src/tui/detail.ts, whose pieces it reuses: the
-// attempt and event renderers of `agent-tasks log`, the captured log, the
-// slot label), but as blocks a component renders (Markdown, code, lines of
-// colored cells) instead of ANSI strings cut to a width. Also the pure part
-// of moving through it: which section j/k select and where the view scrolls.
+// What the Run detail shows, as plain data: a run's sections (built from the
+// pieces `agent-tasks log` uses: the attempt and event renderers, the
+// captured log, the slot label), as blocks a component renders (Markdown,
+// code, lines of colored cells) instead of ANSI strings cut to a width.
+// Also the pure part of moving through it: which section j/k select and
+// where the view scrolls.
 
 export type SectionId = "result" | "output" | "details" | "attempts" | "events" | "log";
 
@@ -130,29 +130,6 @@ export function resultFacts(run: Run, timezone: string, now: Date): Segment[] {
   return facts.flatMap((fact, i) => (i === 0 ? fact : [{ text: " · ", color: "dim" as const }, ...fact]));
 }
 
-/**
- * The run as the shared actions see it (the dashboard's row shape), for runs
- * outside the snapshot too (older than its last 100). Mirrors snapshot.ts's
- * dashRun, which is not exported and src/tui stays untouched until T7.
- */
-function dashRunOf(ref: string, run: Run): DashRun {
-  const last = run.attempts.at(-1);
-  return {
-    ref,
-    task_id: run.task_id,
-    status: run.status,
-    slot: run.slot,
-    attempt: last?.n ?? 0,
-    started_at: last?.started_at ?? null,
-    finished_at: last?.finished_at ?? null,
-    at: lastActivity(run),
-    summary: last?.summary ?? null,
-    reason: last?.reason ?? run.reason ?? null,
-    handle: last?.session?.handle ?? null,
-    machine: last?.session?.machine ?? null,
-  };
-}
-
 /** Reads the run `ref` (throws when it is gone) and lays out its sections. */
 export function buildRunModel(ctx: Context, ref: string, timezone: string): RunModel {
   const run = readRunByRef(ctx.paths, ref);
@@ -253,7 +230,7 @@ export function buildRunModel(ctx: Context, ref: string, timezone: string): RunM
     sections.push({ id: "log", name: "Log", extra, blocks, open: !hasResult && !neverStarted(run.status) });
   }
 
-  return { ref: canonical, run, target: dashRunOf(canonical, run), summary, outputPath, blocked: run.status === "blocked", sections };
+  return { ref: canonical, run, target: dashRun({ ref: canonical, run }, null), summary, outputPath, blocked: run.status === "blocked", sections };
 }
 
 function sessionState(session: SessionRecord): string {

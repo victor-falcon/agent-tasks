@@ -8,8 +8,8 @@ import { agendaTime, clockTime, formatSpan, relativeTime } from "../../../output
 import { tildify } from "../../../paths.ts";
 import { lastTick } from "../../../runner-health.ts";
 import { pidAlive, readRunnerLock, runnerLogPath } from "../../../runner-lock.ts";
-import { parseLogLine } from "../../../tui/render.ts";
-import { tailLines } from "../../../tui/snapshot.ts";
+import { parseLogLine } from "./log-line.ts";
+import { tailLines } from "../../../dashboard.ts";
 import type { Segment } from "../../components/cells.ts";
 
 // What the System tab shows, as plain data so it is tested without a

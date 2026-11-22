@@ -5,7 +5,7 @@ import { agendaTime, clockTime, formatSpan, relativeTime } from "../../../output
 import type { RunStatus } from "../../../schema.ts";
 import { readTask } from "../../../store.ts";
 import { taskOverview } from "../../../task-info.ts";
-import type { Dashboard, DashNext, DashRun } from "../../../tui/snapshot.ts";
+import type { Dashboard, DashNext, DashRun } from "../../../dashboard.ts";
 import type { Target } from "../../actions.ts";
 import { buildRunPreview, type RunPreviewData } from "../../components/run-preview-model.ts";
 import { ATTENTION_WINDOW_MS, SEEABLE, type Seen } from "../../seen.ts";

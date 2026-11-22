@@ -2,7 +2,7 @@ import { type CliRenderer, createCliRenderer } from "@opentui/core";
 import { join } from "node:path";
 import { render } from "@opentui/solid";
 import type { Context } from "../context.ts";
-import type { CommandRunner } from "../tui/app.ts";
+import type { CommandRunner } from "./exec.ts";
 import { createActions } from "./actions.ts";
 import { Frame } from "./app.tsx";
 import { type App, AppContext } from "./context.ts";
@@ -17,7 +17,7 @@ import { createSuspend, type HandOver, waitForTerminalKey } from "./terminal.ts"
 import { createTheme, paletteGuard } from "./theme.ts";
 import { TABS } from "./views/registry.tsx";
 
-// Starting the new dashboard: a renderer on this terminal (or a test
+// Starting the dashboard: a renderer on this terminal (or a test
 // renderer), the store, the keymap and the actions, and the frame mounted
 // on it. Quitting goes through renderer.destroy(), which gives the terminal
 // back; the caller waits for `closed` before the process exits.
@@ -152,7 +152,7 @@ function seenFile(opts: AppOptions): string | null {
   }
 }
 
-/** Opens the new dashboard on this process's terminal. */
+/** Opens the dashboard on this process's terminal. */
 export async function startApp(opts: AppOptions): Promise<AppHandle> {
   const renderer = await createCliRenderer({
     exitOnCtrlC: false,

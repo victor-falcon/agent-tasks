@@ -5,7 +5,7 @@ import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testin
 import { commands } from "../src/commands/index.ts";
 import { createContext } from "../src/context.ts";
 import { archiveTask, readTask } from "../src/store.ts";
-import type { CommandRunner } from "../src/tui/app.ts";
+import type { CommandRunner } from "../src/ui/exec.ts";
 import { alignRow, columnWidths } from "../src/ui/components/cells.ts";
 import { matchesQuery } from "../src/ui/components/filter.ts";
 import { buildKeymap } from "../src/ui/keymap/config.ts";

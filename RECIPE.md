@@ -521,8 +521,9 @@ forwards them to the hub.
   the file the remote shell reads for non-interactive sessions (`~/.zshenv`
   for zsh, `~/.bashrc` before its interactive guard for bash).
 - Both machines on the same agent-tasks version (or at least the same
-  protocol): update with `git -C <checkout> pull` on both. A mismatch fails
-  with a message saying which machine to update.
+  protocol): update with `git -C <checkout> pull`, then `bun install` in
+  the checkout, on both. A mismatch fails with a message saying which
+  machine to update.
 
 ### The hub
 

@@ -3,12 +3,12 @@ import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testin
 import { commands } from "../src/commands/index.ts";
 import { createContext } from "../src/context.ts";
 import { writeRun } from "../src/store.ts";
-import type { CommandRunner } from "../src/tui/app.ts";
+import type { CommandRunner } from "../src/ui/exec.ts";
 import { buildKeymap, type TuiConfig } from "../src/ui/keymap/config.ts";
 import { type AppHandle, mountApp } from "../src/ui/main.tsx";
 import { reconcileSelection } from "../src/ui/components/list-navigation.ts";
 import { attentionRuns } from "../src/ui/views/overview/model.ts";
-import { buildDashboard } from "../src/tui/snapshot.ts";
+import { buildDashboard } from "../src/dashboard.ts";
 import { createSeen } from "../src/ui/seen.ts";
 import { VIEW_KEYS } from "../src/ui/views/keys.ts";
 import { DETAILS, TABS } from "../src/ui/views/registry.tsx";
@@ -139,7 +139,7 @@ describe("frame", () => {
     }
   });
 
-  test("the other tabs are placeholders; the tab keys and gt switch", async () => {
+  test("the tab keys and gt switch tabs", async () => {
     writeFixture(home.paths);
     const { screen, press } = await start();
     await press("2");

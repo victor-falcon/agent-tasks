@@ -2,8 +2,8 @@ import { capturedLog } from "../../commands/log.ts";
 import type { Context } from "../../context.ts";
 import { isFailure } from "../../run-info.ts";
 import { readRunByRef } from "../../store.ts";
-import { type DashRun, tailLines } from "../../tui/snapshot.ts";
-import { sanitize } from "../../tui/text.ts";
+import { type DashRun, tailLines } from "../../dashboard.ts";
+import { sanitize } from "../text.ts";
 
 // What the preview of one run shows, as plain data (tested without a
 // renderer); components/run-preview.tsx draws it.

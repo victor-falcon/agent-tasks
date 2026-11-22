@@ -2,15 +2,15 @@ import { existsSync } from "node:fs";
 import { localMachine } from "../config.ts";
 import { resolvePath, tildify } from "../paths.ts";
 import { isInProgress } from "../run-info.ts";
-import type { CommandRunner } from "../tui/app.ts";
-import type { DashRun } from "../tui/snapshot.ts";
+import type { CommandRunner } from "./exec.ts";
+import type { DashRun } from "../dashboard.ts";
 import { type Keymap, keyHint } from "./keymap/config.ts";
 import type { UiState } from "./state.ts";
 import type { Store } from "./store.ts";
 
 // What the dashboard does, for every view: each action runs the CLI's own
-// command (`agent-tasks retry <ref>`…), like the old dashboard, so the CLI
-// stays the only way to change anything. Cheap actions (pause, resume) run
+// command (`agent-tasks retry <ref>`…), so the CLI stays the only way to
+// change anything. Cheap actions (pause, resume) run
 // at once and can be undone from their toast; the ones that launch an agent
 // ask first. A view passes the selected run or task; this module says why
 // an action does not apply when it does not. Only reading needs no command:

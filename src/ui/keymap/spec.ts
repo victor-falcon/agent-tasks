@@ -31,13 +31,3 @@ export const GLOBAL_HINTS: readonly Hint[] = [
   { actions: ["help"], label: "keys" },
   { actions: ["quit"], label: "quit" },
 ];
-
-/** A tab that is not built yet: only the global keys. */
-export function placeholderTabKeys(id: string): ViewKeys {
-  return { id, actions: GLOBAL_ACTIONS, hints: [{ actions: ["tab_overview"], label: "overview" }, ...GLOBAL_HINTS] };
-}
-
-/** A detail view that is not built yet: back and the global keys (`q` and `<Esc>` go back here). */
-export function placeholderDetailKeys(id: string): ViewKeys {
-  return { id, actions: [...GLOBAL_ACTIONS.filter((a) => a !== "quit" && a !== "dismiss"), "back"], hints: [{ actions: ["back"], label: "back" }, { actions: ["help"], label: "keys" }] };
-}

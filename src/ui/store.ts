@@ -1,11 +1,11 @@
 import { type FSWatcher, watch } from "node:fs";
 import { type Accessor, batch, createSignal } from "solid-js";
 import type { Context } from "../context.ts";
-import { buildDashboard, type Dashboard } from "../tui/snapshot.ts";
+import { buildDashboard, type Dashboard } from "../dashboard.ts";
 
 // The data every view reads, as signals: the dashboard snapshot of the data
 // layer (buildDashboard, the same one `top --json` prints), the context it was
-// read with, and a clock. Refreshed like the old dashboard: a watcher on the
+// read with, and a clock. Refreshed by a watcher on the
 // data folder (debounced), a slow reload in case it misses something, and the
 // clock every second so relative times move.
 

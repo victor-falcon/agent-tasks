@@ -5,7 +5,7 @@ import type { Check } from "../src/checks.ts";
 import { commands } from "../src/commands/index.ts";
 import { createContext } from "../src/context.ts";
 import { runnerLogPath } from "../src/runner-lock.ts";
-import type { CommandRunner } from "../src/tui/app.ts";
+import type { CommandRunner } from "../src/ui/exec.ts";
 import { systemChecks } from "../src/ui/views/system/checks.ts";
 import {
   filterEvents,

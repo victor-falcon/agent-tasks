@@ -67,7 +67,7 @@ echo 'agent-tasks: unknown command "--client-protocol=1"' >&2; echo 'Run "agent-
     expect(human.code).toBe(1);
     expect(human.stdout).toBe("");
     expect(human.stderr).toBe(
-      'agent-tasks: the hub "hub" runs an older agent-tasks that does not know this client\'s protocol (1); update agent-tasks on the hub (git pull in its agent-tasks checkout)\n',
+      'agent-tasks: the hub "hub" runs an older agent-tasks that does not know this client\'s protocol (1); update agent-tasks on the hub (git pull, then bun install, in its agent-tasks checkout)\n',
     );
     const json = await s.cli("list", "--json");
     expect(json.code).toBe(1);
