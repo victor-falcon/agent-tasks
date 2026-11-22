@@ -273,7 +273,7 @@ describe("actions", () => {
     writeFixture(home.paths);
     const { screen, press } = await start();
     await press("j", "<CR>");
-    expect(await screen()).toContain("Run sentry-summary/20261117T080000Z is not in the new dashboard yet.");
+    expect(await screen()).toContain("sentry-summary/20261117T080000Z  ✕ failed · 3m");
     await press("h");
     expect(selectedRow(await screen())).toStartWith("✕ 09:10 sentry-summary");
   });
@@ -300,7 +300,7 @@ describe("mouse", () => {
     await s.mockMouse.click(10, y);
     expect(selectedRow(await screen())).toContain("inbox-triage");
     await s.mockMouse.doubleClick(10, y);
-    expect(await screen()).toContain("is not in the new dashboard yet.");
+    expect(await screen()).toContain("inbox-triage/20261117T050000Z  □ missed");
     text = await screen();
     await s.mockMouse.click(text.split("\n")[1]!.indexOf("System"), 1);
     expect(await screen()).toContain("The System tab");
