@@ -237,6 +237,21 @@ describe("header at narrow widths", () => {
     expect(at(10)).toBe(" | ■3 ✕1 □4 !1");
   });
 
+  test("a down runner keeps its reason longest: the title and the word today go first, then the reason is cut", () => {
+    writeFixture(home.paths, { ticks: false });
+    const ctx = createContext({ now: NOW, json: false, env: home.env, cwd: home.root, stdout: sink, stderr: sink, commands });
+    const i: HeaderInput = { title: "agent-tasks top", dash: buildDashboard(ctx), now: NOW, timezone: FIXTURE_TZ, machine: "wsl" };
+    const at = (width: number) => {
+      const { left, right } = headerSegments(i, width);
+      return `${text(left)} | ${text(right)}`;
+    };
+    expect(at(120)).toBe("agent-tasks top · ✕ runner not running · no tick recorded yet | today ■3 ✕1 □4 !1   hub: wsl");
+    expect(at(80)).toBe("✕ runner not running · no tick recorded yet | today ■3 ✕1 □4 !1");
+    expect(at(60)).toBe("✕ runner not running · no tick recorded yet | ■3 ✕1 □4 !1");
+    expect(at(50)).toBe("✕ runner not running · no tick rec… | ■3 ✕1 □4 !1");
+    expect(at(40)).toBe("✕ runner down | ■3 ✕1 □4 !1");
+  });
+
   for (const width of [60, 80, 120]) {
     test(`fits on one line at ${width} columns`, async () => {
       writeFixture(home.paths);

@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
-import { createSignal } from "solid-js";
+import { type Accessor, createSignal } from "solid-js";
 import { DAY } from "../output/time.ts";
 import type { RunStatus } from "../schema.ts";
 import { writeJsonAtomic } from "../store.ts";
@@ -19,11 +19,12 @@ import type { DashRun } from "../tui/snapshot.ts";
 //
 // Several dashboards share the file: each write re-reads it and merges
 // before writing (temp file + rename, so a reader never sees half of one),
-// and a reader re-reads it when it changed on disk, so a run dismissed in one
-// dashboard leaves the others too. Two writes at the same instant can still
-// lose one mark (the last rename wins); the run then shows again until it is
-// dismissed again, which is the safe way to be wrong. A missing or broken file
-// is an empty one.
+// and a reader re-reads it when it changed on disk (checked after each reload
+// of the data folder, which the write itself causes), so a run dismissed in
+// one dashboard leaves the others too. There is no lock: a write by another
+// dashboard between this one's read and its rename loses that mark; the run
+// then shows again until it is dismissed again, which is the safe way to be
+// wrong. A missing or broken file is an empty one.
 
 /** Failures and missed runs older than this leave Needs attention. */
 export const ATTENTION_WINDOW_MS = DAY;
@@ -31,9 +32,10 @@ export const ATTENTION_WINDOW_MS = DAY;
 /** What stays in Needs attention until seen (blocked runs stay while they are blocked, seen or not). */
 export const SEEABLE: readonly RunStatus[] = ["failed", "timed_out", "missed"];
 
-/** The run `ref` among the dashboard's recent runs when it is one Needs attention can show until seen, or null. */
-export function seeableRun(recent: readonly DashRun[], ref: string): DashRun | null {
-  return recent.find((r) => r.ref === ref && SEEABLE.includes(r.status)) ?? null;
+/** The run `ref` among the dashboard's recent runs when Needs attention can show it until seen (a failure or missed run of the window), or null. */
+export function seeableRun(recent: readonly DashRun[], ref: string, now: Date): DashRun | null {
+  const since = now.getTime() - ATTENTION_WINDOW_MS;
+  return recent.find((r) => r.ref === ref && SEEABLE.includes(r.status) && Date.parse(r.at) >= since) ?? null;
 }
 
 export interface Seen {
@@ -48,6 +50,8 @@ export interface SeenOptions {
   file: string | null;
   /** The dashboard's clock: marks of runs older than the attention window are dropped (they left Needs attention anyway). */
   now(): Date;
+  /** Bumped when the data folder changed (the store's reload): only then is the file checked for another dashboard's marks. Without it, on every read. */
+  changed?: Accessor<number>;
 }
 
 const FORMAT = 1;
@@ -80,42 +84,50 @@ function stamp(file: string): string {
   }
 }
 
-const isNewer = (a: string, b: string) => Date.parse(a) >= Date.parse(b);
+/** Whether a mark made when the run was at `mark` covers the run as it is at `at` (it has not changed since). */
+const covers = (mark: string, at: string) => Date.parse(mark) >= Date.parse(at);
 
 export function createSeen(opts: SeenOptions): Seen {
   // Bumped on every mark made here, so the views reading isSeen update at once.
   const [revision, setRevision] = createSignal(0);
   let marks: Marks = new Map();
+  /** The file's stamp when it was last read, and the reload it was checked at. */
   let read: string | null = null;
-
-  /** The marks, read again when the file changed (another dashboard wrote it). */
-  const current = (): Marks => {
-    if (opts.file === null) return marks;
-    const now = stamp(opts.file);
-    if (now !== read) {
-      // Keep what this dashboard marked but could not write (a full disk, say).
-      const merged = readMarks(opts.file);
-      for (const [ref, at] of marks) if (!merged.has(ref) || isNewer(at, merged.get(ref)!)) merged.set(ref, at);
-      marks = merged;
-      read = now;
-    }
-    return marks;
-  };
+  let checkedAt: number | null = null;
 
   const prune = (from: Marks): Marks => {
     const since = opts.now().getTime() - ATTENTION_WINDOW_MS;
     return new Map([...from].filter(([, at]) => Date.parse(at) >= since));
   };
 
+  /** Reads the file again if it changed since (another dashboard wrote it). */
+  const sync = () => {
+    if (opts.file === null) return;
+    const now = stamp(opts.file);
+    if (now === read) return;
+    // Keep what this dashboard marked but could not write (a full disk, say);
+    // pruned, so a mark another dashboard dropped does not come back.
+    const merged = readMarks(opts.file);
+    for (const [ref, at] of marks) if (!merged.has(ref) || covers(at, merged.get(ref)!)) merged.set(ref, at);
+    marks = prune(merged);
+    read = now;
+  };
+
   return {
     isSeen(ref, at) {
       revision();
-      const mark = current().get(ref);
-      return mark !== undefined && isNewer(mark, at);
+      const version = opts.changed?.() ?? null;
+      if (version === null || version !== checkedAt) {
+        sync();
+        checkedAt = version;
+      }
+      const mark = marks.get(ref);
+      return mark !== undefined && covers(mark, at);
     },
     markSeen(ref, at) {
-      const known = current().get(ref);
-      if (known !== undefined && isNewer(known, at)) return;
+      sync();
+      const known = marks.get(ref);
+      if (known !== undefined && covers(known, at)) return;
       marks = prune(new Map(marks).set(ref, at));
       if (opts.file !== null) {
         try {

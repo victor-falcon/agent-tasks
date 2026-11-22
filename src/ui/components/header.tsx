@@ -15,33 +15,44 @@ import { Line } from "./line.tsx";
 // whose data this is (a client's `top` runs here over SSH, on the hub).
 // On a narrow terminal it says less instead of running into itself: the
 // machine goes first, then the tick details, then the title; the health dot
-// and today's counts stay.
+// and today's counts stay (headerSegments).
 
 /** A tick this much past its time is late (the runner may be busy or asleep). */
 const LATE_MS = 60_000;
-/** Columns taken around the two halves: the box's padding and the least space between them. */
-const CHROME = 2 + 2;
+/** The box's padding (one column on each side) and the least space between the two halves. */
+const PADDING = 2;
+const MIN_GAP = 2;
+/** A down runner's reason is cut rather than dropped while this much of it fits. */
+const MIN_REASON = 12;
 
 const widthOf = (segments: readonly Segment[]) => segments.reduce((w, s) => w + Bun.stringWidth(s.text), 0);
 
-/** How much of the runner's line to show, from all of it (0) to the dot alone. */
-type RunnerDetail = 0 | 1 | 2 | 3 | 4;
+/**
+ * How much of the runner's line to show: everything, without the last tick,
+ * without the next tick either, the word alone, the dot alone. A down
+ * runner has no ticks to drop: its reason stays until "runner down".
+ */
+export type RunnerDetail = "full" | "no_last" | "no_ticks" | "word" | "dot";
 
-export function runnerSegments(dash: Dashboard, now: Date, timezone: string, detail: RunnerDetail = 0): Segment[] {
+export function runnerSegments(dash: Dashboard, now: Date, timezone: string, detail: RunnerDetail = "full"): Segment[] {
   const r = dash.runner;
   if (r.state !== "healthy") {
-    const mark = { text: "✕", color: "red" as const };
-    if (detail >= 4) return [mark];
-    if (detail >= 2) return [mark, { text: " runner down", color: "red" }];
+    const mark: Segment = { text: "✕", color: "red" };
+    if (detail === "dot") return [mark];
+    if (detail === "word") return [mark, { text: " runner down", color: "red" }];
     return [{ ...mark, text: "✕ runner not running" }, { text: ` · ${runnerDownReason(r, now)}` }];
   }
   const next = r.next_tick ? new Date(r.next_tick) : null;
   const late = next !== null && now.getTime() - next.getTime() > LATE_MS;
   const dot: Segment = { text: "●", color: late ? "yellow" : "green" };
-  if (detail >= 4) return [dot];
-  if (detail >= 3) return [dot, { text: " runner" }];
-  const nextSegment: Segment[] = next && detail <= 1 ? [{ text: ` · next ${clockTime(next, timezone)}`, color: late ? "yellow" : undefined }] : [];
-  return [dot, { text: ` runner every ${r.every}` }, ...(detail === 0 ? [{ text: ` · ticked ${clockTime(new Date(r.last_tick!), timezone)}` }] : []), ...nextSegment];
+  if (detail === "dot") return [dot];
+  if (detail === "word") return [dot, { text: " runner" }];
+  return [
+    dot,
+    { text: ` runner every ${r.every}` },
+    ...(detail === "full" ? [{ text: ` · ticked ${clockTime(new Date(r.last_tick!), timezone)}` }] : []),
+    ...(next && detail !== "no_ticks" ? [{ text: ` · next ${clockTime(next, timezone)}`, color: late ? ("yellow" as const) : undefined }] : []),
+  ];
 }
 
 export function todaySegments(dash: Dashboard, label = true): Segment[] {
@@ -64,42 +75,74 @@ export interface HeaderInput {
   machine: string;
 }
 
+/** One way to say the header, from the most detailed to the shortest. */
+interface Variant {
+  title: boolean;
+  runner: RunnerDetail;
+  /** The word "today" before the counts. */
+  label: boolean;
+  hub: boolean;
+}
+
+const VARIANTS: readonly Variant[] = [
+  { title: true, runner: "full", label: true, hub: true },
+  { title: true, runner: "full", label: true, hub: false },
+  { title: true, runner: "no_last", label: true, hub: false },
+  { title: true, runner: "no_ticks", label: true, hub: false },
+  { title: true, runner: "word", label: true, hub: false },
+  { title: false, runner: "word", label: true, hub: false },
+  { title: false, runner: "word", label: false, hub: false },
+  { title: false, runner: "dot", label: false, hub: false },
+];
+
+/** A down runner's reason matters more than the title and the word "today": those go first, then the reason is cut. */
+const DOWN_VARIANTS: readonly Variant[] = [
+  { title: true, runner: "full", label: true, hub: true },
+  { title: true, runner: "full", label: true, hub: false },
+  { title: false, runner: "full", label: true, hub: false },
+  { title: false, runner: "full", label: false, hub: false },
+  { title: false, runner: "word", label: false, hub: false },
+  { title: false, runner: "dot", label: false, hub: false },
+];
+
 /**
  * The header's two halves for a terminal `width` columns wide: the most
- * detailed version that fits, dropping the least useful part first (the
- * machine, the last tick, the next tick, the interval, the title, the word
- * "today"). When even the shortest does not fit, the left half is cut.
+ * detailed variant that fits (see VARIANTS for the order things go in).
+ * When even the shortest does not fit, the left half is cut.
  */
 export function headerSegments(input: HeaderInput, width: number): { left: Segment[]; right: Segment[] } {
   const { title, dash, now, timezone, machine } = input;
-  const titled = (runner: Segment[]): Segment[] => [{ text: title, color: "bold" }, { text: " · " }, ...runner];
-  const hub: Segment = { text: `   hub: ${machine}`, color: "dim" };
-  const variants: { left: Segment[]; right: Segment[] }[] = [
-    { left: titled(runnerSegments(dash, now, timezone, 0)), right: [...todaySegments(dash), hub] },
-    { left: titled(runnerSegments(dash, now, timezone, 0)), right: todaySegments(dash) },
-    { left: titled(runnerSegments(dash, now, timezone, 1)), right: todaySegments(dash) },
-    { left: titled(runnerSegments(dash, now, timezone, 2)), right: todaySegments(dash) },
-    { left: titled(runnerSegments(dash, now, timezone, 3)), right: todaySegments(dash) },
-    { left: runnerSegments(dash, now, timezone, 3), right: todaySegments(dash) },
-    { left: runnerSegments(dash, now, timezone, 3), right: todaySegments(dash, false) },
-    { left: runnerSegments(dash, now, timezone, 4), right: todaySegments(dash, false) },
-  ];
-  const fits = variants.find((v) => widthOf(v.left) + widthOf(v.right) + CHROME <= width);
-  if (fits) return fits;
+  const room = width - PADDING - MIN_GAP;
+  const build = (v: Variant) => ({
+    left: [...(v.title ? [{ text: title, color: "bold" as const }, { text: " · " }] : []), ...runnerSegments(dash, now, timezone, v.runner)],
+    right: [...todaySegments(dash, v.label), ...(v.hub ? [{ text: `   hub: ${machine}`, color: "dim" as const }] : [])],
+  });
+  const down = dash.runner.state !== "healthy";
+  let last = build(VARIANTS.at(-1)!);
+  for (const variant of down ? DOWN_VARIANTS : VARIANTS) {
+    const halves = build(variant);
+    const free = room - widthOf(halves.right);
+    if (widthOf(halves.left) <= free) return halves;
+    // A down runner's reason is cut while enough of it shows to be read.
+    if (down && variant.runner === "full" && !variant.label && free - widthOf(halves.left.slice(0, 1)) - 3 >= MIN_REASON) return { left: cutSegments(halves.left, free), right: halves.right };
+    last = halves;
+  }
   // Narrower than anything planned for: keep the counts, cut what is left of the line.
-  const last = variants.at(-1)!;
-  return { left: cutSegments(last.left, Math.max(0, width - CHROME - widthOf(last.right))), right: last.right };
+  return { left: cutSegments(last.left, Math.max(0, room - widthOf(last.right))), right: last.right };
 }
 
+/** The first `columns` columns of `segments`, the last one ending in `…` when cut. */
 function cutSegments(segments: readonly Segment[], columns: number): Segment[] {
+  if (widthOf(segments) <= columns) return [...segments];
   const out: Segment[] = [];
-  let room = columns;
+  let left = columns - 1;
   for (const s of segments) {
-    if (room <= 0) break;
-    const text = truncate(s.text, room);
+    if (left <= 0) break;
+    const text = truncate(s.text, left);
     out.push({ ...s, text });
-    room -= Bun.stringWidth(text);
+    left -= Bun.stringWidth(text);
   }
+  if (columns > 0) out.push({ text: "…" });
   return out;
 }
 

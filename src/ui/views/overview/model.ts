@@ -1,7 +1,7 @@
 import type { Context } from "../../../context.ts";
 import type { Color } from "../../../output/style.ts";
 import { PENDING_MARK, RUN_MARKS, TASK_MARKS } from "../../../output/symbols.ts";
-import { agendaTime, clockTime, DAY, formatSpan, relativeTime } from "../../../output/time.ts";
+import { agendaTime, clockTime, formatSpan, relativeTime } from "../../../output/time.ts";
 import type { RunStatus } from "../../../schema.ts";
 import { readTask } from "../../../store.ts";
 import { taskOverview } from "../../../task-info.ts";

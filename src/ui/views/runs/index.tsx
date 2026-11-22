@@ -35,12 +35,15 @@ import {
 // when the cursor, or the wheel, gets near the end of what is loaded. Above
 // the list, the filters as chips (`f` status, `S` since) and the `/` text
 // filter (the shared filter bar, over task id and summary or reason); on a
-// wide terminal, the selected run's preview on the right. The selection follows the run's
-// ref across reloads and pages.
+// wide terminal, the selected run's preview on the right. The selection
+// follows the run's ref across reloads and pages.
 
-/** What the tab keeps while a detail is open on top of it (the component is mounted again on the way back). The `/` text is kept by the filter bar. */
+/** The filters the chips set; the `/` text is the filter bar's (kept in the UI state). */
+type ChipFilter = Omit<RunsFilter, "text">;
+
+/** What the tab keeps while a detail is open on top of it (the component is mounted again on the way back). */
 interface Kept {
-  filter: Omit<RunsFilter, "text">;
+  filter: ChipFilter;
   limit: number;
   cache: RunCache;
 }
@@ -120,10 +123,10 @@ function Runs(props: ViewProps) {
     const first = page().runs[0];
     nav.select(first ? rowKey(first.ref) : null);
   };
-  const setFilters = (next: Omit<RunsFilter, "text">) => {
+  const setFilters = (next: ChipFilter) => {
     batch(() => {
       setChips(next);
-      setLimit(PAGE_SIZE);
+      setLimit(PAGE_SIZE); // read once, for the new filter's first page
     });
     restart();
   };

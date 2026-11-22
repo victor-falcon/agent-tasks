@@ -6,6 +6,7 @@ export const OVERVIEW_ACTIONS = {
   dismiss_attention: { desc: "Dismiss the selected failure from Needs attention (seen, without opening it)", keys: ["x"] },
 } as const satisfies ActionDefs;
 
+// `x` dismiss is left out of the footer (it only works on Needs attention, and the line is full at 100 columns); `?` lists it.
 export const OVERVIEW_KEYS: ViewKeys = {
   id: "overview",
   actions: [...GLOBAL_ACTIONS, ...LIST_ACTIONS, ...TARGET_ACTIONS, "dismiss_attention"],

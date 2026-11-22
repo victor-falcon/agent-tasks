@@ -101,7 +101,7 @@ export async function mountApp(renderer: CliRenderer, opts: AppOptions): Promise
     quit: () => actions.quit(),
   };
 
-  const seen = createSeen({ file: seenFile(opts), now: opts.now });
+  const seen = createSeen({ file: seenFile(opts), now: opts.now, changed: store.version });
   const app: App = { title: opts.title, renderer, store, ui, actions, theme, config: opts.config, keymap, seen, globalHandlers };
 
   // Ctrl-C always quits, whatever tui.toml says and whatever is open.

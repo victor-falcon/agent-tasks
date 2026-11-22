@@ -3,7 +3,7 @@ import { createMemo, Show } from "solid-js";
 import { displayTimezone } from "../../../task-info.ts";
 import { useListNavigation } from "../../components/list-navigation.ts";
 import { PREVIEW_MIN_WIDTH } from "../../components/run-preview.tsx";
-import { type ListSection, SectionList } from "../../components/section-list.tsx";
+import { type ListSection, listKeys, SectionList } from "../../components/section-list.tsx";
 import { useApp } from "../../context.ts";
 import { useViewKeys } from "../../keymap/layer.ts";
 import { seeableRun } from "../../seen.ts";
@@ -52,13 +52,13 @@ function Overview(props: ViewProps) {
     const key = nav.selected();
     if (!key) return;
     const { section, id } = parseKey(key);
-    const run = section === "attention" ? seeableRun(store.dash()?.recent ?? [], id) : null;
+    const run = section === "attention" ? seeableRun(store.dash()?.recent ?? [], id, store.now()) : null;
     if (!run) return void ui.toast(section === "attention" ? "a blocked run stays here until it is answered (a to attach)" : "only runs of Needs attention can be dismissed");
-    // The cursor goes to the next row, not to the top: keep it on the row below (or above) the dismissed one.
-    const rows = sections().flatMap((s) => s.rows.map((r) => r.key));
+    // The cursor takes the row below (the last one: above), not the same run down in Recent.
+    const rows = listKeys(sections());
     const at = rows.indexOf(key);
     app.seen.markSeen(run.ref, run.at);
-    const left = sections().flatMap((s) => s.rows.map((r) => r.key));
+    const left = listKeys(sections());
     nav.select(left.includes(rows[at + 1] ?? "") ? rows[at + 1]! : (left[Math.min(at, left.length - 1)] ?? null));
   };
 
