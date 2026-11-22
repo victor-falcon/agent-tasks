@@ -1,0 +1,5 @@
+# Solid's JSX transform for `bun test` (src/ui is .tsx). The CLI does not rely
+# on this file (it is not read when bin/agent-tasks runs from another folder):
+# src/ui/load.ts registers the same plugin before importing the UI.
+[test]
+preload = ["@opentui/solid/preload"]

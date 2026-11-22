@@ -1,0 +1,99 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`frame header, tabs, the Overview with its preview, footer (160 columns) 1`] = `
+" agent-tasks top · ● runner every 5m · ticked 10:00 · next 10:05                                                                 today ■3 ✕1 □4 !1   hub: local
+ 1 Overview   2 Tasks   3 Runs   4 System
+── Needs attention (6) ────────────────────────────────────────────────────────────────█│ ! blocked · review-pr-123 · 09:50 · for 12m
+› !  review-pr-123  blocked         since 09:50  12m                          local    █│ review-pr-123/20261117T083000Z
+  ✕  09:10          sentry-summary  3m           ×2   sentry-cli has no auth           █│
+  □  06:20          inbox-triage    –                 runner_offline                   █│ ╭───────────────────────────────────────────────────────────────────╮
+  □  04:20          sentry-summary  –                 runner_offline                   █│ │ Waiting for you. a attach to its session                          │
+  □  03:20          sentry-summary  –                 runner_offline                   █│ ╰───────────────────────────────────────────────────────────────────╯
+  □  02:20          sentry-summary  –                 runner_offline                   █│
+── Running (2) ────────────────────────────────────────────────────────────────────────█│ asks to confirm the merge
+  ◐  worktree-cleanup  running  since 09:58  4m  local                                 █│
+  ◐  sentry-summary    running  since 10:01  1m  local                                 █│
+── Next (6) ───────────────────────────────────────────────────────────────────────────█│
+  ○  11:00      sentry-summary      in 58m  every hour                                 █│
+  ○  Wed 06:00  inbox-triage        in 20h  every day 06:00                            █│
+  ○  Wed 08:00  worktree-cleanup    in 22h  every day 08:00                            █│
+  ○  Fri 09:00  release-notes       in 3d   Nov 20 09:00                               █│
+  ○  Mon 09:00  weekly-deps-report  in 6d   Mon 09:00                                  █│
+  ⏸  paused     backup-notes                every day 23:00                            █│
+── Recent (31) ────────────────────────────────────────────────────────────────────────█│
+  ✕  09:10         sentry-summary      3m  ×2  sentry-cli has no auth                  █│
+  ■  08:37         sentry-summary      6m      3 new issues in notes/sentry.md         █│
+  □  06:20         inbox-triage        –       runner_offline                          █│
+  □  04:20         sentry-summary      –       runner_offline                          █│
+  □  03:20         sentry-summary      –       runner_offline                          █│
+  □  02:20         sentry-summary      –       runner_offline                          █│
+  ■  01:04         sentry-summary      3m      1 new issue in notes/sentry.md          █│
+  ■  00:04         sentry-summary      3m      no new issues                           █│
+  ■  Mon 09:07     weekly-deps-report  6m      deps report in notes/deps.md            █│
+  ■  Mon 08:04     worktree-cleanup    3m      removed 2 worktrees                     ▀│
+  ■  Mon 06:04     inbox-triage        3m      inbox at zero                            │
+  ■  Sun 08:04     worktree-cleanup    3m      removed 2 worktrees                      │
+  ■  Sun 06:04     inbox-triage        3m      inbox at zero                            │
+  ■  Sat 08:04     worktree-cleanup    3m      removed 2 worktrees                      │
+  ■  Sat 06:04     inbox-triage        3m      inbox at zero                            │
+  ■  Fri 23:04     backup-notes        3m      backed up                                │
+  ✕  Fri 08:04     worktree-cleanup    3m      git worktree prune failed                │
+  ■  Thu 23:04     backup-notes        3m      backed up                                │
+  ■  Thu 08:04     worktree-cleanup    3m      removed 2 worktrees                      │
+ j/k move · <Tab> section · <CR> open · a attach · r retry · R run · p pause · ? keys · q quit
+"
+`;
+
+exports[`frame below 120 columns the preview hides 1`] = `
+" agent-tasks top · ● runner every 5m · ticked 10:00 · next 10:05     today ■3 ✕1 □4 !1   hub: local
+ 1 Overview   2 Tasks   3 Runs   4 System
+── Needs attention (6) ────────────────────────────────────────────────────────────────────────────█
+› !  review-pr-123  blocked         since 09:50  12m                          local                █
+  ✕  09:10          sentry-summary  3m           ×2   sentry-cli has no auth                       █
+  □  06:20          inbox-triage    –                 runner_offline                               █
+  □  04:20          sentry-summary  –                 runner_offline                               █
+  □  03:20          sentry-summary  –                 runner_offline                               █
+  □  02:20          sentry-summary  –                 runner_offline                               █
+── Running (2) ────────────────────────────────────────────────────────────────────────────────────█
+  ◐  worktree-cleanup  running  since 09:58  4m  local                                             █
+  ◐  sentry-summary    running  since 10:01  1m  local                                             █
+── Next (6) ───────────────────────────────────────────────────────────────────────────────────────█
+  ○  11:00      sentry-summary      in 58m  every hour                                             █
+  ○  Wed 06:00  inbox-triage        in 20h  every day 06:00                                        █
+  ○  Wed 08:00  worktree-cleanup    in 22h  every day 08:00                                        █
+  ○  Fri 09:00  release-notes       in 3d   Nov 20 09:00                                           ▀
+  ○  Mon 09:00  weekly-deps-report  in 6d   Mon 09:00
+  ⏸  paused     backup-notes                every day 23:00
+── Recent (31) ────────────────────────────────────────────────────────────────────────────────────
+  ✕  09:10         sentry-summary      3m  ×2  sentry-cli has no auth
+  ■  08:37         sentry-summary      6m      3 new issues in notes/sentry.md
+  □  06:20         inbox-triage        –       runner_offline
+  □  04:20         sentry-summary      –       runner_offline
+  □  03:20         sentry-summary      –       runner_offline
+  □  02:20         sentry-summary      –       runner_offline
+  ■  01:04         sentry-summary      3m      1 new issue in notes/sentry.md
+  ■  00:04         sentry-summary      3m      no new issues
+  ■  Mon 09:07     weekly-deps-report  6m      deps report in notes/deps.md
+ j/k move · <Tab> section · <CR> open · a attach · r retry · R run · p pause · ? keys · q quit
+"
+`;
+
+exports[`frame no tasks yet 1`] = `
+" agent-tasks top · ✕ runner not running · no tick recorded yet       today ■0 ✕0 □0 !0   hub: local
+ 1 Overview   2 Tasks   3 Runs   4 System
+── Running (0) ─────────────────────────────────────────────────────────────────────────────────────
+  nothing running
+── Next (0) ────────────────────────────────────────────────────────────────────────────────────────
+  nothing scheduled
+── Recent (0) ──────────────────────────────────────────────────────────────────────────────────────
+  no runs yet
+
+
+
+
+
+
+
+ j/k move · <Tab> section · <CR> open · a attach · r retry · R run · p pause · ? keys · q quit
+"
+`;

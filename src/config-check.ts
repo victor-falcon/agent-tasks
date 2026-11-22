@@ -10,6 +10,7 @@ import { type Env, resolveConfigLocation, resolvePath, tildify } from "./paths.t
 import type { AgentSpec } from "./schema.ts";
 import { TASK_TEMPLATE_VARIABLES } from "./task-context.ts";
 import { loadKeymap, TUI_CONFIG_FILE } from "./tui/keys.ts";
+import { loadTuiConfig } from "./ui/keymap/config.ts";
 import { variablesIn } from "./template.ts";
 
 // `agent-tasks config check`: everything in the user's config folder that
@@ -226,6 +227,8 @@ export function configLoadCheck(ctx: Context): { loaded: LoadedConfig | null; ch
 export function tuiChecks(configDir: string, env: Env): Check[] {
   try {
     const { file } = loadKeymap(configDir);
+    // The new dashboard (`top --next`) reads the same file and adds its own actions and checks.
+    loadTuiConfig(configDir);
     return file ? [ok("config.tui", `keys: ${tildify(file, env)} is valid`)] : [];
   } catch (err) {
     if (!(err instanceof AgentTasksError)) throw err;

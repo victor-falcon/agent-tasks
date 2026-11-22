@@ -1,9 +1,12 @@
 import { parseCommandArgs } from "../args.ts";
-import { createContext, output } from "../context.ts";
+import { type Context, createContext, output } from "../context.ts";
 import { stdoutStyle } from "../output/style.ts";
 import { displayTimezone } from "../task-info.ts";
 import { initialState, renderFrame } from "../tui/render.ts";
 import { buildDashboard, canShowDashboard, loadKeymap, startDashboard } from "../tui/index.ts";
+import { selfCommand } from "../tui/app.ts";
+import { loadTuiConfig } from "../ui/keymap/config.ts";
+import { type AppHandle, startNewDashboard } from "../ui/load.ts";
 import type { Command } from "./types.ts";
 
 const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
@@ -44,11 +47,13 @@ Keys can be changed in tui.toml in the config folder
 With --json, prints the data once and exits. When stdout is not a terminal,
 prints a single frame.`,
   async run(ctx, args) {
-    parseCommandArgs(args, {}, { maxPositionals: 0 });
+    // --next: the new dashboard (src/ui), not documented until it replaces this one.
+    const { values } = parseCommandArgs(args, { next: { type: "boolean" } }, { maxPositionals: 0 });
     if (ctx.json) {
       output(ctx, buildDashboard(ctx), "");
       return;
     }
+    if (values.next && canShowDashboard(ctx.stdout)) return await topNext(ctx);
     const keymap = loadKeymap(ctx.paths.configDir);
     if (!canShowDashboard(ctx.stdout)) {
       const frame = renderFrame({
@@ -88,5 +93,42 @@ prints a single frame.`,
     });
   },
 };
+
+/** `top --next`: the new dashboard, until the old one goes. */
+async function topNext(ctx: Context): Promise<number> {
+  // Read before taking the screen, so a broken tui.toml stops here.
+  const config = loadTuiConfig(ctx.paths.configDir);
+  const offset = ctx.now.getTime() - Date.now();
+  const now = () => new Date(Date.now() + offset);
+  let handle: AppHandle | null = null;
+  let finished = false;
+  let resolveQuit!: () => void;
+  const quit = new Promise<void>((resolve) => (resolveQuit = resolve));
+  const done = () => {
+    if (finished) return;
+    finished = true;
+    handle?.stop();
+    resolveQuit();
+  };
+  for (const signal of SIGNALS) process.on(signal, done);
+  try {
+    handle = await startNewDashboard({
+      title: "agent-tasks top",
+      config,
+      now,
+      context: (at) => createContext({ now: at, json: false, env: ctx.env, cwd: ctx.cwd, stdout: ctx.stdout, stderr: ctx.stderr, commands: ctx.commands }),
+      env: ctx.env,
+      exec: selfCommand(ctx.env),
+      watchDir: ctx.paths.dataDir,
+      onQuit: done,
+    });
+    if (finished) handle.stop(); // a signal came while it was starting
+    await quit;
+    await handle.closed;
+    return 0;
+  } finally {
+    for (const signal of SIGNALS) process.off(signal, done);
+  }
+}
 
 export default top;

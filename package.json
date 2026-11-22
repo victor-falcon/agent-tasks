@@ -12,7 +12,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "croner": "^11.0.1"
+    "@opentui/core": "0.9.7",
+    "@opentui/keymap": "0.9.7",
+    "@opentui/solid": "0.9.7",
+    "croner": "^11.0.1",
+    "solid-js": "1.9.20"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",
