@@ -5,13 +5,14 @@ import type { CommandRunner } from "../tui/app.ts";
 import { createActions } from "./actions.ts";
 import { Frame } from "./app.tsx";
 import { type App, AppContext } from "./context.ts";
-import type { Action } from "./keymap/actions.ts";
 import type { TuiConfig } from "./keymap/config.ts";
 import { createAppKeymap } from "./keymap/vim.ts";
 import { createSeen } from "./seen.ts";
-import { createUiState, TAB_IDS, type TabId } from "./state.ts";
+import { createUiState, TAB_IDS } from "./state.ts";
 import { createStore } from "./store.ts";
+import { createSuspend, type HandOver, waitForTerminalKey } from "./terminal.ts";
 import { createTheme, paletteGuard } from "./theme.ts";
+import { TABS } from "./views/registry.tsx";
 
 // Starting the new dashboard: a renderer on this terminal (or a test
 // renderer), the store, the keymap and the actions, and the frame mounted
@@ -35,7 +36,7 @@ export interface AppOptions {
   /** After a command that had the terminal fails: wait for a key so its error can be read. */
   waitForKey?: () => Promise<void>;
   /** How the terminal is handed to a command (attach) and taken back: the renderer's suspend/resume unless replaced (tests). */
-  handOver?: { suspend(): Promise<void>; resume(): Promise<void> };
+  handOver?: HandOver;
 }
 
 export interface AppHandle {
@@ -45,20 +46,6 @@ export interface AppHandle {
   readonly isRunning: boolean;
   /** Settles once the terminal is given back. */
   closed: Promise<void>;
-}
-
-/** One key from the real terminal, in raw mode. */
-function waitForTerminalKey(): Promise<void> {
-  return new Promise((resolve) => {
-    const { stdin } = process;
-    stdin.setRawMode?.(true);
-    stdin.resume();
-    stdin.once("data", () => {
-      stdin.setRawMode?.(false);
-      stdin.pause();
-      resolve();
-    });
-  });
 }
 
 export async function mountApp(renderer: CliRenderer, opts: AppOptions): Promise<AppHandle> {
@@ -82,36 +69,13 @@ export async function mountApp(renderer: CliRenderer, opts: AppOptions): Promise
     opts.onQuit();
   };
 
-  const suspend = async (run: () => Promise<number>) => {
-    const handOver = opts.handOver ?? renderer;
-    store.setPaused(true);
-    await handOver.suspend();
-    let code: number;
-    try {
-      code = await run();
-    } catch (err) {
-      code = 1;
-      process.stdout.write(`agent-tasks: ${(err as Error).message}\n`);
-    }
-    if (code !== 0) {
-      // Leave its error on screen until a key is pressed.
-      process.stdout.write("\nPress any key to go back to the dashboard…");
-      await (opts.waitForKey ?? waitForTerminalKey)();
-    }
-    store.setPaused(false);
-    if (!running) return;
-    await handOver.resume();
-    store.reload();
-  };
+  const suspend = createSuspend({ handOver: opts.handOver ?? renderer, store, waitForKey: opts.waitForKey ?? waitForTerminalKey, running: () => running });
 
   const actions = createActions({ store, ui, keymap: opts.config.keymap, exec: opts.exec, suspend, quit });
-  const tabHandler = (tab: TabId) => () => ui.setTab(tab);
   const cycle = (by: number) => () => ui.setTab(TAB_IDS[(TAB_IDS.indexOf(ui.tab()) + by + TAB_IDS.length) % TAB_IDS.length]!);
   const globalHandlers: App["globalHandlers"] = {
-    tab_overview: tabHandler("overview"),
-    tab_tasks: tabHandler("tasks"),
-    tab_runs: tabHandler("runs"),
-    tab_system: tabHandler("system"),
+    // Each tab's own action (tab_overview…), from the registry.
+    ...Object.fromEntries(TAB_IDS.map((id) => [TABS[id].action, () => ui.setTab(id)])),
     next_tab: cycle(1),
     prev_tab: cycle(-1),
     refresh: () => store.reload(),
@@ -120,7 +84,7 @@ export async function mountApp(renderer: CliRenderer, opts: AppOptions): Promise
     dismiss: () => ui.dismiss(),
     back: () => void ui.pop(),
     quit: () => actions.quit(),
-  } satisfies Partial<Record<Action, () => void>>;
+  };
 
   const app: App = { title: opts.title, renderer, store, ui, actions, theme, config: opts.config, keymap, seen: createSeen(), globalHandlers };
 

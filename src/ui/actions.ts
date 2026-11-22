@@ -13,7 +13,7 @@ import type { Store } from "./store.ts";
 // an action does not apply when it does not.
 
 /** What an action acts on: a run, or a task with no run in hand. */
-export type Target = { kind: "run"; run: DashRun } | { kind: "task"; taskId: string; paused: boolean };
+export type Target = { kind: "run"; run: DashRun } | { kind: "task"; taskId: string };
 
 export interface ActionsOptions {
   store: Store;
@@ -47,6 +47,13 @@ function taskOf(target: Target): string {
 export function createActions(opts: ActionsOptions): Actions {
   const { store, ui, exec } = opts;
 
+  /** Errors stay until dismissed: say how. */
+  const dismissHint = () => {
+    const key = keyHint(opts.keymap, "dismiss");
+    return key ? ` · ${key} dismiss` : "";
+  };
+  const error = (text: string) => ui.toast(`${text}${dismissHint()}`, { error: true });
+
   const isPaused = (taskId: string) => store.dash()?.next.some((n) => n.task_id === taskId && n.state === "paused") ?? false;
 
   const background = async (args: string[], doing: string) => {
@@ -65,7 +72,7 @@ export function createActions(opts: ActionsOptions): Actions {
   };
 
   const report = (code: number, first: string, doing: string, undo?: () => void) => {
-    if (code !== 0) return ui.toast(`${doing} failed: ${first || `exit code ${code}`}`, { error: true });
+    if (code !== 0) return error(`${doing} failed: ${first || `exit code ${code}`}`);
     const key = undo ? keyHint(opts.keymap, "undo") : null;
     return ui.toast(`${first || `${doing}: done`}${key ? ` · ${key} undo` : ""}`, { undo });
   };
@@ -83,7 +90,7 @@ export function createActions(opts: ActionsOptions): Actions {
     async attach(target) {
       if (!target) return;
       if (target.kind !== "run" || !isInProgress(target.run.status)) {
-        ui.toast("only running or blocked runs have a session to attach to; open the run to read its log", { error: true });
+        error("only running or blocked runs have a session to attach to; open the run to read its log");
         return;
       }
       const ref = target.run.ref;
@@ -92,7 +99,7 @@ export function createActions(opts: ActionsOptions): Actions {
     retry(target) {
       if (!target) return;
       if (target.kind !== "run" || !RETRYABLE.includes(target.run.status)) {
-        ui.toast("only failed, timed-out or missed runs can be retried", { error: true });
+        error("only failed, timed-out or missed runs can be retried");
         return;
       }
       const ref = target.run.ref;
@@ -114,8 +121,7 @@ export function createActions(opts: ActionsOptions): Actions {
     async togglePause(target) {
       if (!target) return;
       const id = taskOf(target);
-      const paused = target.kind === "task" ? target.paused : isPaused(id);
-      await setPaused(id, !paused, true);
+      await setPaused(id, !isPaused(id), true);
     },
     undo() {
       const toast = [...ui.toasts()].reverse().find((t) => t.undo);

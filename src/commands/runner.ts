@@ -5,8 +5,8 @@ import { isDuration } from "../duration.ts";
 import { UsageError } from "../errors.ts";
 import { interruptibleSleep, runRunner } from "../runner.ts";
 import { releaseRunnerLock } from "../runner-lock.ts";
-import { canShowDashboard, loadKeymap, startDashboard } from "../tui/index.ts";
 import { selfCommand } from "../tui/app.ts";
+import { canShowDashboard, loadKeymap, startDashboard } from "../tui/index.ts";
 import { loadTuiConfig } from "../ui/keymap/config.ts";
 import { startNewDashboard } from "../ui/load.ts";
 import type { Command } from "./types.ts";
@@ -58,6 +58,8 @@ Options:
     const nextConfig = next ? loadTuiConfig(ctx.paths.configDir) : null;
     // The old dashboard (Tui) or the new one (AppHandle, which gives the terminal back asynchronously: `closed`).
     let tui = null as { stop(): void; readonly isRunning: boolean; closed?: Promise<void> } | null;
+    /** The new dashboard while it starts (it is async): waited for before giving the terminal back. */
+    let starting: Promise<void> | null = null;
 
     // The clock is the real time, shifted so that the first tick happens at `--now`.
     const offset = ctx.now.getTime() - Date.now();
@@ -87,10 +89,13 @@ Options:
           pid: process.pid,
           onStarted: () => {
             if (nextConfig) {
-              void startNewDashboard({ title: "agent-tasks runner", config: nextConfig, now, context, env: ctx.env, exec: selfCommand(ctx.env), watchDir: ctx.paths.dataDir, onQuit: stop }).then((handle) => {
-                tui = handle;
-                if (controller.signal.aborted) handle.stop(); // stopped while it was starting
-              }, (err) => ctx.stderr.write(`agent-tasks: the dashboard could not start: ${(err as Error).message}\n`));
+              starting = startNewDashboard({ title: "agent-tasks runner", config: nextConfig, now, context, env: ctx.env, exec: selfCommand(ctx.env), watchDir: ctx.paths.dataDir, onQuit: stop }).then(
+                (handle) => {
+                  tui = handle;
+                  if (controller.signal.aborted) handle.stop(); // stopped while it was starting
+                },
+                (err) => void ctx.stderr.write(`agent-tasks: the dashboard could not start (${(err as Error).message}); carrying on without it\n`),
+              );
               return;
             }
             if (!keymap) return;
@@ -100,6 +105,7 @@ Options:
         },
       );
     } finally {
+      await starting;
       tui?.stop();
       await tui?.closed;
       for (const signal of SIGNALS) process.off(signal, stop);

@@ -1,11 +1,13 @@
 import { useTerminalDimensions } from "@opentui/solid";
-import { createEffect, createMemo, on, Show } from "solid-js";
+import { createMemo, Show } from "solid-js";
 import { displayTimezone } from "../../../task-info.ts";
-import { type ListSection, listKeys, SectionList } from "../../components/section-list.tsx";
+import { useListNavigation } from "../../components/list-navigation.ts";
+import { type ListSection, SectionList } from "../../components/section-list.tsx";
 import { useApp } from "../../context.ts";
 import { useViewKeys } from "../../keymap/layer.ts";
+import type { TabDef, ViewProps } from "../types.ts";
 import { OVERVIEW_KEYS } from "./keys.ts";
-import { overviewSections, parseKey, reconcileSelection, targetOf } from "./model.ts";
+import { overviewSections, parseKey, targetOf } from "./model.ts";
 import { Preview } from "./preview.tsx";
 
 // Home: what needs you, what runs, what comes next and what just happened,
@@ -15,11 +17,8 @@ import { Preview } from "./preview.tsx";
 
 /** From this width on, the list shares the screen with the preview. */
 export const PREVIEW_MIN_WIDTH = 120;
-const VIEW = "overview";
-/** Rows taken by the header, the tab bar and the footer. */
-const CHROME_ROWS = 3;
 
-export function Overview() {
+function Overview(props: ViewProps) {
   const app = useApp();
   const { store, ui, actions } = app;
   const dims = useTerminalDimensions();
@@ -30,41 +29,16 @@ export function Overview() {
     if (!dash || !ctx) return [];
     return overviewSections({ dash, now: store.now(), timezone: displayTimezone(ctx), seen: app.seen }).map((s) => ({ ...s, color: s.id === "attention" ? ("magenta" as const) : undefined }));
   });
-  const keys = createMemo(() => listKeys(sections()), undefined, { equals: (a, b) => a.length === b.length && a.every((k, i) => k === b[i]) });
-  const selected = () => ui.selection(VIEW);
-
-  // Keep the selection on the same run or task when the rows change.
-  createEffect(
-    on(keys, (now, before) => {
-      const next = reconcileSelection(sections(), selected(), before ?? []);
-      if (next !== selected()) ui.select(VIEW, next);
-    }),
-  );
+  const nav = useListNavigation("overview", sections);
 
   const showPreview = () => dims().width >= PREVIEW_MIN_WIDTH;
   const listWidth = () => (showPreview() ? Math.floor(dims().width * 0.55) : dims().width);
-  const halfPage = () => Math.max(1, Math.floor((dims().height - CHROME_ROWS) / 2));
   const target = () => {
     const dash = store.dash();
-    return dash ? targetOf(dash, selected()) : null;
+    return dash ? targetOf(dash, nav.selected()) : null;
   };
 
-  const moveTo = (index: number) => {
-    const all = keys();
-    if (all.length === 0) return;
-    ui.select(VIEW, all[Math.max(0, Math.min(all.length - 1, index))]!);
-  };
-  const move = (by: number) => moveTo(Math.max(0, keys().indexOf(selected() ?? "")) + by);
-  /** First row of the next (or previous) section that has rows, wrapping around. */
-  const jumpSection = (direction: 1 | -1) => {
-    const filled = sections().filter((s) => s.rows.length > 0);
-    if (filled.length === 0) return;
-    const here = filled.findIndex((s) => s.rows.some((r) => r.key === selected()));
-    const next = filled[(Math.max(0, here) + direction + filled.length) % filled.length]!;
-    ui.select(VIEW, next.rows[0]!.key);
-  };
-
-  const open = (key = selected()) => {
+  const open = (key = nav.selected()) => {
     if (!key) return;
     const { section, id } = parseKey(key);
     if (section === "next") return ui.push({ view: "task", params: { id } });
@@ -72,15 +46,8 @@ export function Overview() {
     ui.push({ view: "run", params: { ref: id } });
   };
 
-  useViewKeys(OVERVIEW_KEYS, {
-    down: (n) => move(n),
-    up: (n) => move(-n),
-    first: () => moveTo(0),
-    last: () => moveTo(Infinity),
-    half_page_down: () => move(halfPage()),
-    half_page_up: () => move(-halfPage()),
-    next_panel: () => jumpSection(1),
-    prev_panel: () => jumpSection(-1),
+  useViewKeys(props.keys, {
+    ...nav.handlers,
     open: () => open(),
     attach: () => void actions.attach(target()),
     retry: () => actions.retry(target()),
@@ -90,10 +57,12 @@ export function Overview() {
 
   return (
     <box flexDirection="row" flexGrow={1}>
-      <SectionList sections={sections()} selected={selected()} width={listWidth()} onSelect={(key) => ui.select(VIEW, key)} onOpen={open} />
+      <SectionList sections={sections()} selected={nav.selected()} width={listWidth()} onSelect={nav.select} onOpen={open} />
       <Show when={showPreview()}>
-        <Preview rowKey={selected()} width={dims().width - listWidth()} />
+        <Preview rowKey={nav.selected()} width={dims().width - listWidth()} />
       </Show>
     </box>
   );
 }
+
+export const OVERVIEW_TAB: TabDef = { title: "Overview", action: "tab_overview", keys: OVERVIEW_KEYS, component: Overview };

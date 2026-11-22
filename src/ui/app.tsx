@@ -25,7 +25,7 @@ export function Frame() {
       <box flexGrow={1} flexDirection="column">
         <Show when={app.store.dash()} fallback={<Line segments={[{ text: app.store.loadError() ? `  agent-tasks: ${app.store.loadError()}` : "  loading…", color: app.store.loadError() ? "red" : "dim" }]} />}>
           <Show when={route()} keyed>
-            {(r: Route) => <Dynamic component={viewOf(r).component} params={r.params} />}
+            {(r: Route) => <Dynamic component={viewOf(r).component} params={r.params} keys={viewOf(r).keys} />}
           </Show>
         </Show>
       </box>

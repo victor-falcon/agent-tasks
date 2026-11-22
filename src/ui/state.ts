@@ -67,7 +67,7 @@ export interface UiState {
 
 export function createUiState(initialTab: TabId = "overview"): UiState {
   const [tab, setTab] = createSignal<TabId>(initialTab);
-  const [stacks, setStacks] = createSignal<Record<TabId, Route[]>>({ overview: [], tasks: [], runs: [], system: [] });
+  const [stacks, setStacks] = createSignal(Object.fromEntries(TAB_IDS.map((id) => [id, []])) as unknown as Record<TabId, Route[]>);
   const [selections, setSelections] = createSignal<Record<string, string | null>>({});
   const [toasts, setToasts] = createSignal<readonly Toast[]>([]);
   const [busy, setBusy] = createSignal<readonly Busy[]>([]);

@@ -1,4 +1,8 @@
+import type { ActionDefs } from "../../keymap/defs.ts";
 import { GLOBAL_ACTIONS, GLOBAL_HINTS, LIST_ACTIONS, TARGET_ACTIONS, type ViewKeys } from "../../keymap/spec.ts";
+
+/** Actions only this view has (name → description and default keys); none yet. */
+export const OVERVIEW_ACTIONS = {} as const satisfies ActionDefs;
 
 export const OVERVIEW_KEYS: ViewKeys = {
   id: "overview",

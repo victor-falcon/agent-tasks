@@ -293,12 +293,12 @@ export function loadKeymap(configDir: string): { keymap: Keymap; file: string | 
   const root = parsed as Record<string, unknown>;
   // `mouse` and the new dashboard's actions belong to src/ui (see src/ui/keymap/config.ts, which validates them).
   const unknown = Object.keys(root).filter((k) => k !== "keys" && k !== "mouse");
-  if (unknown.length > 0) throw new ConfigError(file, unknown.map((k) => `${k}: unknown setting (only [keys] is read)`));
+  if (unknown.length > 0) throw new ConfigError(file, unknown.map((k) => `${k}: unknown setting (only [keys] and mouse are read)`));
   const keys = root.keys ?? {};
   if (typeof keys !== "object" || keys === null || Array.isArray(keys)) throw new ConfigError(file, ["keys: must be a table, e.g. [keys]"]);
-  const ours = Object.fromEntries(Object.entries(keys).filter(([action]) => !isNewAction(action)));
+  const v1Keys = Object.fromEntries(Object.entries(keys).filter(([action]) => !isNewAction(action)));
   try {
-    return { keymap: buildKeymap(ours), file };
+    return { keymap: buildKeymap(v1Keys), file };
   } catch (err) {
     if (err instanceof KeymapError) throw new ConfigError(file, err.details);
     throw err;

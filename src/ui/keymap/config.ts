@@ -4,6 +4,7 @@ import { ConfigError } from "../../errors.ts";
 import { type Binding, KeymapError, parseKeys, TUI_CONFIG_FILE } from "../../tui/keys.ts";
 import { VIEW_KEYS } from "../views/keys.ts";
 import { ACTIONS, type Action, DEFAULT_KEYS } from "./actions.ts";
+import { isNewAction } from "./new-actions.ts";
 import type { ViewKeys } from "./spec.ts";
 
 // tui.toml for the new dashboard: the old file format ([keys] with the same
@@ -46,9 +47,34 @@ export function buildKeymap(overrides: Record<string, unknown> = {}, views: read
       errors.push(`keys.${action}: ${(err as Error).message}`);
     }
   }
-  if (errors.length === 0) errors.push(...conflicts(keymap, views));
+  if (errors.length === 0) {
+    yieldToUser(keymap, new Set(Object.keys(overrides) as Action[]), views);
+    errors.push(...conflicts(keymap, views));
+  }
   if (errors.length > 0) throw new KeymapError(errors);
   return keymap;
+}
+
+/** Whether two bindings clash: the same keys, or one's keys start the other's. */
+function clash(a: Binding, b: Binding): boolean {
+  const [short, long] = a.keys.length <= b.keys.length ? [a, b] : [b, a];
+  return short.keys.every((k, n) => long.keys[n] === k);
+}
+
+/**
+ * A tui.toml written for the old dashboard may already use a key that a new
+ * action takes by default (`retry = "u"`, `attach = "1"`). The user's choice
+ * wins: the new action loses that default key in the views where both are
+ * bound (it keeps it if the user set the new action too, and then a clash is
+ * reported as usual).
+ */
+function yieldToUser(keymap: Keymap, overridden: ReadonlySet<Action>, views: readonly ViewKeys[]): void {
+  for (const action of Object.keys(keymap) as Action[]) {
+    if (!isNewAction(action) || overridden.has(action)) continue;
+    const mine = views.filter((v) => v.actions.includes(action));
+    const theirs = mine.flatMap((v) => v.actions.filter((a) => a !== action && overridden.has(a)).flatMap((a) => keymap[a]));
+    keymap[action] = keymap[action].filter((b) => !theirs.some((t) => clash(b, t)));
+  }
 }
 
 /** Two actions of the same view on the same keys, or one's keys a prefix of the other's (it would never fire). */

@@ -6,9 +6,12 @@ import { writeRun } from "../src/store.ts";
 import type { CommandRunner } from "../src/tui/app.ts";
 import { buildKeymap, type TuiConfig } from "../src/ui/keymap/config.ts";
 import { type AppHandle, mountApp } from "../src/ui/main.tsx";
-import { attentionRuns, reconcileSelection } from "../src/ui/views/overview/model.ts";
+import { reconcileSelection } from "../src/ui/components/list-navigation.ts";
+import { attentionRuns } from "../src/ui/views/overview/model.ts";
 import { buildDashboard } from "../src/tui/snapshot.ts";
 import { createSeen } from "../src/ui/seen.ts";
+import { VIEW_KEYS } from "../src/ui/views/keys.ts";
+import { DETAILS, TABS } from "../src/ui/views/registry.tsx";
 import { FIXTURE_NOW, FIXTURE_TZ, scheduledRun, writeFixture } from "./fixtures/views.ts";
 import { makeTempHome, type TempHome } from "./helpers.ts";
 
@@ -302,6 +305,11 @@ describe("mouse", () => {
     await s.mockMouse.click(text.split("\n")[1]!.indexOf("System"), 1);
     expect(await screen()).toContain("The System tab");
   });
+});
+
+test("the registry and the key specs tui.toml is checked against are the same views", () => {
+  const registered = [...Object.values(TABS), ...Object.values(DETAILS)].map((v) => v.keys);
+  expect(registered).toEqual([...VIEW_KEYS]);
 });
 
 describe("Overview data", () => {

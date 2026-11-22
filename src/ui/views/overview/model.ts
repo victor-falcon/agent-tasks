@@ -109,27 +109,10 @@ export function targetOf(dash: Dashboard, rowKey: string | null): Target | null 
   const { section, id } = parseKey(rowKey);
   if (section === "next") {
     const next = dash.next.find((n) => n.task_id === id);
-    return next ? { kind: "task", taskId: id, paused: next.state === "paused" } : null;
+    return next ? { kind: "task", taskId: id } : null;
   }
   const run = [...dash.running, ...dash.recent].find((r) => r.ref === id);
   return run ? { kind: "run", run } : null;
-}
-
-/**
- * The row to select after a reload: the same one if it is still there, else
- * the same run or task in another section (a run that finished moves from
- * Running to Recent), else the row now at the same place, else the first.
- */
-export function reconcileSelection(sections: readonly { rows: readonly { key: string }[] }[], previous: string | null, previousKeys: readonly string[]): string | null {
-  const keys = sections.flatMap((s) => s.rows.map((r) => r.key));
-  if (keys.length === 0) return null;
-  if (previous === null) return keys[0]!;
-  if (keys.includes(previous)) return previous;
-  const { id } = parseKey(previous);
-  const moved = keys.find((k) => parseKey(k).id === id);
-  if (moved) return moved;
-  const index = previousKeys.indexOf(previous);
-  return keys[Math.max(0, Math.min(keys.length - 1, index))] ?? keys[0]!;
 }
 
 // ---------------------------------------------------------------------------

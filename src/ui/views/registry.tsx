@@ -1,55 +1,32 @@
-import type { Component } from "solid-js";
-import type { App } from "../context.ts";
-import type { Action } from "../keymap/actions.ts";
-import type { ViewKeys } from "../keymap/spec.ts";
 import type { Route, TabId } from "../state.ts";
-import { RUN_DETAIL_KEYS, RUNS_KEYS, SYSTEM_KEYS, TASK_DETAIL_KEYS, TASKS_KEYS } from "./keys.ts";
-import { OVERVIEW_KEYS } from "./overview/keys.ts";
-import { Overview } from "./overview/index.tsx";
-import { PlaceholderDetail, PlaceholderTab } from "./placeholder.tsx";
+import { OVERVIEW_TAB } from "./overview/index.tsx";
+import { RUN_VIEW } from "./run/index.tsx";
+import { RUNS_TAB } from "./runs/index.tsx";
+import { SYSTEM_TAB } from "./system/index.tsx";
+import { TASK_VIEW } from "./task/index.tsx";
+import { TASKS_TAB } from "./tasks/index.tsx";
+import type { TabDef, ViewDef } from "./types.ts";
+import { Placeholder } from "./placeholder.tsx";
 
 // Every view of the dashboard: the four tabs (roots) and the details a view
-// can open on top of them (`ui.push({ view: "run", params: { ref } })`). A
-// view is one folder with its component and its keys (views/<name>/); adding
-// or replacing one is one line here and one in views/keys.ts.
+// can open on top of them (`ui.push({ view: "run", params: { ref } })`). Each
+// view is one folder (views/<name>/: index.tsx exports its definition,
+// keys.ts its keys and actions), so building or replacing one stays inside
+// its folder.
 
-export interface ViewProps {
-  params: Record<string, string>;
-}
+export type { TabDef, ViewDef, ViewProps } from "./types.ts";
 
-export interface ViewDef {
-  keys: ViewKeys;
-  component: Component<ViewProps>;
-}
+export const TABS: Record<TabId, TabDef> = { overview: OVERVIEW_TAB, tasks: TASKS_TAB, runs: RUNS_TAB, system: SYSTEM_TAB };
 
-export interface TabDef extends ViewDef {
-  title: string;
-  /** The action that jumps to it (its key is shown in the tab bar). */
-  action: Action;
-  /** Shown after the title when the tab needs you (`!`), or null. */
-  badge?: (app: App) => string | null;
-}
+export const DETAILS: Record<string, ViewDef> = { run: RUN_VIEW, task: TASK_VIEW };
 
-export const TABS: Record<TabId, TabDef> = {
-  overview: { title: "Overview", action: "tab_overview", keys: OVERVIEW_KEYS, component: Overview },
-  tasks: { title: "Tasks", action: "tab_tasks", keys: TASKS_KEYS, component: () => <PlaceholderTab keys={TASKS_KEYS} what="Tasks" cli="agent-tasks list" /> },
-  runs: { title: "Runs", action: "tab_runs", keys: RUNS_KEYS, component: () => <PlaceholderTab keys={RUNS_KEYS} what="Runs" cli="agent-tasks runs" /> },
-  system: {
-    title: "System",
-    action: "tab_system",
-    keys: SYSTEM_KEYS,
-    component: () => <PlaceholderTab keys={SYSTEM_KEYS} what="System" cli="agent-tasks doctor" />,
-    // Files the data layer could not read are a problem worth a look.
-    badge: (app) => ((app.store.dash()?.errors.length ?? 0) > 0 ? "!" : null),
-  },
-};
-
-export const DETAILS: Record<string, ViewDef> = {
-  run: { keys: RUN_DETAIL_KEYS, component: (props) => <PlaceholderDetail keys={RUN_DETAIL_KEYS} what={`Run ${props.params.ref}`} cli={`agent-tasks log ${props.params.ref}`} /> },
-  task: { keys: TASK_DETAIL_KEYS, component: (props) => <PlaceholderDetail keys={TASK_DETAIL_KEYS} what={`Task ${props.params.id}`} cli={`agent-tasks show ${props.params.id}`} /> },
+/** Shown for a route nobody registered: a typo in `ui.push` shows up instead of falling back silently. */
+const UNKNOWN: ViewDef = {
+  keys: RUN_VIEW.keys,
+  component: (props) => <Placeholder keys={props.keys} what={`A view named "${JSON.stringify(props.params)}"`} cli="(none: this is a bug)" />,
 };
 
 /** The definition of the view a route shows. */
 export function viewOf(route: Route): ViewDef {
-  return (TABS as Record<string, ViewDef>)[route.view] ?? DETAILS[route.view] ?? TABS.overview;
+  return (TABS as Record<string, ViewDef>)[route.view] ?? DETAILS[route.view] ?? UNKNOWN;
 }

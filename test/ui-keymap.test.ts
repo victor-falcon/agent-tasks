@@ -56,7 +56,7 @@ describe("tui.toml", () => {
       '[keys]\nnope = "x"\n',
       "[keys]\nretry = 3\n",
       '[keys]\nretry = "j"\n', // j is down in the list views
-      '[keys]\nfirst = "g"\n', // hides gg… and gt
+      '[keys]\nfirst = "g"\nnext_panel = "gj"\n', // g hides gj
       "keys = 3\n",
       "not toml [",
     ];
@@ -70,10 +70,6 @@ describe("tui.toml", () => {
         expect(ours![0]).toStartWith("keys.nope: unknown action (known: down, up,");
         continue;
       }
-      if (text.includes('first = "g"')) {
-        expect(ours).toContain('"g" (first) hides "gt" (next_tab); it is bound to first and next_tab in the overview view');
-        continue;
-      }
       // The old dashboard names its views list/detail (and may say it for both); the rest is the same message.
       const message = (all: string[]) => [...new Set(all.map((d) => d.replace(/ in the \w+ view$/, "")))];
       expect(message(ours!)).toEqual(message(theirs!));
@@ -85,6 +81,22 @@ describe("tui.toml", () => {
     expect(details(() => loadTuiConfig(home.configDir))).toEqual(['"j" is bound to both undo and down in the overview view']);
     // `back` lives in the detail views, `dismiss` in the roots: both on <Esc> is fine.
     expect(() => buildKeymap({ back: "<Esc>", dismiss: "<Esc>" })).not.toThrow();
+  });
+
+  test("an old file's key wins over a new action's default key", () => {
+    writeToml('[keys]\nretry = "u"\nattach = "1"\nrun_now = "gt"\n');
+    const config = loadTuiConfig(home.configDir);
+    expect(config.keymap.retry.map((b) => b.text)).toEqual(["u"]);
+    expect(config.keymap.undo).toEqual([]);
+    expect(config.keymap.tab_overview).toEqual([]);
+    expect(config.keymap.next_tab).toEqual([]);
+    expect(config.keymap.prev_tab.map((b) => b.text)).toEqual(["gT"]);
+    // `g` alone would hide gt and gT: they give way too.
+    writeToml('[keys]\nfirst = "g"\n');
+    expect(loadTuiConfig(home.configDir).keymap.prev_tab).toEqual([]);
+    // Set both, and the clash is reported as usual.
+    writeToml('[keys]\nretry = "u"\nundo = "u"\n');
+    expect(details(() => loadTuiConfig(home.configDir))).toEqual(['"u" is bound to both undo and retry in the overview view']);
   });
 
   test("new actions and mouse = false; the old dashboard reads the same file", () => {
