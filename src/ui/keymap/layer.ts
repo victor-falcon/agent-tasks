@@ -1,20 +1,14 @@
 import { reactiveMatcherFromSignal } from "@opentui/keymap/solid";
 import { onCleanup } from "solid-js";
 import { type Handler, useApp } from "../context.ts";
-import { ACTIONS, type Action, COUNTED_ACTIONS } from "./actions.ts";
+import { ACTIONS, type Action } from "./actions.ts";
 import type { ViewKeys } from "./spec.ts";
-import { countedBinding } from "./vim.ts";
 
 // A view's keymap layer: the keys tui.toml gives to each action the view
 // lists, bound to the view's handlers (and the global ones), while the view
 // is shown and no overlay is open. Views are mounted only while shown, so the
-// layer lives as long as the component.
-
-/** The count of `5j`, or 1. */
-function countOf(payload: unknown): number {
-  const count = (payload as { count?: unknown } | undefined)?.count;
-  return typeof count === "number" && count > 0 ? count : 1;
-}
+// layer lives as long as the component. The count typed before a motion
+// (`15j`) comes from count.ts, not from the binding.
 
 export function useViewKeys(spec: ViewKeys, handlers: Partial<Record<Action, Handler>>): void {
   const app = useApp();
@@ -26,14 +20,9 @@ export function useViewKeys(spec: ViewKeys, handlers: Partial<Record<Action, Han
     commands: actions.map((action) => ({
       name: command(action),
       desc: ACTIONS[action],
-      run: (ctx) => void all[action]!(countOf(ctx.payload)),
+      run: () => void all[action]!(app.count.take()),
     })),
-    bindings: actions.flatMap((action) =>
-      app.config.keymap[action].flatMap((b) => {
-        const counted = COUNTED_ACTIONS.includes(action) ? countedBinding(b.text) : null;
-        return [{ key: b.text, cmd: command(action) }, ...(counted ? [{ key: counted, cmd: command(action) }] : [])];
-      }),
-    ),
+    bindings: actions.flatMap((action) => app.config.keymap[action].map((b) => ({ key: b.text, cmd: command(action) }))),
   });
   onCleanup(off);
 }

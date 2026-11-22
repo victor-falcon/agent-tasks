@@ -3,6 +3,7 @@ import { createContext, useContext } from "solid-js";
 import type { Actions } from "./actions.ts";
 import type { Action } from "./keymap/actions.ts";
 import type { TuiConfig } from "./keymap/config.ts";
+import type { Count } from "./keymap/count.ts";
 import type { AppKeymap } from "./keymap/vim.ts";
 import type { Seen } from "./seen.ts";
 import type { UiState } from "./state.ts";
@@ -24,6 +25,8 @@ export interface App {
   theme: Theme;
   config: TuiConfig;
   keymap: AppKeymap;
+  /** The count typed before a motion (`15j`). */
+  count: Count;
   seen: Seen;
   /** What works in every view (tabs, help, reload, undo, back, quit). */
   globalHandlers: Partial<Record<Action, Handler>>;

@@ -7,7 +7,9 @@ import { TabBar } from "./components/tab-bar.tsx";
 import { useApp } from "./context.ts";
 import { Confirm } from "./overlays/confirm.tsx";
 import { Help } from "./overlays/help.tsx";
+import { Palette } from "./overlays/palette.tsx";
 import { Toasts } from "./overlays/toasts.tsx";
+import { WhichKey } from "./overlays/which-key.tsx";
 import type { Route } from "./state.ts";
 import { viewOf } from "./views/registry.tsx";
 
@@ -31,6 +33,8 @@ export function Frame() {
       </box>
       <Footer />
       <Toasts />
+      <WhichKey />
+      <Palette />
       <Confirm />
       <Help />
     </box>

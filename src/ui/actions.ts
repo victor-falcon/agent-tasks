@@ -72,7 +72,8 @@ export interface Actions {
   report(code: number, first: string, doing: string): void;
 }
 
-const RETRYABLE = ["failed", "timed_out", "missed"];
+/** Statuses `retry` accepts (the palette offers only these runs to retry). */
+export const RETRYABLE: readonly string[] = ["failed", "timed_out", "missed"];
 
 function taskOf(target: Target): string {
   return target.kind === "run" ? target.run.task_id : target.taskId;

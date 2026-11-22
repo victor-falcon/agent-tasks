@@ -5,7 +5,8 @@ import { ConfigError } from "../src/errors.ts";
 import { ACTIONS as V1_ACTIONS, loadKeymap } from "../src/tui/keys.ts";
 import { ACTIONS, DEFAULT_KEYS } from "../src/ui/keymap/actions.ts";
 import { buildKeymap, loadTuiConfig } from "../src/ui/keymap/config.ts";
-import { countedBinding, strokeOf } from "../src/ui/keymap/vim.ts";
+import type { KeyEvent } from "@opentui/core";
+import { isKey, strokeOf } from "../src/ui/keymap/vim.ts";
 import { VIEW_KEYS } from "../src/ui/views/keys.ts";
 import { makeTempHome, type TempHome } from "./helpers.ts";
 
@@ -135,9 +136,15 @@ describe("Vim notation on the keymap", () => {
     expect(strokeOf("<")).toEqual({ name: "<" });
   });
 
-  test("single keys take a count, sequences do not", () => {
-    expect(countedBinding("j")).toBe("{count}j");
-    expect(countedBinding("<Down>")).toBe("{count}<Down>");
-    expect(countedBinding("gj")).toBeNull();
+  test("a key event is matched against a single key of tui.toml, never a sequence", () => {
+    const key = (name: string, mods: { ctrl?: boolean; shift?: boolean; meta?: boolean } = {}) => ({ name, ctrl: false, shift: false, meta: false, ...mods }) as KeyEvent;
+    expect(isKey(key("j"), "j")).toBe(true);
+    expect(isKey(key("down"), "<Down>")).toBe(true);
+    expect(isKey(key("g", { shift: true }), "G")).toBe(true);
+    expect(isKey(key("g"), "G")).toBe(false);
+    expect(isKey(key("d", { ctrl: true }), "<C-d>")).toBe(true);
+    expect(isKey(key("d"), "<C-d>")).toBe(false);
+    expect(isKey(key("j", { meta: true }), "j")).toBe(false);
+    expect(isKey(key("g"), "gg")).toBe(false);
   });
 });
