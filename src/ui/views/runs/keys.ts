@@ -8,10 +8,10 @@ import { GLOBAL_ACTIONS, GLOBAL_HINTS, LIST_ACTIONS, type ViewKeys } from "../..
  * everywhere.
  */
 export const RUNS_ACTIONS = {
-  cycle_filter: { desc: "Cycle the list's filter (Runs: all · failures · blocked · ok · missed)", keys: ["f"] },
+  cycle_filter: { desc: "Cycle the list's main filter", keys: ["f"] },
   cycle_since: { desc: "Cycle how far back the list goes (24h · 7d · 30d · all)", keys: ["S"] },
   goto_task: { desc: "Go to the selected run's task", keys: ["t"] },
-  copy: { desc: "Copy the selected run's ref (or task's id)", keys: ["y"] },
+  copy: { desc: "Copy the selected item's ref or id", keys: ["y"] },
 } as const satisfies ActionDefs;
 
 // `y` copy is left out of the footer to keep it on one line at 100 columns; `?` lists it.

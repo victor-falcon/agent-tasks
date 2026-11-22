@@ -1,48 +1,21 @@
 import { type Accessor, For, Show } from "solid-js";
-import { capturedLog } from "../../commands/log.ts";
-import type { Context } from "../../context.ts";
 import { RUN_MARKS } from "../../output/symbols.ts";
 import { agendaTime, formatSpan } from "../../output/time.ts";
 import { tildify } from "../../paths.ts";
-import { isFailure } from "../../run-info.ts";
-import { readRunByRef } from "../../store.ts";
 import { displayTimezone } from "../../task-info.ts";
-import { type DashRun, tailLines } from "../../tui/snapshot.ts";
-import { sanitize } from "../../tui/text.ts";
 import { useApp } from "../context.ts";
 import { keyHint } from "../keymap/config.ts";
 import type { Segment } from "./cells.ts";
 import { Line } from "./line.tsx";
+import type { RunPreviewData } from "./run-preview-model.ts";
 
 // The preview of one run, shared by the list views (Overview, Runs): its
 // result (the agent's summary, as Markdown) or, when it failed, the end of
 // its captured log; a blocked run says it waits for you and how to attach.
+// What it shows is read by run-preview-model.ts.
 
-/** Lines of a failed run's captured log shown in the preview. */
-export const PREVIEW_LOG_LINES = 40;
-
-export interface RunPreviewData {
-  run: DashRun;
-  blocked: boolean;
-  summary: string | null;
-  reason: string | null;
-  log: { path: string; lines: string[] } | null;
-}
-
-export function buildRunPreview(ctx: Context, run: DashRun): RunPreviewData {
-  let log: { path: string; lines: string[] } | null = null;
-  // A failure says why in its log, more than in its summary.
-  if (isFailure(run.status) || (run.status === "missed" && run.attempt > 0)) {
-    try {
-      const stored = readRunByRef(ctx.paths, run.ref);
-      const captured = capturedLog(ctx, stored, stored.attempts.at(-1));
-      if (captured?.exists) log = { path: captured.path, lines: sanitize(tailLines(captured.path, PREVIEW_LOG_LINES).join("\n")).split("\n") };
-    } catch {
-      // The run file is being rewritten: the summary is enough for now.
-    }
-  }
-  return { run, blocked: run.status === "blocked", summary: run.summary, reason: run.reason, log };
-}
+/** From this width on, a list view shares the screen with its preview. */
+export const PREVIEW_MIN_WIDTH = 120;
 
 /** The body of a run's preview (the pane around it is the view's). */
 export function RunPreview(props: { preview: RunPreviewData }) {

@@ -1,12 +1,12 @@
-import { readdirSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Context } from "../../../context.ts";
 import { RUN_MARKS } from "../../../output/symbols.ts";
 import { agendaTime, DAY, formatSpan } from "../../../output/time.ts";
 import { isFailure, isInProgress, lastActivity } from "../../../run-info.ts";
 import type { Run, RunStatus } from "../../../schema.ts";
-import { isSlotId, runRef, slotIdToDate } from "../../../slot.ts";
-import { readRun, taskIdsWithRuns } from "../../../store.ts";
+import { isManualSlotId, isSlotId, parseRunRef, runRef, slotIdToDate } from "../../../slot.ts";
+import { readRun, runPath, taskIdsWithRuns } from "../../../store.ts";
 import { findTask } from "../../../task-info.ts";
 import type { DashRun } from "../../../tui/snapshot.ts";
 import type { Segment } from "../../components/cells.ts";
@@ -15,7 +15,8 @@ import type { Segment } from "../../components/cells.ts";
 // ones included), newest first, read a page at a time. Run files are named
 // after their slot, so the order and the `since` cut come from the file
 // names alone; only the files of the rows shown (and those a status filter
-// skips on the way) are read.
+// skips on the way) are read, and a file read once is read again only when
+// it changes (RunCache), so the reloads a running agent causes stay cheap.
 
 /** Rows read at a time; the next page is read when the cursor gets near the end. */
 export const PAGE_SIZE = 100;
@@ -102,12 +103,26 @@ function historyRun(ref: string, run: Run, taskMachine: string | null, max: numb
   };
 }
 
+/** Run files already read, by path, with the size and time they had then. */
+export type RunCache = Map<string, { mtimeMs: number; size: number; run: Run }>;
+
+/** A run file, from `cache` while it has not changed since. */
+function readCached(ctx: Context, taskId: string, slot: string, cache: RunCache): Run {
+  const path = runPath(ctx.paths, taskId, slot);
+  const { mtimeMs, size } = statSync(path);
+  const hit = cache.get(path);
+  if (hit && hit.mtimeMs === mtimeMs && hit.size === size) return hit.run;
+  const run = readRun(ctx.paths, taskId, slot);
+  cache.set(path, { mtimeMs, size, run });
+  return run;
+}
+
 /**
  * The first `limit` runs that pass `filter`, newest slot first (the order of
  * `agent-tasks runs`). Unreadable run files are skipped: the data layer
  * reports them in the System tab.
  */
-export function loadRuns(ctx: Context, filter: RunsFilter, limit: number): RunsPage {
+export function loadRuns(ctx: Context, filter: RunsFilter, limit: number, cache: RunCache = new Map()): RunsPage {
   const since = filter.since === "all" ? null : ctx.now.getTime() - SINCE_MS[filter.since];
   const files: { taskId: string; slot: string; at: number }[] = [];
   for (const taskId of taskIdsWithRuns(ctx.paths)) {
@@ -145,7 +160,7 @@ export function loadRuns(ctx: Context, filter: RunsFilter, limit: number): RunsP
   for (const file of files) {
     let run: Run;
     try {
-      run = readRun(ctx.paths, file.taskId, file.slot);
+      run = readCached(ctx, file.taskId, file.slot, cache);
     } catch {
       continue;
     }
@@ -158,9 +173,13 @@ export function loadRuns(ctx: Context, filter: RunsFilter, limit: number): RunsP
   return { runs, more: false };
 }
 
-/** Whether the cursor at `index` of `loaded` rows is close enough to the end to read the next page. */
-export function needsMore(index: number, loaded: number, more: boolean): boolean {
-  return more && index >= loaded - LOAD_AHEAD;
+/** Whether the row at `index` (the cursor, or the last one in view) is close enough to the end of `page` to read the next one. */
+export function needsMore(index: number, page: RunsPage): boolean {
+  return page.more && index >= 0 && index >= page.runs.length - LOAD_AHEAD;
+}
+
+export function isFiltered(filter: RunsFilter): boolean {
+  return filter.status !== "all" || filter.since !== "all" || filter.text !== "";
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +212,7 @@ export function runCells(run: HistoryRun, timezone: string, now: Date): Segment[
   const what: Segment = run.summary ? { text: run.summary.split("\n")[0]! } : { text: run.reason?.split("\n")[0] ?? "", color: "dim" };
   return [
     { text: mark.symbol, color: mark.color },
-    { text: run.ref.includes("/manual-") ? `${slot} (manual)` : slot },
+    { text: isManualSlotId(parseRunRef(run.ref).slot) ? `${slot} (manual)` : slot },
     { text: run.task_id },
     { text: run.machine ?? "", color: "dim" },
     { text: tookText(run, now) },
@@ -208,12 +227,13 @@ export function chipSegments(filter: RunsFilter, page: RunsPage): Segment[] {
     { text: `${label} `, color: "dim" },
     { text: ` ${value} `, color: active ? "inverse" : undefined },
   ];
-  const count = page.runs.length === 0 ? "no runs" : page.more ? `${page.runs.length} shown, more as you scroll` : `${page.runs.length} run${page.runs.length === 1 ? "" : "s"}`;
+  // The list's title counts the rows loaded; say when there are more.
+  const count = page.more ? `   ${page.runs.length} loaded, more as you scroll` : "";
   return [
     ...chip("status", filter.status, filter.status !== "all"),
     { text: "  " },
     ...chip("since", filter.since, filter.since !== "all"),
-    ...(filter.text ? [{ text: "  " }, ...chip("/", filter.text, true)] : []),
-    { text: `   ${count}`, color: "dim" },
+    ...(filter.text !== "" ? [{ text: "  " }, ...chip("/", filter.text, true)] : []),
+    { text: count, color: "dim" },
   ];
 }

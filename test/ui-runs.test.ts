@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { commands } from "../src/commands/index.ts";
 import { createContext } from "../src/context.ts";
 import { archiveTask, readTask, writeRun } from "../src/store.ts";
-import { DEFAULT_FILTER, LOAD_AHEAD, loadRuns, needsMore, nextSince, nextStatus, PAGE_SIZE, type RunsFilter } from "../src/ui/views/runs/model.ts";
+import { DEFAULT_FILTER, LOAD_AHEAD, loadRuns, needsMore, nextSince, nextStatus, PAGE_SIZE, type RunCache, type RunsFilter } from "../src/ui/views/runs/model.ts";
 import { FIXTURE_NOW, FIXTURE_TZ, scheduledRun, writeFixture } from "./fixtures/views.ts";
 import { makeTempHome, type TempHome } from "./helpers.ts";
 import { selectedRow, settle, type Started, startApp } from "./ui-harness.ts";
@@ -74,9 +74,23 @@ describe("history (model)", () => {
     expect(loadRuns(ctx(), DEFAULT_FILTER, 10)).toMatchObject({ more: true });
     expect(loadRuns(ctx(), DEFAULT_FILTER, 10).runs.map((r) => r.summary)).toEqual(Array.from({ length: 10 }, (_, i) => `run ${i + 1}`));
     expect(loadRuns(ctx(), DEFAULT_FILTER, 30)).toMatchObject({ more: false });
-    expect(needsMore(10 - LOAD_AHEAD, 10, true)).toBe(true);
-    expect(needsMore(0, 100, true)).toBe(false);
-    expect(needsMore(99, 100, false)).toBe(false);
+    const page = loadRuns(ctx(), DEFAULT_FILTER, 10);
+    expect(needsMore(Math.max(0, 10 - LOAD_AHEAD), page)).toBe(true);
+    expect(needsMore(-1, page)).toBe(false);
+    expect(needsMore(29, loadRuns(ctx(), DEFAULT_FILTER, 30))).toBe(false);
+  });
+
+  test("a run file is read again only when it changes", () => {
+    writeHourly("hourly", 3);
+    const cache: RunCache = new Map();
+    const first = loadRuns(ctx(), DEFAULT_FILTER, 10, cache).runs;
+    expect(cache.size).toBe(3);
+    const cached = [...cache.values()].map((c) => c.run);
+    loadRuns(ctx(), DEFAULT_FILTER, 10, cache);
+    expect([...cache.values()].map((c) => c.run)).toEqual(cached);
+    expect([...cache.values()].every((c, i) => c.run === cached[i])).toBe(true);
+    writeRun(home.paths, scheduledRun("hourly", first[0]!.slot, "failed", { summary: "changed its mind" }));
+    expect(loadRuns(ctx(), DEFAULT_FILTER, 10, cache).runs[0]!.summary).toBe("changed its mind");
   });
 
   test("the filter chips cycle in order", () => {
@@ -126,11 +140,31 @@ describe("Runs tab", () => {
   test("the next page is read as the cursor nears the end", async () => {
     writeHourly("hourly", PAGE_SIZE + 30);
     const { screen, press } = await openRuns({ height: 30 });
-    expect(await screen()).toContain(`${PAGE_SIZE} shown, more as you scroll`);
+    expect(await screen()).toContain(`${PAGE_SIZE} loaded, more as you scroll`);
     await press("G");
+    await settle();
     const text = await screen();
-    expect(text).toContain(`${PAGE_SIZE + 30} runs`);
-    expect(selectedRow(text)).toContain(`run ${PAGE_SIZE}`);
+    expect(text).not.toContain("more as you scroll");
+    expect(selectedRow(text)).toMatch(new RegExp(`run ${PAGE_SIZE}$`)); // still in view after the page grew
+    await press("G");
+    expect(selectedRow(await screen())).toMatch(new RegExp(`run ${PAGE_SIZE + 30}$`));
+  });
+
+  test("the wheel reads the next page too, once it shows the last rows", async () => {
+    writeHourly("hourly", PAGE_SIZE + 30);
+    const { screen, setup, handle } = await openRuns({ height: 30 });
+    const first = handle.app.ui.selection("runs");
+    for (let i = 0; i < 300 && (await screen()).includes("more as you scroll"); i++) await setup.mockMouse.scroll(10, 10, "down");
+    expect(await screen()).not.toContain("more as you scroll");
+    expect(handle.app.ui.selection("runs")).toBe(first); // the cursor did not move
+  });
+
+  test("a new filter starts at its first row", async () => {
+    writeFixture(home.paths);
+    const { screen, press } = await openRuns();
+    await press("G", "S"); // at the bottom, then since 24h
+    await settle();
+    expect(selectedRow(await screen())).toStartWith("◐ 10:00 sentry-summary");
   });
 
   test("the selection stays on the same run across a reload", async () => {

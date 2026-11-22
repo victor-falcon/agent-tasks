@@ -78,7 +78,8 @@ export async function startApp(home: TempHome, now: Date, opts: StartOptions = {
 /** The selected row (`› …`) without the preview beside it, its cells joined by single spaces. */
 export function selectedRow(screen: string): string {
   const line = screen.split("\n").find((l) => l.startsWith("› "));
-  return line ? line.slice(2).split("│")[0]!.replace(/\s+/g, " ").trim() : "";
+  // Cut at the preview's border, and drop the list's scrollbar.
+  return line ? line.slice(2).split("│")[0]!.replace(/[█▀▄]/g, "").replace(/\s+/g, " ").trim() : "";
 }
 
 /** Waits for background commands (the fake runner resolves on the next tick). */

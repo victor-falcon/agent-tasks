@@ -7,7 +7,7 @@ import { readTask } from "../../../store.ts";
 import { taskOverview } from "../../../task-info.ts";
 import type { Dashboard, DashNext, DashRun } from "../../../tui/snapshot.ts";
 import type { Target } from "../../actions.ts";
-import { buildRunPreview, type RunPreviewData } from "../../components/run-preview.tsx";
+import { buildRunPreview, type RunPreviewData } from "../../components/run-preview-model.ts";
 import type { Seen } from "../../seen.ts";
 
 // What the Overview shows, as plain data (cells with a color name), so it is

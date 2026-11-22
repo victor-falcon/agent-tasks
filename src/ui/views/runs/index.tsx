@@ -1,28 +1,46 @@
+import type { BoxRenderable, ScrollBoxRenderable } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/solid";
-import { type Accessor, createEffect, createMemo, createSignal, Show } from "solid-js";
+import { type Accessor, batch, createEffect, createMemo, createSignal, Show } from "solid-js";
 import { displayTimezone } from "../../../task-info.ts";
 import type { Target } from "../../actions.ts";
 import { Line } from "../../components/line.tsx";
 import { useListNavigation } from "../../components/list-navigation.ts";
-import { buildRunPreview, RunPreview, type RunPreviewData } from "../../components/run-preview.tsx";
+import { PREVIEW_MIN_WIDTH, RunPreview } from "../../components/run-preview.tsx";
+import { buildRunPreview, type RunPreviewData } from "../../components/run-preview-model.ts";
 import { type ListSection, SectionList } from "../../components/section-list.tsx";
 import { type App, useApp } from "../../context.ts";
+import { keyHint } from "../../keymap/config.ts";
 import { useViewKeys } from "../../keymap/layer.ts";
-import { PREVIEW_MIN_WIDTH } from "../overview/index.tsx";
 import type { TabDef, ViewProps } from "../types.ts";
 import { RUNS_KEYS } from "./keys.ts";
-import { chipSegments, DEFAULT_FILTER, loadRuns, needsMore, nextSince, nextStatus, PAGE_SIZE, refOf, rowKey, runCells, type RunsFilter, type RunsPage } from "./model.ts";
+import {
+  chipSegments,
+  DEFAULT_FILTER,
+  isFiltered,
+  loadRuns,
+  needsMore,
+  nextSince,
+  nextStatus,
+  PAGE_SIZE,
+  type RunCache,
+  type RunsFilter,
+  type RunsPage,
+  refOf,
+  rowKey,
+  runCells,
+} from "./model.ts";
 
 // The whole history, newest first, a page at a time: the next page is read
-// when the cursor gets near the end of what is loaded. Above the list, the
-// filters as chips (`f` status, `S` since); on a wide terminal, the selected
-// run's preview on the right. The selection follows the run's ref across
-// reloads and pages.
+// when the cursor, or the wheel, gets near the end of what is loaded. Above
+// the list, the filters as chips (`f` status, `S` since); on a wide terminal,
+// the selected run's preview on the right. The selection follows the run's
+// ref across reloads and pages.
 
 /** What the tab keeps while a detail is open on top of it (the component is mounted again on the way back). */
 interface Kept {
   filter: RunsFilter;
   limit: number;
+  cache: RunCache;
 }
 
 const kept = new WeakMap<App, Kept>();
@@ -32,33 +50,33 @@ function Runs(props: ViewProps) {
   const { store, ui, actions, renderer } = app;
   const dims = useTerminalDimensions();
 
-  const initial = kept.get(app) ?? { filter: DEFAULT_FILTER, limit: PAGE_SIZE };
+  const initial = kept.get(app) ?? { filter: DEFAULT_FILTER, limit: PAGE_SIZE, cache: new Map() };
+  const cache = initial.cache;
   const [filter, setFilter] = createSignal<RunsFilter>(initial.filter);
   const [limit, setLimit] = createSignal(initial.limit);
-  createEffect(() => kept.set(app, { filter: filter(), limit: limit() }));
+  createEffect(() => kept.set(app, { filter: filter(), limit: limit(), cache }));
 
   // Read again on every reload (store.version) and when the filters or the
   // page count change; not on every clock tick.
   const page = createMemo((): RunsPage => {
     store.version();
     const ctx = store.ctx();
-    return ctx ? loadRuns(ctx, filter(), limit()) : { runs: [], more: false };
+    return ctx ? loadRuns(ctx, filter(), limit(), cache) : { runs: [], more: false };
   });
+  const loadMore = () => setLimit((l) => l + PAGE_SIZE);
+
+  const emptyText = () => {
+    if (!isFiltered(filter())) return "no runs yet";
+    const keys = [keyHint(app.config.keymap, "cycle_filter"), keyHint(app.config.keymap, "cycle_since")].filter((k) => k !== null);
+    return `no runs match these filters${keys.length > 0 ? ` (${keys.join(" / ")} to change them)` : ""}`;
+  };
 
   const sections = createMemo((): ListSection[] => {
     const ctx = store.ctx();
     if (!ctx) return [];
     const tz = displayTimezone(ctx);
     const now = store.now();
-    const filtered = filter().status !== "all" || filter().since !== "all" || filter().text !== "";
-    return [
-      {
-        id: "runs",
-        title: "Runs",
-        rows: page().runs.map((r) => ({ key: rowKey(r.ref), cells: runCells(r, tz, now) })),
-        empty: filtered ? "no runs match these filters" : "no runs yet",
-      },
-    ];
+    return [{ id: "runs", title: "History", rows: page().runs.map((r) => ({ key: rowKey(r.ref), cells: runCells(r, tz, now) })), empty: emptyText() }];
   });
   const nav = useListNavigation("runs", sections);
 
@@ -73,16 +91,33 @@ function Runs(props: ViewProps) {
     return run ? { kind: "run", run } : null;
   };
 
-  // Near the end of what is loaded: read the next page.
+  // The cursor near the end of what is loaded: read the next page.
   createEffect(() => {
     const p = page();
-    const index = p.runs.findIndex((r) => r.ref === selectedRun()?.ref);
-    if (index >= 0 && needsMore(index, p.runs.length, p.more)) setLimit((l) => l + PAGE_SIZE);
+    const ref = selectedRun()?.ref;
+    if (ref !== undefined && needsMore(p.runs.findIndex((r) => r.ref === ref), p)) loadMore();
   });
 
-  const setAndReset = (next: RunsFilter) => {
-    setFilter(next);
-    setLimit(PAGE_SIZE); // a new filter starts again from its first page
+  // The wheel scrolls without moving the cursor: when it shows the last
+  // rows, read the next page too. (The list is the box's only child; the box
+  // is a row so the list takes its height and scrolls inside it.)
+  let listBox: BoxRenderable | undefined;
+  const onWheel = () => {
+    const scroll = listBox?.getChildren()[0] as ScrollBoxRenderable | undefined;
+    if (!scroll) return;
+    // Rows from the top of the list to the bottom of the view, less the section title.
+    const lastInView = scroll.scrollTop + scroll.height - 2;
+    if (needsMore(lastInView, page())) loadMore();
+  };
+
+  const setFilters = (next: RunsFilter) => {
+    batch(() => {
+      setFilter(next);
+      setLimit(PAGE_SIZE); // a new filter starts again from its first page
+    });
+    // ...at its first row.
+    const first = page().runs[0];
+    nav.select(first ? rowKey(first.ref) : null);
   };
 
   const open = (key = nav.selected()) => {
@@ -110,8 +145,8 @@ function Runs(props: ViewProps) {
       if (run) ui.push({ view: "task", params: { id: run.task_id } });
     },
     copy,
-    cycle_filter: () => setAndReset({ ...filter(), status: nextStatus(filter().status) }),
-    cycle_since: () => setAndReset({ ...filter(), since: nextSince(filter().since) }),
+    cycle_filter: () => setFilters({ ...filter(), status: nextStatus(filter().status) }),
+    cycle_since: () => setFilters({ ...filter(), since: nextSince(filter().since) }),
   });
 
   const showPreview = () => dims().width >= PREVIEW_MIN_WIDTH;
@@ -125,12 +160,14 @@ function Runs(props: ViewProps) {
 
   return (
     <box flexDirection="column" flexGrow={1}>
-      {/* The filter chips. T6 puts the shared `/` filter bar (components/filter-bar.tsx) on this line; it sets filter().text. */}
+      {/* The filter chips. The shared `/` filter bar (components/filter-bar.tsx, see doc/roadmap/tui-v2.md) goes on this line and sets filter().text. */}
       <box height={1} flexShrink={0} paddingLeft={2}>
         <Line segments={chipSegments(filter(), page())} />
       </box>
       <box flexDirection="row" flexGrow={1}>
-        <SectionList sections={sections()} selected={nav.selected()} width={listWidth()} onSelect={nav.select} onOpen={open} />
+        <box ref={listBox} flexDirection="row" width={listWidth()} flexShrink={0} onMouseScroll={onWheel}>
+          <SectionList sections={sections()} selected={nav.selected()} width={listWidth()} onSelect={nav.select} onOpen={open} />
+        </box>
         <Show when={showPreview()}>
           <box flexDirection="column" width={dims().width - listWidth()} flexShrink={0} border={["left"]} borderColor={app.theme.border} paddingLeft={1} paddingRight={1}>
             <Show when={preview()} fallback={<Line segments={[{ text: "Nothing selected.", color: "dim" }]} />}>
