@@ -39,7 +39,7 @@ const MOVING: readonly Action[] = [
 
 const FOOTNOTE = "j/k <C-d>/<C-u> scroll · any other key closes · Ctrl-C quits";
 /** Counts are typed in the views, not here (keys go to the help while it shows). */
-const COUNTS = "In a view: 15j moves 15 rows; 1–4 alone switch tabs (after a moment, or at once before another key).";
+const COUNTS = "In a view: 15j moves 15 rows; 1–4 alone switch tabs (after a moment).";
 
 export interface HelpSection {
   title: string;
@@ -112,7 +112,10 @@ export function Help() {
           maxHeight={Math.max(8, dims().height - 2)}
           width={widths().box}
         >
-          <Line segments={[{ text: app.config.file ? `from ${app.config.file}` : "defaults; change them in tui.toml in the config folder", color: "dim" }]} />
+          {/* Only the list gives up rows on a short terminal; the lines around it keep theirs. */}
+          <box flexShrink={0}>
+            <Line segments={[{ text: app.config.file ? `from ${app.config.file}` : "defaults; change them in tui.toml in the config folder", color: "dim" }]} />
+          </box>
           <scrollbox ref={scroll} flexGrow={1} flexShrink={1} scrollY scrollX={false}>
             <For each={sections()}>
               {(section) => (
@@ -126,9 +129,11 @@ export function Help() {
               )}
             </For>
           </scrollbox>
-          <Line segments={[{ text: "" }]} />
-          <Line segments={[{ text: COUNTS, color: "dim" }]} />
-          <Line segments={[{ text: FOOTNOTE, color: "dim" }]} />
+          <box flexShrink={0} flexDirection="column">
+            <Line segments={[{ text: "" }]} />
+            <Line segments={[{ text: COUNTS, color: "dim" }]} />
+            <Line segments={[{ text: FOOTNOTE, color: "dim" }]} />
+          </box>
         </box>
       </box>
     </Show>

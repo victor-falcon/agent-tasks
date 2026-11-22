@@ -184,6 +184,8 @@ describe("help", () => {
     await press("?");
     let text = await screen();
     expect(text).toContain("Moving");
+    expect(text).toContain("15j moves 15 rows"); // the lines around the list keep their rows
+    expect(text).toContain("any other key closes");
     expect(text).not.toContain("tab_system"); // below the fold
     await press("<C-d>", "<C-d>", "j", "j", "j");
     text = await screen();
