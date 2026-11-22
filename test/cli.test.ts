@@ -176,4 +176,20 @@ describe("bin/agent-tasks", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("output past a pipe's buffer reaches a slow reader whole", async () => {
+    // What bin/agent-tasks does before exiting (a `top --json` past 64 KiB came
+    // out cut): the reader only starts reading once the writer has finished.
+    const writer = join(home.root, "big-writer.ts");
+    const flush = resolve(import.meta.dir, "..", "src", "flush.ts");
+    writeFileSync(
+      writer,
+      `const { watchBackpressure, exitWhenFlushed } = await import(${JSON.stringify(flush)});\n` +
+        `const streams = [watchBackpressure(process.stdout)];\n` +
+        `process.stdout.write("x".repeat(200000) + "\\n");\n` +
+        `await exitWhenFlushed(0, streams);\n`,
+    );
+    const proc = Bun.spawn(["sh", "-c", `${JSON.stringify(process.execPath)} ${JSON.stringify(writer)} | (sleep 1; wc -c)`], { stdout: "pipe" });
+    expect((await new Response(proc.stdout).text()).trim()).toBe("200001");
+  });
 });

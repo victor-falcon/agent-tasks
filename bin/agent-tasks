@@ -5,5 +5,8 @@ import { realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const root = dirname(dirname(realpathSync(import.meta.path)));
+const { watchBackpressure, exitWhenFlushed } = await import(join(root, "src", "flush.ts"));
+// Before anything writes: exiting must not cut output a pipe hasn't taken yet.
+const streams = [watchBackpressure(process.stdout), watchBackpressure(process.stderr)];
 const { main } = await import(join(root, "src", "cli.ts"));
-process.exit(await main(process.argv.slice(2)));
+await exitWhenFlushed(await main(process.argv.slice(2)), streams);
