@@ -5,7 +5,10 @@ import { fitText } from "../components/cells.ts";
 import { Line } from "../components/line.tsx";
 import { useApp } from "../context.ts";
 import { viewOf } from "../views/registry.tsx";
-import { ASKING_ACTIONS, type AskingAction, type PaletteItem, type Pick, paletteCatalog, rankItems, targetItems } from "./palette-model.ts";
+import { listTasks } from "../../store.ts";
+import type { Actions, Target } from "../actions.ts";
+import type { Store } from "../store.ts";
+import { ASKING_ACTIONS, type AskingAction, type PaletteItem, paletteCatalog, rankItems, targetItems } from "./palette-model.ts";
 
 // The command palette (`:` or <C-p>): type to narrow, Up/Down or <C-n>/<C-p>
 // to move, Enter to choose, Esc to close. It lists the current view's
@@ -16,6 +19,19 @@ import { ASKING_ACTIONS, type AskingAction, type PaletteItem, type Pick, palette
 
 /** Rows shown at most: the list scrolls with the cursor past that. */
 const MAX_ROWS = 14;
+
+/** What each asking action does to the target chosen in the second step: the actions the views' keys run. */
+const APPLY: Record<AskingAction, (actions: Actions, target: Target, store: Store) => void> = {
+  run_now: (actions, target) => actions.runNow(target),
+  toggle_pause: (actions, target) => void actions.togglePause(target),
+  retry: (actions, target) => actions.retry(target),
+  attach: (actions, target) => void actions.attach(target),
+  archive: (actions, target, store) => {
+    const taskId = target.kind === "task" ? target.taskId : target.run.task_id;
+    // As the Tasks tab says it: a run in progress goes on.
+    actions.archive(taskId, store.dash()?.running.some((r) => r.task_id === taskId) ?? false);
+  },
+};
 
 export function Palette() {
   const app = useApp();
@@ -35,16 +51,23 @@ export function Palette() {
     }),
   );
 
+  /** The saved tasks, read when the palette opens (and on a reload while it is open). */
+  const tasks = createMemo(() => {
+    store.version();
+    const ctx = store.ctx();
+    return ui.palette() && ctx ? listTasks(ctx.paths).items : [];
+  });
   const items = createMemo((): PaletteItem[] => {
     if (!ui.palette()) return [];
     const route = ui.route();
     const asking = step();
-    if (asking) return targetItems(asking, store.dash(), { taskId: route.view === "task" ? route.params.id : undefined, ref: route.view === "run" ? route.params.ref : undefined });
+    if (asking) return targetItems(asking, store.dash(), tasks(), { taskId: route.view === "task" ? route.params.id : undefined, ref: route.view === "run" ? route.params.ref : undefined });
     return paletteCatalog({
       viewId: viewOf(route).keys.id,
       commands: app.keymap.getCommands({ visibility: "registered" }).map((c) => c.name),
       keymap: app.config.keymap,
       dash: store.dash(),
+      tasks: tasks(),
     });
   });
   const ranked = createMemo(() => rankItems(items(), query()));
@@ -57,15 +80,6 @@ export function Palette() {
     if (n > 0) setCursor((cursor() + by + n) % n);
   };
   const close = () => ui.setPalette(false);
-  const apply = (pick: Extract<Pick, { type: "apply" }>) => {
-    const { action, taskId, run } = pick;
-    if (action === "run_now") return actions.runNow({ kind: "task", taskId });
-    if (action === "toggle_pause") return void actions.togglePause({ kind: "task", taskId });
-    if (action === "archive") return actions.archive(taskId, store.dash()?.running.some((r) => r.task_id === taskId) ?? false);
-    if (!run) return;
-    if (action === "retry") return actions.retry({ kind: "run", run });
-    return void actions.attach({ kind: "run", run });
-  };
   const choose = (item: PaletteItem | undefined = ranked()[cursor()]) => {
     if (!item) return;
     const pick = item.pick;
@@ -80,7 +94,7 @@ export function Palette() {
     if (pick.type === "command") app.keymap.runCommand(pick.command);
     else if (pick.type === "open_task") ui.push({ view: "task", params: { id: pick.id } });
     else if (pick.type === "open_run") ui.push({ view: "run", params: { ref: pick.ref } });
-    else apply(pick);
+    else APPLY[pick.action](actions, pick.target, store);
   };
   const escape = () => {
     if (step() === null) return close();

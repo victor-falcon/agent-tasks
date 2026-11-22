@@ -90,7 +90,8 @@ export function createCount(keymap: AppKeymap, opts: CountOptions): Count {
             timer = null;
             const lone = typed();
             setTyped("");
-            if (lone.length === 1) runLone(lone);
+            // An overlay opened meanwhile (a click): the digit no longer goes to the view.
+            if (lone.length === 1 && opts.enabled()) runLone(lone);
           }, AMBIGUOUS_TIMEOUT_MS);
         }
         return;

@@ -3,6 +3,8 @@ import type { BindingParser, KeyStrokeInput, Keymap } from "@opentui/keymap";
 import { registerDefaultKeys, registerEnabledFields, registerMetadataFields, registerNeovimDisambiguation } from "@opentui/keymap/addons";
 import { createOpenTuiKeymap } from "@opentui/keymap/opentui";
 import { parseKeys } from "../../tui/keys.ts";
+import type { Action } from "./actions.ts";
+import type { Keymap as TuiKeymap } from "./config.ts";
 
 // tui.toml's Vim notation on @opentui/keymap: `gg`, `G`, `<C-d>`, `<CR>`,
 // `<C-w>j`… become key strokes the way the terminal reports them (`G` is
@@ -109,4 +111,9 @@ export function isKey(event: KeyEvent, text: string): boolean {
   if (keys.length !== 1) return false;
   const stroke = strokeOf(keys[0]!);
   return event.name === stroke.name && event.ctrl === (stroke.ctrl ?? false) && event.shift === (stroke.shift ?? false) && !event.meta;
+}
+
+/** Whether `event` is a single-key binding tui.toml gives to one of `actions` (j for `down`): the first such action, or null. */
+export function actionOfKey(event: KeyEvent, keymap: TuiKeymap, actions: readonly Action[]): Action | null {
+  return actions.find((action) => keymap[action].some((b) => isKey(event, b.text))) ?? null;
 }

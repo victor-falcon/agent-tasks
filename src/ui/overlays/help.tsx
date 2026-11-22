@@ -7,7 +7,7 @@ import { useApp } from "../context.ts";
 import { ACTIONS, type Action } from "../keymap/actions.ts";
 import type { Keymap } from "../keymap/config.ts";
 import { GLOBAL_ACTIONS, type ViewKeys } from "../keymap/spec.ts";
-import { isKey } from "../keymap/vim.ts";
+import { actionOfKey } from "../keymap/vim.ts";
 import { viewOf } from "../views/registry.tsx";
 
 // `?`: every key of the current view, grouped (moving, what this view does,
@@ -37,7 +37,9 @@ const MOVING: readonly Action[] = [
   "back",
 ];
 
-const FOOTNOTE = "j/k scroll · any other key closes · a count before j/k moves that many rows (15j) · Ctrl-C quits";
+const FOOTNOTE = "j/k <C-d>/<C-u> scroll · any other key closes · Ctrl-C quits";
+/** Counts are typed in the views, not here (keys go to the help while it shows). */
+const COUNTS = "In a view: 15j moves 15 rows; 1–4 alone switch tabs (after a moment, or at once before another key).";
 
 export interface HelpSection {
   title: string;
@@ -62,23 +64,23 @@ export function Help() {
   const dims = useTerminalDimensions();
   let scroll: ScrollBoxRenderable | undefined;
   const halfPage = () => Math.max(1, Math.floor((scroll?.viewport.height ?? 10) / 2));
-  /** The motions of tui.toml that scroll the list, by action. */
-  const moves: [Action, () => void][] = [
-    ["down", () => scroll?.scrollBy(1)],
-    ["up", () => scroll?.scrollBy(-1)],
-    ["half_page_down", () => scroll?.scrollBy(halfPage())],
-    ["half_page_up", () => scroll?.scrollBy(-halfPage())],
-    ["first", () => scroll?.scrollTo(0)],
-    ["last", () => scroll?.scrollTo(scroll.scrollHeight)],
-  ];
+  /** The motions of tui.toml that scroll the list. */
+  const moves: Partial<Record<Action, () => void>> = {
+    down: () => scroll?.scrollBy(1),
+    up: () => scroll?.scrollBy(-1),
+    half_page_down: () => scroll?.scrollBy(halfPage()),
+    half_page_up: () => scroll?.scrollBy(-halfPage()),
+    first: () => scroll?.scrollTo(0),
+    last: () => scroll?.scrollTo(scroll.scrollHeight),
+  };
   onCleanup(
     app.keymap.intercept(
       "key",
       (ctx) => {
         if (!app.ui.help()) return;
         ctx.consume();
-        const move = moves.find(([action]) => app.config.keymap[action].some((b) => isKey(ctx.event, b.text)));
-        if (move) move[1]();
+        const move = actionOfKey(ctx.event, app.config.keymap, Object.keys(moves) as Action[]);
+        if (move) moves[move]!();
         else app.ui.setHelp(false);
       },
       { priority: 50 },
@@ -88,9 +90,9 @@ export function Help() {
   const sections = () => helpSections(viewOf(app.ui.route()).keys, app.config.keymap);
   const widths = () => {
     const rows = sections().flatMap((s) => s.rows);
-    const keys = Math.max(...rows.map((r) => Bun.stringWidth(r.keys)));
-    const action = Math.max(...rows.map((r) => r.action.length));
-    const line = Math.max(...rows.map((r) => keys + action + 4 + Bun.stringWidth(r.desc)), Bun.stringWidth(FOOTNOTE));
+    const keys = Math.max(0, ...rows.map((r) => Bun.stringWidth(r.keys)));
+    const action = Math.max(0, ...rows.map((r) => r.action.length));
+    const line = Math.max(...rows.map((r) => keys + action + 4 + Bun.stringWidth(r.desc)), Bun.stringWidth(FOOTNOTE), Bun.stringWidth(COUNTS));
     // Padding, borders and the scrollbar around the longest line, within the terminal.
     return { keys, action, box: Math.min(line + 7, dims().width - 2) };
   };
@@ -125,6 +127,7 @@ export function Help() {
             </For>
           </scrollbox>
           <Line segments={[{ text: "" }]} />
+          <Line segments={[{ text: COUNTS, color: "dim" }]} />
           <Line segments={[{ text: FOOTNOTE, color: "dim" }]} />
         </box>
       </box>

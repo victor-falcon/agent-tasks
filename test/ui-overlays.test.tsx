@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { listTasks } from "../src/store.ts";
 import { buildDashboard } from "../src/tui/snapshot.ts";
 import { commands } from "../src/commands/index.ts";
 import { createContext } from "../src/context.ts";
@@ -217,6 +218,7 @@ describe("palette model", () => {
       commands: ["overview.down", "overview.open", "overview.retry", "overview.refresh", "overview.tab_system", "overview.palette", "confirm.yes"],
       keymap,
       dash: dashboard(),
+      tasks: listTasks(home.paths).items,
     });
     const titles = items.map((i) => i.title);
     expect(titles).toContain("Reload everything now");
@@ -237,14 +239,19 @@ describe("palette model", () => {
 
   test("targets: only runs the action takes, the one the view is open on first", () => {
     const dash = dashboard();
-    const retry = targetItems("retry", dash);
+    const tasks = listTasks(home.paths).items;
+    const retry = targetItems("retry", dash, tasks);
     expect(retry.length).toBeGreaterThan(0);
     expect(retry.every((i) => /failed|timed out|missed/.test(i.detail))).toBe(true);
-    const attach = targetItems("attach", dash, { ref: "sentry-summary/20261117T090000Z" });
+    const attach = targetItems("attach", dash, tasks, { ref: "sentry-summary/20261117T090000Z" });
     expect(attach.every((i) => /running|blocked/.test(i.detail))).toBe(true);
     expect(attach[0]!.title).toBe("sentry-summary/20261117T090000Z");
-    const pause = targetItems("toggle_pause", dash, { taskId: "release-notes" });
-    expect(pause[0]!.pick).toEqual({ type: "apply", action: "toggle_pause", taskId: "release-notes", run: null });
+    const pause = targetItems("toggle_pause", dash, tasks, { taskId: "release-notes" });
+    expect(pause[0]!.pick).toEqual({ type: "apply", action: "toggle_pause", target: { kind: "task", taskId: "release-notes" } });
+    // Every saved task, even one with no upcoming slot (review-pr-123 ran once, and is blocked).
+    expect(pause.map((i) => i.title)).toContain("review-pr-123");
+    expect(pause.find((i) => i.title === "review-pr-123")!.detail).toEndWith("no upcoming run");
+    expect(pause.find((i) => i.title === "backup-notes")!.detail).toEndWith("paused");
   });
 
   test("ranking puts the best match first and keeps the order on ties", () => {

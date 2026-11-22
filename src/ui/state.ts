@@ -3,8 +3,7 @@ import { type Accessor, createSignal } from "solid-js";
 // The UI's own state, apart from the data: which tab and view are shown (each
 // tab keeps its stack of opened details, so coming back finds it as it was),
 // the selection of each view by identity, the overlays (confirm, help, the
-// command palette) and
-// what goes in the footer (background commands, toasts).
+// command palette) and what goes in the footer (background commands, toasts).
 
 export const TAB_IDS = ["overview", "tasks", "runs", "system"] as const;
 export type TabId = (typeof TAB_IDS)[number];

@@ -11,7 +11,7 @@ import { HOLD_SEQUENCE } from "../keymap/vim.ts";
 // so it shows the keys tui.toml set and only those that work in this view.
 // It waits a moment before showing, so `gg` typed at speed never flashes it;
 // once shown it holds the sequence (no timeout) until the next key: Esc, or
-// any key that continues nothing, drops it.
+// any key that continues nothing, drops it (and does nothing else, as in Vim).
 
 /** How long a half-typed sequence waits before the popup shows. */
 export const WHICH_KEY_DELAY_MS = 500;
@@ -25,6 +25,8 @@ interface Popup {
   /** The keys typed so far (`g`). */
   typed: string;
   rows: WhichKeyRow[];
+  /** Width of the keys column. */
+  width: number;
 }
 
 /** The rows of the popup: each key that can follow `typed`, with its command's description ("…" when it starts a longer sequence). */
@@ -55,7 +57,7 @@ export function WhichKey() {
     const rows = whichKeyRows(typed, keymap.getActiveKeys({ includeMetadata: true }));
     if (rows.length === 0) return hide();
     keymap.setData(HOLD_SEQUENCE, true);
-    setPopup({ typed, rows });
+    setPopup({ typed, rows, width: Math.max(...rows.map((r) => Bun.stringWidth(r.keys))) });
   };
 
   onCleanup(
@@ -90,8 +92,8 @@ export function WhichKey() {
           title={` ${open().typed}… `}
           titleAlignment="left"
         >
-          <For each={open().rows}>{(row) => <Line segments={[{ text: fitText(row.keys, Math.max(...open().rows.map((r) => Bun.stringWidth(r.keys)))), color: "yellow" }, { text: "  " }, { text: row.desc }]} />}</For>
-          <Line segments={[{ text: "<Esc> cancel", color: "dim" }]} />
+          <For each={open().rows}>{(row) => <Line segments={[{ text: fitText(row.keys, open().width), color: "yellow" }, { text: "  " }, { text: row.desc }]} />}</For>
+          <Line segments={[{ text: "<Esc> or another key cancels", color: "dim" }]} />
         </box>
       )}
     </Show>

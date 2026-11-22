@@ -1,6 +1,7 @@
 import { isInProgress } from "../../run-info.ts";
+import type { Task } from "../../schema.ts";
 import type { Dashboard, DashRun } from "../../tui/snapshot.ts";
-import { RETRYABLE } from "../actions.ts";
+import { RETRYABLE, type Target } from "../actions.ts";
 import { ACTIONS, type Action, COUNTED_ACTIONS } from "../keymap/actions.ts";
 import type { Keymap } from "../keymap/config.ts";
 import { GLOBAL_ACTIONS } from "../keymap/spec.ts";
@@ -17,6 +18,8 @@ import { GLOBAL_ACTIONS } from "../keymap/spec.ts";
 //   own key for the same action (which acts on the selected row), so one
 //   action is listed once; the row the view is open on comes first.
 // - Tasks (Enter opens the task) and recent runs (Enter opens the run).
+//   Every saved task (archived ones are only in the Tasks tab: nothing but
+//   reading applies to them).
 //
 // With nothing typed they come in that order of use: acting on a task or a
 // run, the view's own actions, the ones of every view (tabs, reload…), then
@@ -44,7 +47,7 @@ export function isAsking(action: string): action is AskingAction {
 }
 
 /** What choosing a row does. */
-export type Pick =
+export type PaletteChoice =
   /** Runs a command of the current view's layer (as its key would). */
   | { type: "command"; command: string }
   /** Asks for the target of an action (the palette's second step). */
@@ -52,7 +55,7 @@ export type Pick =
   | { type: "open_task"; id: string }
   | { type: "open_run"; ref: string }
   /** The second step: the action on the chosen task or run. */
-  | { type: "apply"; action: AskingAction; taskId: string; run: DashRun | null };
+  | { type: "apply"; action: AskingAction; target: Target };
 
 export interface PaletteItem {
   /** Unique within a list. */
@@ -63,7 +66,9 @@ export interface PaletteItem {
   detail: string;
   /** The keys that do the same here (tui.toml's), or "". */
   keys: string;
-  pick: Pick;
+  /** The tui.toml action, for a row that is one. */
+  action?: Action;
+  pick: PaletteChoice;
 }
 
 export interface CatalogInput {
@@ -73,6 +78,8 @@ export interface CatalogInput {
   commands: readonly string[];
   keymap: Keymap;
   dash: Dashboard | null;
+  /** The saved tasks (store.listTasks): the dashboard's Next leaves out those with no upcoming slot. */
+  tasks: readonly Pick<Task, "id" | "title" | "enabled">[];
 }
 
 const keysOf = (keymap: Keymap, action: Action) => keymap[action].map((b) => b.text).join(" ");
@@ -80,15 +87,19 @@ const keysOf = (keymap: Keymap, action: Action) => keymap[action].map((b) => b.t
 /** First line of a summary or reason, for a run's detail. */
 const firstLine = (text: string | null) => text?.split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
 
-function taskItems(dash: Dashboard | null): PaletteItem[] {
-  return (dash?.next ?? []).map((task) => ({
-    id: `task:${task.task_id}`,
-    kind: "task",
-    title: task.task_id,
-    detail: [task.title, task.schedule, task.state === "paused" ? "paused" : null].filter(Boolean).join(" · "),
-    keys: "",
-    pick: { type: "open_task", id: task.task_id },
-  }));
+/** Tasks by id, with their schedule as the dashboard words it when they have a next slot. */
+function taskItems(tasks: CatalogInput["tasks"], dash: Dashboard | null): PaletteItem[] {
+  const next = new Map((dash?.next ?? []).map((n) => [n.task_id, n]));
+  return [...tasks]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((task) => ({
+      id: `task:${task.id}`,
+      kind: "task",
+      title: task.id,
+      detail: [task.title, task.enabled ? (next.get(task.id)?.schedule ?? "no upcoming run") : "paused"].join(" · "),
+      keys: "",
+      pick: { type: "open_task", id: task.id },
+    }));
 }
 
 /** Running runs first, then the newest finished ones, each once. */
@@ -107,7 +118,7 @@ export function paletteCatalog(input: CatalogInput): PaletteItem[] {
   const viewActions = input.commands.filter((c) => c.startsWith(prefix)).map((c) => c.slice(prefix.length) as Action);
   const actions: PaletteItem[] = viewActions
     .filter((action) => action in ACTIONS && !MOTIONS.includes(action) && action !== "palette" && !isAsking(action))
-    .map((action) => ({ id: `action:${action}`, kind: "action", title: ACTIONS[action], detail: action, keys: keysOf(input.keymap, action), pick: { type: "command", command: `${prefix}${action}` } }));
+    .map((action) => ({ id: `action:${action}`, kind: "action", title: ACTIONS[action], detail: action, keys: keysOf(input.keymap, action), action, pick: { type: "command", command: `${prefix}${action}` } }));
   const asking: PaletteItem[] = (Object.keys(ASKING_ACTIONS) as AskingAction[]).map((action) => ({
     id: `ask:${action}`,
     kind: "action",
@@ -115,25 +126,26 @@ export function paletteCatalog(input: CatalogInput): PaletteItem[] {
     detail: action,
     // The view's own key does it to the selected row: worth knowing.
     keys: viewActions.includes(action) ? keysOf(input.keymap, action) : "",
+    action,
     pick: { type: "ask", action },
   }));
   const runs: PaletteItem[] = recentRuns(input.dash).map((run) => ({ id: `run:${run.ref}`, kind: "run", title: run.ref, detail: runDetail(run), keys: "", pick: { type: "open_run", ref: run.ref } }));
-  const isGlobal = (item: PaletteItem) => GLOBAL_ACTIONS.includes(item.detail as Action);
-  return [...asking, ...actions.filter((a) => !isGlobal(a)), ...actions.filter(isGlobal), ...taskItems(input.dash), ...runs];
+  const isGlobal = (item: PaletteItem) => item.action !== undefined && GLOBAL_ACTIONS.includes(item.action);
+  return [...asking, ...actions.filter((a) => !isGlobal(a)), ...actions.filter(isGlobal), ...taskItems(input.tasks, input.dash), ...runs];
 }
 
 /** The palette's second step: the tasks or runs `action` can act on, the one the view is open on (`current`) first. */
-export function targetItems(action: AskingAction, dash: Dashboard | null, current: { taskId?: string; ref?: string } = {}): PaletteItem[] {
+export function targetItems(action: AskingAction, dash: Dashboard | null, tasks: CatalogInput["tasks"], current: { taskId?: string; ref?: string } = {}): PaletteItem[] {
   const def = ASKING_ACTIONS[action];
   let items: PaletteItem[];
   if (def.target === "task") {
-    items = taskItems(dash).map((item) => ({ ...item, id: `apply:${item.title}`, pick: { type: "apply", action, taskId: item.title, run: null } }));
+    items = taskItems(tasks, dash).map((item) => ({ ...item, id: `apply:${item.title}`, pick: { type: "apply", action, target: { kind: "task", taskId: item.title } } }));
     if (current.taskId) items = [...items.filter((i) => i.title === current.taskId), ...items.filter((i) => i.title !== current.taskId)];
   } else {
     const accepts = "accepts" in def ? def.accepts : () => true;
     items = recentRuns(dash)
       .filter(accepts)
-      .map((run) => ({ id: `apply:${run.ref}`, kind: "run", title: run.ref, detail: runDetail(run), keys: "", pick: { type: "apply", action, taskId: run.task_id, run } }));
+      .map((run) => ({ id: `apply:${run.ref}`, kind: "run", title: run.ref, detail: runDetail(run), keys: "", pick: { type: "apply", action, target: { kind: "run", run } } }));
     if (current.ref) items = [...items.filter((i) => i.title === current.ref), ...items.filter((i) => i.title !== current.ref)];
   }
   return items;

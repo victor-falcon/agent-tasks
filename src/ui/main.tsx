@@ -9,7 +9,7 @@ import { type App, AppContext } from "./context.ts";
 import { COUNTED_ACTIONS } from "./keymap/actions.ts";
 import type { TuiConfig } from "./keymap/config.ts";
 import { createCount } from "./keymap/count.ts";
-import { createAppKeymap, isKey } from "./keymap/vim.ts";
+import { actionOfKey, createAppKeymap } from "./keymap/vim.ts";
 import { createSeen } from "./seen.ts";
 import { createUiState, TAB_IDS } from "./state.ts";
 import { createStore } from "./store.ts";
@@ -63,7 +63,7 @@ export async function mountApp(renderer: CliRenderer, opts: AppOptions): Promise
   const ui = createUiState();
   const count = createCount(keymap, {
     enabled: () => !ui.modal(),
-    counted: (event) => COUNTED_ACTIONS.some((action) => opts.config.keymap[action].some((b) => isKey(event, b.text))),
+    counted: (event) => actionOfKey(event, opts.config.keymap, COUNTED_ACTIONS) !== null,
   });
   let running = true;
 
