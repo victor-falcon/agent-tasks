@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readSync } from "node:fs";
 import { extname, isAbsolute, join } from "node:path";
 import { capturedLog, renderAttempt, renderEvents } from "../../../commands/log.ts";
 import type { Context } from "../../../context.ts";
@@ -8,12 +8,12 @@ import { RUN_MARKS } from "../../../output/symbols.ts";
 import { formatSpan } from "../../../output/time.ts";
 import { tildify } from "../../../paths.ts";
 import { attemptDuration, isInProgress, lastActivity, neverStarted } from "../../../run-info.ts";
-import type { Run, Task } from "../../../schema.ts";
+import type { Run, SessionRecord, Task } from "../../../schema.ts";
 import { runRef, runSlotId } from "../../../slot.ts";
 import { readRunByRef, readTask } from "../../../store.ts";
 import { describeSchedule } from "../../../task-info.ts";
 import type { DashRun } from "../../../tui/snapshot.ts";
-import { sanitize, wrap } from "../../../tui/text.ts";
+import { sanitize } from "../../../tui/text.ts";
 import type { Segment } from "../../components/cells.ts";
 
 // What the Run detail shows, as plain data: the same sections as the old
@@ -63,12 +63,22 @@ export const MAX_FILE_BYTES = 512 * 1024;
 
 const PLAIN = createStyle(false);
 
-function readShown(path: string): { text: string; cut: boolean } | null {
+/** The file, or only its end when it is big (that's where the result usually is): read again on every reload of a running log. */
+export function readShown(path: string, max = MAX_FILE_BYTES): { text: string; cut: boolean } | null {
   if (!existsSync(path)) return null;
-  const content = readFileSync(path);
-  const cut = content.length > MAX_FILE_BYTES;
-  // Keep the end: that's where the result usually is.
-  return { text: (cut ? content.subarray(content.length - MAX_FILE_BYTES) : content).toString("utf8"), cut };
+  const fd = openSync(path, "r");
+  try {
+    const size = fstatSync(fd).size;
+    const length = Math.min(size, max);
+    const buffer = Buffer.alloc(length);
+    readSync(fd, buffer, 0, length, size - length);
+    let text = buffer.toString("utf8");
+    // A cut can split a character or a line: start at the next whole line.
+    if (length < size) text = text.slice(text.indexOf("\n") + 1);
+    return { text, cut: length < size };
+  } finally {
+    closeSync(fd);
+  }
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -120,7 +130,11 @@ export function resultFacts(run: Run, timezone: string, now: Date): Segment[] {
   return facts.flatMap((fact, i) => (i === 0 ? fact : [{ text: " · ", color: "dim" as const }, ...fact]));
 }
 
-/** The run as the shared actions see it (the dashboard's row shape), for runs outside the snapshot too. */
+/**
+ * The run as the shared actions see it (the dashboard's row shape), for runs
+ * outside the snapshot too (older than its last 100). Mirrors snapshot.ts's
+ * dashRun, which is not exported and src/tui stays untouched until T7.
+ */
 function dashRunOf(ref: string, run: Run): DashRun {
   const last = run.attempts.at(-1);
   return {
@@ -155,7 +169,8 @@ export function buildRunModel(ctx: Context, ref: string, timezone: string): RunM
   const sections: RunSection[] = [];
 
   // The result: how it ended and what the agent said.
-  const summary = last?.summary ?? null;
+  // Written by the agent: no escape sequences or control characters reach the screen or the clipboard.
+  const summary = last?.summary ? sanitize(last.summary).trimEnd() : null;
   const result: Block[] = [{ kind: "facts" }];
   if (summary) result.push({ kind: "markdown", text: summary });
   else {
@@ -186,14 +201,12 @@ export function buildRunModel(ctx: Context, ref: string, timezone: string): RunM
   }
 
   // The task and the run, for when the result raises questions.
-  const rows: [string, string][] = [
-    ["Task", task ? `${task.id} — ${task.title}` : `${run.task_id} (removed)`],
-    ...(task ? ([["Folder", tildify(task.cwd, ctx.env)], ["Schedule", describeSchedule(task)]] as [string, string][]) : []),
-    ["Slot", slotLabel(run, timezone, ctx.now)],
-    ...(last ? ([["Attempts", `${run.attempts.length}${task ? ` of ${(task.retries ?? 0) + 1}` : ""}`]] as [string, string][]) : []),
-    ...(last?.session ? ([["Session", sessionState(last.session)]] as [string, string][]) : []),
-    ["Run ref", canonical],
-  ];
+  const rows: [string, string][] = [["Task", task ? `${task.id} — ${task.title}` : `${run.task_id} (removed)`]];
+  if (task) rows.push(["Folder", tildify(task.cwd, ctx.env)], ["Schedule", describeSchedule(task)]);
+  rows.push(["Slot", slotLabel(run, timezone, ctx.now)]);
+  if (last) rows.push(["Attempts", `${run.attempts.length}${task ? ` of ${(task.retries ?? 0) + 1}` : ""}`]);
+  if (last?.session) rows.push(["Session", sessionState(last.session)]);
+  rows.push(["Run ref", canonical]);
   sections.push({
     id: "details",
     name: "Details",
@@ -243,26 +256,21 @@ export function buildRunModel(ctx: Context, ref: string, timezone: string): RunM
   return { ref: canonical, run, target: dashRunOf(canonical, run), summary, outputPath, blocked: run.status === "blocked", sections };
 }
 
-function sessionState(session: NonNullable<Run["attempts"][number]["session"]>): string {
+function sessionState(session: SessionRecord): string {
   const where = `${session.launcher} ${session.handle}${session.machine ? ` on ${session.machine}` : ""}`;
   if (session.closed_at) return `${where} (closed)`;
   return `${where} (open${session.kept_open ? ", kept open" : ""})`;
 }
 
-/** Whether the run's latest attempt still has a session to close (`c`). */
-export function hasOpenSession(run: Run): boolean {
+/** The session of the run's latest attempt while it is open (what `c` closes), or null. */
+export function openSession(run: Run): SessionRecord | null {
   const session = run.attempts.at(-1)?.session;
-  return Boolean(session && !session.closed_at);
+  return session && !session.closed_at ? session : null;
 }
 
 // ---------------------------------------------------------------------------
 // The log, wrapped, and searching it
 // ---------------------------------------------------------------------------
-
-/** The log as the rows it takes at `width` columns. */
-export function logRows(text: string, width: number): string[] {
-  return wrap(text, width);
-}
 
 /** Smart case, like Vim's: a query with a capital letter matches case, else it does not. */
 export function matchRows(rows: readonly string[], query: string): number[] {

@@ -1,7 +1,9 @@
 import type { BoxRenderable, MouseEvent, ScrollBoxRenderable, TextRenderable } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/solid";
+import { existsSync } from "node:fs";
 import { type Accessor, createMemo, createSignal, For, Index, Match, onCleanup, onMount, Show, Switch } from "solid-js";
 import { displayTimezone } from "../../../task-info.ts";
+import { wrap } from "../../../tui/text.ts";
 import { fitText, type Segment } from "../../components/cells.ts";
 import { Line } from "../../components/line.tsx";
 import { useApp } from "../../context.ts";
@@ -10,7 +12,7 @@ import { useViewKeys } from "../../keymap/layer.ts";
 import type { UiState } from "../../state.ts";
 import type { ViewDef, ViewProps } from "../types.ts";
 import { RUN_KEYS } from "./keys.ts";
-import { type Block, buildRunModel, type Geometry, logRows, logSegments, matchRows, moveInRun, nextMatch, type Place, resultFacts, reveal, type RunModel, type RunSection, runTitle, type SectionId } from "./model.ts";
+import { type Block, buildRunModel, type Geometry, logSegments, matchRows, moveInRun, nextMatch, openSession, type Place, resultFacts, reveal, type RunModel, type RunSection, runTitle, type SectionId } from "./model.ts";
 
 // One run, what it did first: its result (the summary as Markdown) and its
 // --output-file open, then folded sections for the details, the attempts,
@@ -29,7 +31,11 @@ interface Saved {
   match: number | null;
 }
 
-/** Per dashboard (its UI state) and run ref. */
+/**
+ * Per dashboard (its UI state) and run ref. Local to this view on purpose:
+ * only it knows what a run's place is, and the UI state stays the same for
+ * every view. A few small entries per run opened, for as long as the app runs.
+ */
 const SAVED = new WeakMap<UiState, Map<string, Saved>>();
 
 function savedOf(ui: UiState): Map<string, Saved> {
@@ -38,7 +44,7 @@ function savedOf(ui: UiState): Map<string, Saved> {
   return map;
 }
 
-/** Columns taken around a section's text: the padding on both sides and the scrollbar. */
+/** Columns taken around a section's text: the view's paddingLeft, a section's paddingRight and the scrollbar (below). */
 const GUTTER = 3;
 
 function RunDetail(props: ViewProps) {
@@ -89,9 +95,14 @@ function RunDetail(props: ViewProps) {
   });
   const rows = createMemo(() => {
     const text = logText();
-    return text === null ? [] : logRows(text, bodyWidth());
+    return text === null ? [] : wrap(text, bodyWidth());
   });
   const matches = createMemo(() => matchRows(rows(), query()));
+  /** The match being shown, while it still is one (a resize re-wraps the log, a reload changes it). */
+  const current = () => {
+    const row = match();
+    return row !== null && matches().includes(row) ? row : null;
+  };
 
   let scroll: ScrollBoxRenderable | undefined;
   let logNode: TextRenderable | undefined;
@@ -102,7 +113,7 @@ function RunDetail(props: ViewProps) {
     if (saved && scroll) scroll.afterLayout(() => scroll?.scrollTo(saved.scroll));
   });
   onCleanup(() => {
-    savedOf(ui).set(ref(), { folds: folds(), selected: selectedId(), scroll: scroll?.scrollTop ?? 0, query: query(), match: match() });
+    savedOf(ui).set(ref(), { folds: folds(), selected: selectedId(), scroll: scroll?.scrollTop ?? 0, query: query(), match: current() });
   });
 
   /** Where the sections are now, in rows of the scrolled content. */
@@ -166,7 +177,7 @@ function RunDetail(props: ViewProps) {
   };
   const findNext = (direction: 1 | -1) => {
     if (query() === "") return ui.toast(`no search yet: ${keyHint(app.config.keymap, "search_log") ?? "/"} searches the log`);
-    const row = nextMatch(matches(), match() ?? (direction > 0 ? -1 : rows().length), direction);
+    const row = nextMatch(matches(), current() ?? (direction > 0 ? -1 : rows().length), direction);
     if (row === null) return ui.toast(`no match for "${query()}" in the log`);
     goToMatch(row);
   };
@@ -192,8 +203,14 @@ function RunDetail(props: ViewProps) {
     ),
   );
 
-  const target = () => {
+  /** The run, or null with a toast when its file is gone (the view says so too). */
+  const live = () => {
     const m = model();
+    if (!m) ui.toast("this run is gone");
+    return m;
+  };
+  const target = () => {
+    const m = live();
     return m ? { kind: "run" as const, run: m.target } : null;
   };
   const halfPage = () => Math.max(1, Math.floor((scroll?.viewport.height ?? dims().height) / 2));
@@ -221,14 +238,18 @@ function RunDetail(props: ViewProps) {
     attach: () => void actions.attach(target()),
     retry: () => actions.retry(target()),
     run_now: () => actions.runNow(target()),
-    close_session: () => actions.closeSession(target()),
+    close_session: () => {
+      const m = live();
+      if (m) actions.closeSession(m.target, openSession(m.run)?.handle ?? null);
+    },
     go_to_task: () => {
-      const m = model();
+      const m = live();
       if (m) ui.push({ view: "task", params: { id: m.run.task_id } });
     },
     open_output: () => {
       const path = model()?.outputPath;
       if (!path) return void ui.toast("this run has no output file");
+      if (!existsSync(path)) return void ui.toast("its output file is gone");
       void actions.openInPager(path);
     },
     copy_ref: () => actions.copy(model()?.ref ?? ref(), "ref"),
@@ -256,6 +277,7 @@ function RunDetail(props: ViewProps) {
             <box flexDirection="column" paddingTop={1}>
               <Line segments={[{ text: ref(), color: "bold" }]} />
               <Line segments={[{ text: error(), color: "red" }]} wrap />
+              <Line segments={[{ text: `${keyHint(app.config.keymap, "back") ?? "<Esc>"} back`, color: "dim" }]} />
             </box>
           )}
         </Match>
@@ -267,7 +289,7 @@ function RunDetail(props: ViewProps) {
               </box>
               <Show when={m().blocked}>
                 <box border borderStyle="rounded" borderColor={theme.magenta} paddingLeft={1} flexShrink={0} marginRight={1}>
-                  <Line segments={[{ text: "Waiting for you. ", color: "magenta" }, ...(attachKey() ? [{ text: attachKey()!, color: "yellow" as const }, { text: " attach to its session" }] : [])]} />
+                  <Line segments={[{ text: "Waiting for you. ", color: "magenta" }, ...(attachKey() && m().target.handle ? [{ text: attachKey()!, color: "yellow" as const }, { text: " attach to its session" }] : [])]} />
                 </box>
               </Show>
               <scrollbox ref={scroll} flexGrow={1} marginTop={1} scrollY scrollX={false}>
@@ -303,7 +325,7 @@ function RunDetail(props: ViewProps) {
                                       timezone={tz()}
                                       rows={rows()}
                                       matches={matches()}
-                                      match={match()}
+                                      match={current()}
                                       onLog={(node) => (logNode = node)}
                                     />
                                   )}
@@ -319,7 +341,7 @@ function RunDetail(props: ViewProps) {
               </scrollbox>
               <Show when={searching() || query() !== ""}>
                 <box flexShrink={0}>
-                  <Line segments={searchLine(searching() ? draft() : query(), searching(), matches(), match())} />
+                  <Line segments={searchLine(searching() ? draft() : query(), searching(), matches(), current())} />
                 </box>
               </Show>
             </box>
@@ -336,12 +358,13 @@ function heading(section: RunSection, open: boolean, width: number): Segment[] {
   return [{ text: fitText(head + "─".repeat(Math.max(0, width - Bun.stringWidth(head))), width) }];
 }
 
+/** `/query  3 of 12` (no count while a new query is typed: it would be the old one's). */
 function searchLine(text: string, typing: boolean, matches: readonly number[], match: number | null): Segment[] {
-  const where = matches.length === 0 ? (text === "" || typing ? "" : "  no match") : `  ${match === null ? "-" : matches.indexOf(match) + 1} of ${matches.length}`;
+  const where = typing ? "" : matches.length === 0 ? "  no match" : `  ${match === null ? "-" : matches.indexOf(match) + 1} of ${matches.length}`;
   return [{ text: `/${text}`, color: "yellow" }, ...(typing ? [{ text: "█" }] : []), { text: where, color: "dim" }];
 }
 
-function BlockView(props: { block: Block; run: RunModel; timezone: string; rows: readonly string[]; matches: readonly number[]; match: number | null; onLog(node: TextRenderable): void }) {
+function BlockView(props: { block: Block; run: RunModel; timezone: string; rows: readonly string[]; matches: readonly number[]; match: number | null; onLog(node: TextRenderable | undefined): void }) {
   const { theme, store } = useApp();
   return (
     <Switch>
@@ -360,7 +383,11 @@ function BlockView(props: { block: Block; run: RunModel; timezone: string; rows:
         {(b: Accessor<Extract<Block, { kind: "lines" }>>) => <For each={b().lines}>{(line) => <Line segments={line.length > 0 ? line : [{ text: "" }]} wrap />}</For>}
       </Match>
       <Match when={props.block.kind === "log"}>
-        <text ref={props.onLog} fg={theme.fg} bg={theme.bg} wrapMode="none" flexShrink={0}>
+        <text
+          ref={(node: TextRenderable) => {
+            props.onLog(node);
+            onCleanup(() => props.onLog(undefined));
+          }} fg={theme.fg} bg={theme.bg} wrapMode="none" flexShrink={0}>
           <For each={logSegments(props.rows, props.matches, props.match)}>
             {(segment) => (
               <span style={{ fg: segment.color === "yellow" ? theme.yellow : theme.fg, bg: theme.bg, inverse: segment.color === "inverse" }}>{segment.text}</span>

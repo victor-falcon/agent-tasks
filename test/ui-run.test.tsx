@@ -10,7 +10,7 @@ import { readRunByRef, writeRun } from "../src/store.ts";
 import type { CommandRunner } from "../src/tui/app.ts";
 import { buildKeymap } from "../src/ui/keymap/config.ts";
 import { type AppHandle, mountApp } from "../src/ui/main.tsx";
-import { buildRunModel, type Geometry, logSegments, matchRows, moveInRun, nextMatch, reveal } from "../src/ui/views/run/model.ts";
+import { buildRunModel, type Geometry, logSegments, matchRows, moveInRun, nextMatch, readShown, reveal } from "../src/ui/views/run/model.ts";
 import { FIXTURE_NOW, FIXTURE_TZ, writeFixture } from "./fixtures/views.ts";
 import { makeTempHome, type TempHome } from "./helpers.ts";
 
@@ -185,9 +185,14 @@ describe("sections", () => {
     expect(await screen()).toContain("│ Waiting for you. a attach to its session");
   });
 
-  test("a run that is gone says so", async () => {
-    const { screen } = await start("sentry-summary/20991117T080000Z");
-    expect(await screen()).toContain("sentry-summary/20991117T080000Z");
+  test("a run that is gone says so, and how to go back; its actions say it is gone", async () => {
+    const { screen, press, calls } = await start("sentry-summary/20991117T080000Z");
+    const text = await screen();
+    expect(text).toContain("sentry-summary/20991117T080000Z");
+    expect(text).toContain("<Esc> back");
+    await press("r");
+    expect(await screen()).toContain("this run is gone");
+    expect(calls).toEqual([]);
   });
 });
 
@@ -259,6 +264,17 @@ describe("keys", () => {
     expect(await screen()).toContain("/line 11  11 of 11");
   });
 
+  test("a resize re-wraps the log: a match that no longer is one is dropped", async () => {
+    writeData("runs/sentry-summary/20261117T080000Z.log", `${"x".repeat(150)} boom\nline 2\nboom again`);
+    const { screen, press, setup } = await start(FAILED, { width: 200 });
+    await press("/", "b", "o", "o", "m", "<CR>");
+    expect(await screen()).toContain("/boom  1 of 2");
+    setup.resize(100, 30);
+    expect(await screen()).toContain("/boom  - of 2");
+    await press("n");
+    expect(await screen()).toContain("/boom  1 of 2");
+  });
+
   test("searching a run without a log says so; keys typed in a search are not actions", async () => {
     const { screen, press, calls } = await start("inbox-triage/20261117T050000Z");
     await press("/");
@@ -319,7 +335,7 @@ describe("actions", () => {
   });
 
   test("c closes an open session after asking; a closed one says why not", async () => {
-    const { screen, press, calls } = await start(FAILED);
+    const { screen, press, calls, handle: h } = await start(FAILED);
     await press("c");
     expect(await screen()).toContain(`Close the session of ${FAILED}?`);
     expect(await screen()).toContain("It closes p28; the run's status does not change.");
@@ -327,6 +343,7 @@ describe("actions", () => {
     await settle();
     expect(calls).toEqual([{ args: ["session", "close", FAILED], interactive: false }]);
     editRun(FAILED, (run) => void (run.attempts.at(-1)!.session!.closed_at = "2026-11-17T09:20:00Z"));
+    h.app.store.reload();
     await press("c");
     expect(await screen()).toContain("only a run whose session is still open");
     expect(calls.length).toBe(1);
@@ -345,6 +362,14 @@ describe("actions", () => {
     expect(await screen()).toContain("copied the ref");
     await press("Y");
     expect(copied).toEqual([FAILED, "sentry-cli has no auth"]);
+  });
+
+  test("o on an output file that is gone says so instead of opening the pager", async () => {
+    editRun(FAILED, (run) => void (run.attempts.at(-1)!.output = "runs/sentry-summary/gone.md"));
+    const { screen, press, spawned } = await start(FAILED);
+    await press("o");
+    expect(await screen()).toContain("its output file is gone");
+    expect(spawned).toEqual([]);
   });
 });
 
@@ -398,6 +423,18 @@ describe("model", () => {
     expect(nextMatch([], 0, 1)).toBeNull();
     expect(logSegments(rows, [2], 2)).toEqual([{ text: "Error here\nfine\n" }, { text: "error again", color: "inverse" }, { text: "\n" }, { text: "fine" }]);
     expect(logSegments(rows, [], null).map((s) => s.text).join("")).toBe(rows.join("\n"));
+  });
+
+  test("a big file shows its end, from a whole line", () => {
+    const file = writeData("big.log", "first line\nsecond line\nthird line\n");
+    expect(readShown(file, 1000)).toEqual({ text: "first line\nsecond line\nthird line\n", cut: false });
+    expect(readShown(file, 20)).toEqual({ text: "third line\n", cut: true });
+    expect(readShown(join(home.dataDir, "nope"))).toBeNull();
+  });
+
+  test("the summary is shown without escape sequences", () => {
+    editRun(FAILED, (run) => void (run.attempts.at(-1)!.summary = "\x1b[31mred\x1b[0m and\x07 done"));
+    expect(buildRunModel(ctx(), FAILED, FIXTURE_TZ).summary).toBe("red and done");
   });
 
   test("the run as the actions see it, and the session in Details", () => {
