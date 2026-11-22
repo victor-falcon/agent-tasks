@@ -36,9 +36,9 @@ exports[`event lines anomaly, plain and colored 1`] = `"10:05:01  ⚠ broken    
 
 exports[`event lines anomaly, plain and colored 2`] = `"\x1B[2m10:05:01\x1B[22m  \x1B[33m⚠\x1B[39m broken                               watching task broken: invalid JSON"`;
 
-exports[`event lines tick, recovered and warning lines 1`] = `"\x1B[2m10:05:01\x1B[22m  \x1B[33m⚠\x1B[39m tick failed: boom"`;
-
 exports[`header and status line header 1`] = `"\x1B[1magent-tasks runner\x1B[22m · every 5m · launcher: herdr (clc) · data: ~/.local/share/agent-tasks"`;
+
+exports[`event lines tick, recovered and warning lines 1`] = `"\x1B[2m10:05:01\x1B[22m  \x1B[33m⚠\x1B[39m tick failed: boom"`;
 
 exports[`header and status line status line in every health 1`] = `
 "\x1B[2m─────────────────────────────────────────────────────────────────────────────\x1B[22m
