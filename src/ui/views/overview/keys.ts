@@ -12,7 +12,7 @@ export const OVERVIEW_KEYS: ViewKeys = {
   actions: [...GLOBAL_ACTIONS, ...LIST_ACTIONS, ...TARGET_ACTIONS, "dismiss_attention"],
   hints: [
     { actions: ["down", "up"], label: "move" },
-    { actions: ["next_panel"], label: "section" },
+    { actions: ["prev_panel", "next_panel"], label: "section" },
     { actions: ["open"], label: "open" },
     { actions: ["attach"], label: "attach" },
     { actions: ["retry"], label: "retry" },

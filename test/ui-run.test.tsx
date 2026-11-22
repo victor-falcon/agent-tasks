@@ -302,7 +302,7 @@ describe("keys", () => {
     await press("j", "<CR>");
     await press("t");
     expect(await screen()).toContain("Sentry summary · sentry-summary · active"); // the Task detail
-    await press("h");
+    await press("<Esc>");
     expect(await screen()).toContain("▾ Details");
     expect(await selected()).toBe("Details");
   });

@@ -40,7 +40,7 @@ exports[`frame header, tabs, the Overview with its preview, footer (160 columns)
   ✕  Fri 08:04     worktree-cleanup    3m      git worktree prune failed                │
   ■  Thu 23:04     backup-notes        3m      backed up                                │
   ■  Thu 08:04     worktree-cleanup    3m      removed 2 worktrees                      │
- j/k move · <Tab> section · <CR> open · a attach · r retry · R run · p pause · ? keys · q quit
+ j/k move · h/l section · <CR> open · a attach · r retry · R run · p pause · ? keys · q quit
 "
 `;
 
@@ -74,7 +74,7 @@ exports[`frame below 120 columns the preview hides 1`] = `
   ■  01:04         sentry-summary      3m      1 new issue in notes/sentry.md
   ■  00:04         sentry-summary      3m      no new issues
   ■  Mon 09:07     weekly-deps-report  6m      deps report in notes/deps.md
- j/k move · <Tab> section · <CR> open · a attach · r retry · R run · p pause · ? keys · q quit
+ j/k move · h/l section · <CR> open · a attach · r retry · R run · p pause · ? keys · q quit
 "
 `;
 
@@ -94,6 +94,6 @@ exports[`frame no tasks yet 1`] = `
 
 
 
- j/k move · <Tab> section · <CR> open · a attach · r retry · R run · p pause · ? keys · q quit
+ j/k move · h/l section · <CR> open · a attach · r retry · R run · p pause · ? keys · q quit
 "
 `;

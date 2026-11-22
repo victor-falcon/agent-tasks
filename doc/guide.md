@@ -197,7 +197,8 @@ ticked and ticks next, and today's counts. Four tabs (`1`–`4`, or
 - **System**: the runner, its events (`state/runner.log`), machines,
   `doctor`'s checks and unreadable files.
 
-`<CR>` or `l` opens a run or a task; `h`, `q` or `<Esc>` goes back. A run
+`l`/`h` (or `<Tab>`/`<S-Tab>`) move to the next or previous section;
+`<CR>` opens a run or a task, and `<Esc>` or `q` goes back. A run
 opens on its result (the summary and the file the agent passed to
 `--output-file`), with its details, attempts, events and captured log folded
 below: `j`/`k` move between sections, `<CR>` folds or opens one, `/`

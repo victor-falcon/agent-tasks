@@ -23,7 +23,7 @@ export const SYSTEM_KEYS: ViewKeys = {
   id: "system",
   actions: [...GLOBAL_ACTIONS, ...LIST_ACTIONS, "cycle_filter", "copy", "search", "next_match", "prev_match", "toggle_follow", "tick_now", "recheck"],
   hints: [
-    { actions: ["next_panel"], label: "pane" },
+    { actions: ["prev_panel", "next_panel"], label: "pane" },
     { actions: ["open"], label: "open" },
     { actions: ["search"], label: "search" },
     { actions: ["cycle_filter"], label: "level" },

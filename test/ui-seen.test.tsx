@@ -137,7 +137,7 @@ describe("Needs attention in the Overview", () => {
     await app.screen();
     await app.press("f", "<CR>");
     expect(await app.screen()).toContain(`${FAILED}  ✕ failed`);
-    await app.press("h", "1");
+    await app.press("<Esc>", "1");
     await Bun.sleep(450); // `1` also starts a count (`12j`): it runs alone after a moment
     expect(attention(await app.screen())).not.toContain("no auth");
     // It failed again after being seen: back in the list.
@@ -206,7 +206,7 @@ describe("Runs: the / filter", () => {
     await press("G");
     text = await screen();
     expect(selectedRow(text)).toMatch(new RegExp(`run ${PAGE_SIZE + 30}$`));
-    await press("<CR>", "h");
+    await press("<CR>", "<Esc>");
     text = await screen();
     expect(text).toContain(" / hourly ");
     expect(selectedRow(text)).toMatch(new RegExp(`run ${PAGE_SIZE + 30}$`));
