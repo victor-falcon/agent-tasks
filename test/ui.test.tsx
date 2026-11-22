@@ -147,7 +147,7 @@ describe("frame", () => {
     await settle();
     expect(await screen()).toContain("The Tasks tab is not in the new dashboard yet.");
     await press("g", "t");
-    expect(await screen()).toContain("The Runs tab");
+    expect(await screen()).toContain("── History (");
     await press("g", "T", "g", "T");
     expect(await screen()).toContain("Needs attention");
   });

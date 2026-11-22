@@ -78,7 +78,8 @@ describe("tui.toml", () => {
 
   test("conflicts are checked within each view, as the keys it listens to", () => {
     writeToml('[keys]\nundo = "j"\n');
-    expect(details(() => loadTuiConfig(home.configDir))).toEqual(['"j" is bound to both undo and down in the overview view']);
+    // Every list view binds both and reports it; the overview is one of them.
+    expect(details(() => loadTuiConfig(home.configDir))).toContain('"j" is bound to both undo and down in the overview view');
     // `back` lives in the detail views, `dismiss` in the roots: both on <Esc> is fine.
     expect(() => buildKeymap({ back: "<Esc>", dismiss: "<Esc>" })).not.toThrow();
   });
@@ -96,7 +97,7 @@ describe("tui.toml", () => {
     expect(loadTuiConfig(home.configDir).keymap.prev_tab).toEqual([]);
     // Set both, and the clash is reported as usual.
     writeToml('[keys]\nretry = "u"\nundo = "u"\n');
-    expect(details(() => loadTuiConfig(home.configDir))).toEqual(['"u" is bound to both undo and retry in the overview view']);
+    expect(details(() => loadTuiConfig(home.configDir))).toContain('"u" is bound to both undo and retry in the overview view');
   });
 
   test("new actions and mouse = false; the old dashboard reads the same file", () => {

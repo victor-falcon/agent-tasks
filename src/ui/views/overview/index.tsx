@@ -2,6 +2,7 @@ import { useTerminalDimensions } from "@opentui/solid";
 import { createMemo, Show } from "solid-js";
 import { displayTimezone } from "../../../task-info.ts";
 import { useListNavigation } from "../../components/list-navigation.ts";
+import { PREVIEW_MIN_WIDTH } from "../../components/run-preview.tsx";
 import { type ListSection, SectionList } from "../../components/section-list.tsx";
 import { useApp } from "../../context.ts";
 import { useViewKeys } from "../../keymap/layer.ts";
@@ -15,8 +16,8 @@ import { Preview } from "./preview.tsx";
 // moves over every row of every section; a reload keeps it on the same run
 // or task (see reconcileSelection).
 
-/** From this width on, the list shares the screen with the preview. */
-export const PREVIEW_MIN_WIDTH = 120;
+// Kept here too for views that already import it from the Overview.
+export { PREVIEW_MIN_WIDTH };
 
 function Overview(props: ViewProps) {
   const app = useApp();
