@@ -37,9 +37,9 @@ first = ["gg", "<Home>"]                  # Go to the first row / the top
 last = ["G", "<End>"]                     # Go to the last row / the bottom
 half_page_down = ["<C-d>", "<PageDown>"]  # Half a page down
 half_page_up = ["<C-u>", "<PageUp>"]      # Half a page up
-next_panel = ["<Tab>", "<C-w>j"]          # Next section
-prev_panel = ["<S-Tab>", "<C-w>k"]        # Previous section
-open = ["<CR>", "l"]                      # Open the selected run or task
+next_panel = ["l", "<Tab>", "<C-w>j"]     # Next section
+prev_panel = ["h", "<S-Tab>", "<C-w>k"]   # Previous section
+open = ["<CR>"]                           # Open the selected run or task
 
 # Overview tab
 attach = ["a"]             # Attach to the run's session
@@ -70,7 +70,7 @@ tick_now = ["T"]       # Run one tick of the runner now (it may launch due runs)
 recheck = ["c"]        # Check again: machines (in Machines) or doctor (elsewhere)
 
 # Run detail
-back = ["<Esc>", "h", "q"]                  # Close the view (back to where you were)
+back = ["<Esc>", "q"]                       # Close the view (back to where you were)
 next_section = ["}"]                        # Next section of the run
 prev_section = ["{"]                        # Previous section of the run
 toggle_section = ["<CR>", "<Space>", "za"]  # Fold or open the selected section of the run

@@ -172,6 +172,24 @@ describe("Overview keys", () => {
     expect(selectedRow(await screen())).toStartWith("! review-pr-123");
   });
 
+  test("l/h move to the next/previous section, <CR> opens and <Esc> comes back", async () => {
+    writeFixture(home.paths);
+    const { screen, press } = await start();
+    await press("l");
+    expect(selectedRow(await screen())).toStartWith("◐ worktree-cleanup running");
+    await press("l");
+    expect(selectedRow(await screen())).toStartWith("○ 11:00 sentry-summary");
+    await press("h");
+    expect(selectedRow(await screen())).toStartWith("◐ worktree-cleanup running");
+    await press("h");
+    expect(selectedRow(await screen())).toStartWith("! review-pr-123 blocked");
+    await press("<CR>");
+    expect(await screen()).toContain("review-pr-123/20261117T083000Z");
+    expect(await screen()).not.toContain("Needs attention");
+    await press("<Esc>");
+    expect(selectedRow(await screen())).toStartWith("! review-pr-123 blocked");
+  });
+
   test("keys from tui.toml: remapped keys work and show in the footer", async () => {
     writeFixture(home.paths);
     const { screen, press } = await start({ config: { keymap: buildKeymap({ down: ["n"], retry: "<C-r>" }) } });
@@ -274,7 +292,7 @@ describe("actions", () => {
     const { screen, press } = await start();
     await press("j", "<CR>");
     expect(await screen()).toContain("sentry-summary/20261117T080000Z  ✕ failed · 3m");
-    await press("h");
+    await press("<Esc>");
     expect(selectedRow(await screen())).toStartWith("✕ 09:10 sentry-summary");
   });
 

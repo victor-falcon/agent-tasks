@@ -184,14 +184,14 @@ describe("Runs tab", () => {
     const { screen, press } = await openRuns();
     await press("f", "<CR>");
     expect(await screen()).toContain("sentry-summary/20261117T080000Z  ✕ failed");
-    await press("h");
+    await press("<Esc>");
     let text = await screen();
     expect(text).toContain("status  failures");
     expect(selectedRow(text)).toStartWith("✕ 09:00 sentry-summary");
     await press("j", "t");
     expect(await screen()).toContain("worktree-cleanup");
     expect(await screen()).toContain("Worktree cleanup · worktree-cleanup · active"); // the Task detail
-    await press("h");
+    await press("<Esc>");
     text = await screen();
     expect(selectedRow(text)).toStartWith("✕ Fri 08:00 worktree-cleanup");
   });
