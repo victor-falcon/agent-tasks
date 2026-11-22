@@ -242,7 +242,7 @@ function RunDetail(props: ViewProps) {
       const m = live();
       if (m) actions.closeSession(m.target, openSession(m.run)?.handle ?? null);
     },
-    go_to_task: () => {
+    goto_task: () => {
       const m = live();
       if (m) ui.push({ view: "task", params: { id: m.run.task_id } });
     },
@@ -252,7 +252,7 @@ function RunDetail(props: ViewProps) {
       if (!existsSync(path)) return void ui.toast("its output file is gone");
       void actions.openInPager(path);
     },
-    copy_ref: () => actions.copy(model()?.ref ?? ref(), "ref"),
+    copy: () => actions.copy(model()?.ref ?? ref(), "ref"),
     copy_summary: () => {
       const summary = model()?.summary;
       if (!summary) return void ui.toast("this run has no summary to copy");

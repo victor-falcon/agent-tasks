@@ -1,12 +1,14 @@
 import type { ActionDefs } from "../../keymap/defs.ts";
 import { GLOBAL_ACTIONS, type ViewKeys } from "../../keymap/spec.ts";
 
-/** Actions only this view has (name → description and default keys). */
+/**
+ * Actions only this view has (name → description and default keys). It also
+ * binds the generic `goto_task` (t) and `copy` (y) of views/runs/keys.ts, so
+ * one tui.toml line remaps them in both views.
+ */
 export const RUN_ACTIONS = {
   close_session: { desc: "Close the run's session (kept open, or still running)", keys: ["c"] },
-  go_to_task: { desc: "Go to the run's task", keys: ["t"] },
   open_output: { desc: "Open the run's output file in $PAGER", keys: ["o"] },
-  copy_ref: { desc: "Copy the run's ref", keys: ["y"] },
   copy_summary: { desc: "Copy the run's summary", keys: ["Y"] },
   search_log: { desc: "Search the run's log", keys: ["/"] },
   next_match: { desc: "Next match in the log", keys: ["n"] },
@@ -34,9 +36,9 @@ export const RUN_KEYS: ViewKeys = {
     "retry",
     "run_now",
     "close_session",
-    "go_to_task",
+    "goto_task",
     "open_output",
-    "copy_ref",
+    "copy",
     "copy_summary",
     "search_log",
     "next_match",
@@ -47,7 +49,7 @@ export const RUN_KEYS: ViewKeys = {
     { actions: ["toggle_section"], label: "fold" },
     { actions: ["attach"], label: "attach" },
     { actions: ["retry"], label: "retry" },
-    { actions: ["go_to_task"], label: "task" },
+    { actions: ["goto_task"], label: "task" },
     { actions: ["search_log"], label: "search" },
     { actions: ["back"], label: "back" },
     { actions: ["help"], label: "keys" },
