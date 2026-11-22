@@ -62,8 +62,10 @@ export interface Actions {
   /** Undoes the newest toast that can be undone. */
   undo(): void;
   quit(): void;
-  /** Runs an agent-tasks command in the background with a spinner, then a toast with its first line. */
-  background(args: string[], doing: string): Promise<{ code: number; first: string }>;
+  /** Runs an agent-tasks command in the background with a spinner; its exit code, first line and whole output (for `--json`). */
+  background(args: string[], doing: string): Promise<{ code: number; first: string; output: string }>;
+  /** The toast that ends a background command: its first line, or the error (which stays until dismissed). */
+  report(code: number, first: string, doing: string): void;
 }
 
 const RETRYABLE = ["failed", "timed_out", "missed"];
@@ -96,7 +98,7 @@ export function createActions(opts: ActionsOptions): Actions {
     }
     const first = result.output.split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
     store.reload();
-    return { code: result.code, first };
+    return { code: result.code, first, output: result.output };
   };
 
   const report = (code: number, first: string, doing: string, undo?: () => void) => {
@@ -152,6 +154,7 @@ export function createActions(opts: ActionsOptions): Actions {
         return 0;
       });
     },
+    report: (code, first, doing) => void report(code, first, doing),
     async attach(target) {
       if (!target) return;
       if (target.kind !== "run" || !isInProgress(target.run.status)) {
