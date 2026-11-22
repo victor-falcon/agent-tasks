@@ -140,8 +140,9 @@ export function Palette() {
 
   return (
     <Show when={ui.palette()}>
-      <box position="absolute" top={2} left={0} width="100%" alignItems="center" zIndex={100}>
-        <box border borderStyle="rounded" borderColor={app.theme.cyan} backgroundColor={app.theme.bg} paddingLeft={1} paddingRight={1} flexDirection="column" width={width()} title={` ${prompt()} `} titleAlignment="left">
+      {/* The whole screen under it: a click outside the box closes the palette instead of reaching the view behind. */}
+      <box position="absolute" top={0} left={0} width="100%" height="100%" paddingTop={2} alignItems="center" zIndex={100} onMouseDown={close}>
+        <box onMouseDown={(e) => e.stopPropagation()} border borderStyle="rounded" borderColor={app.theme.cyan} backgroundColor={app.theme.bg} paddingLeft={1} paddingRight={1} flexDirection="column" width={width()} title={` ${prompt()} `} titleAlignment="left">
           <box flexDirection="row" height={1}>
             <Line segments={[{ text: step() ? "› " : ": ", color: "yellow" }]} />
             <input

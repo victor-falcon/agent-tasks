@@ -352,6 +352,16 @@ describe("palette", () => {
     expect(paletteRows(await screen())[0]).toStartWith("review-pr-123/20261117T083000Z");
   });
 
+  test("a click outside it closes it, and does not reach the view behind", async () => {
+    const { screen, press, setup, handle } = await start();
+    await press(":");
+    const tabs = (await screen()).split("\n")[1]!;
+    await setup.mockMouse.click(tabs.indexOf("3 Runs"), 1);
+    await setup.renderOnce();
+    expect(handle.app.ui.palette()).toBe(false);
+    expect(handle.app.ui.tab()).toBe("overview");
+  });
+
   test("a click on a row chooses it", async () => {
     const { screen, press, setup, handle } = await start();
     await press(":", ..."system".split(""));
