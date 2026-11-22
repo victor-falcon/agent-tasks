@@ -37,6 +37,8 @@ export interface AppOptions {
   waitForKey?: () => Promise<void>;
   /** How the terminal is handed to a command (attach) and taken back: the renderer's suspend/resume unless replaced (tests). */
   handOver?: HandOver;
+  /** Runs a program with the terminal (the pager): Bun.spawn unless replaced (tests). */
+  spawn?: (argv: string[]) => Promise<number>;
 }
 
 export interface AppHandle {
@@ -71,7 +73,17 @@ export async function mountApp(renderer: CliRenderer, opts: AppOptions): Promise
 
   const suspend = createSuspend({ handOver: opts.handOver ?? renderer, store, waitForKey: opts.waitForKey ?? waitForTerminalKey, running: () => running });
 
-  const actions = createActions({ store, ui, keymap: opts.config.keymap, exec: opts.exec, suspend, quit });
+  const actions = createActions({
+    store,
+    ui,
+    keymap: opts.config.keymap,
+    exec: opts.exec,
+    suspend,
+    quit,
+    spawn: opts.spawn,
+    env: opts.env,
+    copy: (text) => renderer.copyToClipboardOSC52(text),
+  });
   const cycle = (by: number) => () => ui.setTab(TAB_IDS[(TAB_IDS.indexOf(ui.tab()) + by + TAB_IDS.length) % TAB_IDS.length]!);
   const globalHandlers: App["globalHandlers"] = {
     // Each tab's own action (tab_overview…), from the registry.

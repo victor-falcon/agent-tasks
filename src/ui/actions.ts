@@ -10,7 +10,8 @@ import type { Store } from "./store.ts";
 // stays the only way to change anything. Cheap actions (pause, resume) run
 // at once and can be undone from their toast; the ones that launch an agent
 // ask first. A view passes the selected run or task; this module says why
-// an action does not apply when it does not.
+// an action does not apply when it does not. Only reading needs no command:
+// a file in the pager, text to the clipboard.
 
 /** What an action acts on: a run, or a task with no run in hand. */
 export type Target = { kind: "run"; run: DashRun } | { kind: "task"; taskId: string };
@@ -24,6 +25,11 @@ export interface ActionsOptions {
   suspend(run: () => Promise<number>): Promise<void>;
   /** Leaves the dashboard (renderer.destroy()). */
   quit(): void;
+  /** Runs a program with the terminal (the pager), returning its exit code. */
+  spawn?: (argv: string[]) => Promise<number>;
+  /** Copies text to the clipboard (OSC 52); false when the terminal can't. */
+  copy?: (text: string) => boolean;
+  env?: Record<string, string | undefined>;
 }
 
 export interface Actions {
@@ -31,6 +37,12 @@ export interface Actions {
   retry(target: Target | null): void;
   runNow(target: Target | null): void;
   togglePause(target: Target | null): Promise<void>;
+  /** Closes the session of a run's latest attempt (`session close`), after asking; `handle` is that session's, null when it is not open. */
+  closeSession(run: DashRun, handle: string | null): void;
+  /** Shows a file in `$PAGER` (less by default), with the terminal handed over as for attach. */
+  openInPager(path: string): Promise<void>;
+  /** Copies `text` to the clipboard; `what` names it in the toast (`ref`, `summary`). */
+  copy(text: string, what: string): void;
   /** Undoes the newest toast that can be undone. */
   undo(): void;
   quit(): void;
@@ -85,6 +97,13 @@ export function createActions(opts: ActionsOptions): Actions {
 
   const doQuit = () => opts.quit();
 
+  const spawn =
+    opts.spawn ??
+    (async (argv: string[]) => {
+      const proc = Bun.spawn(argv, { stdin: "inherit", stdout: "inherit", stderr: "inherit", env: { ...process.env, ...opts.env } });
+      return await proc.exited;
+    });
+
   return {
     background,
     async attach(target) {
@@ -122,6 +141,29 @@ export function createActions(opts: ActionsOptions): Actions {
       if (!target) return;
       const id = taskOf(target);
       await setPaused(id, !isPaused(id), true);
+    },
+    closeSession(run, handle) {
+      if (handle === null) {
+        error("only a run whose session is still open (kept open, or running) has one to close");
+        return;
+      }
+      const doing = `closing the session of ${run.ref}`;
+      ui.ask({
+        title: `Close the session of ${run.ref}?`,
+        consequence: isInProgress(run.status) ? "The agent is still working: closing ends it. The run's status does not change." : `It closes ${handle}; the run's status does not change.`,
+        onYes: () => void background(["session", "close", run.ref], doing).then(({ code, first }) => report(code, first, doing)),
+      });
+    },
+    async openInPager(path) {
+      const pager = opts.env?.PAGER || process.env.PAGER || "less";
+      // $PAGER is the user's own setting and may carry arguments (`less -R`): the shell
+      // splits it; the path goes as $1, so spaces or quotes in it are safe.
+      await opts.suspend(() => spawn(["sh", "-c", `${pager} "$1"`, "sh", path]));
+    },
+    copy(text, what) {
+      const copied = opts.copy?.(text) ?? false;
+      if (copied) ui.toast(`copied the ${what}`);
+      else error("this terminal does not take clipboard writes (OSC 52)");
     },
     undo() {
       const toast = [...ui.toasts()].reverse().find((t) => t.undo);

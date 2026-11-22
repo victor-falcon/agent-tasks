@@ -1,0 +1,35 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`sections title, Result open with the summary, the rest folded 1`] = `
+" agent-tasks top · ● runner every 5m · ticked 10:00 · next 10:05     today ■3 ✕1 □4 !1   hub: local
+ 1 Overview   2 Tasks   3 Runs   4 System
+ sentry-summary/20261117T080000Z  ✕ failed · 3m
+
+ ▾ Result ────────────────────────────────────────────────────────────────────────────────────────
+ ✕ failed · Nov 17 09:00 · took 3m · attempt 2
+
+ sentry-cli has no auth
+
+ ▸ Details · Sentry summary · ~/Projects/foo ─────────────────────────────────────────────────────
+ ▸ Attempts · 2 attempts ─────────────────────────────────────────────────────────────────────────
+ ▸ Events · 2 events · last: launched ────────────────────────────────────────────────────────────
+ ▸ Log · 2 lines · ~/data/runs/sentry-summary/20261117T080000Z.log ───────────────────────────────
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ j/k sections · <CR> fold · a attach · r retry · t task · / search · <Esc> back · ? keys
+"
+`;

@@ -183,7 +183,7 @@ describe("Runs tab", () => {
     writeFixture(home.paths);
     const { screen, press } = await openRuns();
     await press("f", "<CR>");
-    expect(await screen()).toContain("Run sentry-summary/20261117T080000Z");
+    expect(await screen()).toContain("sentry-summary/20261117T080000Z  ✕ failed");
     await press("h");
     let text = await screen();
     expect(text).toContain("status  failures");
@@ -228,6 +228,6 @@ describe("Runs tab", () => {
     await setup.mockMouse.click(10, y);
     expect(selectedRow(await screen())).toContain("worktree-cleanup");
     await setup.mockMouse.doubleClick(10, y);
-    expect(await screen()).toContain("Run worktree-cleanup/20261113T070000Z");
+    expect(await screen()).toContain("worktree-cleanup/20261113T070000Z  ✕ failed");
   });
 });
