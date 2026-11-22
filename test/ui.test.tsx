@@ -303,7 +303,7 @@ describe("mouse", () => {
     expect(await screen()).toContain("inbox-triage/20261117T050000Z  □ missed");
     text = await screen();
     await s.mockMouse.click(text.split("\n")[1]!.indexOf("System"), 1);
-    expect(await screen()).toContain("The System tab");
+    expect(await screen()).toContain("─ Checks");
   });
 });
 
