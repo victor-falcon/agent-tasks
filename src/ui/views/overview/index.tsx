@@ -6,6 +6,7 @@ import { PREVIEW_MIN_WIDTH } from "../../components/run-preview.tsx";
 import { type ListSection, SectionList } from "../../components/section-list.tsx";
 import { useApp } from "../../context.ts";
 import { useViewKeys } from "../../keymap/layer.ts";
+import { seeableRun } from "../../seen.ts";
 import type { TabDef, ViewProps } from "../types.ts";
 import { OVERVIEW_KEYS } from "./keys.ts";
 import { overviewSections, parseKey, targetOf } from "./model.ts";
@@ -43,8 +44,22 @@ function Overview(props: ViewProps) {
     if (!key) return;
     const { section, id } = parseKey(key);
     if (section === "next") return ui.push({ view: "task", params: { id } });
-    if (section === "attention") app.seen.markSeen(id);
     ui.push({ view: "run", params: { ref: id } });
+  };
+
+  /** `x` on a failure of Needs attention: seen without opening it, it leaves the list. */
+  const dismissAttention = () => {
+    const key = nav.selected();
+    if (!key) return;
+    const { section, id } = parseKey(key);
+    const run = section === "attention" ? seeableRun(store.dash()?.recent ?? [], id) : null;
+    if (!run) return void ui.toast(section === "attention" ? "a blocked run stays here until it is answered (a to attach)" : "only runs of Needs attention can be dismissed");
+    // The cursor goes to the next row, not to the top: keep it on the row below (or above) the dismissed one.
+    const rows = sections().flatMap((s) => s.rows.map((r) => r.key));
+    const at = rows.indexOf(key);
+    app.seen.markSeen(run.ref, run.at);
+    const left = sections().flatMap((s) => s.rows.map((r) => r.key));
+    nav.select(left.includes(rows[at + 1] ?? "") ? rows[at + 1]! : (left[Math.min(at, left.length - 1)] ?? null));
   };
 
   useViewKeys(props.keys, {
@@ -54,6 +69,7 @@ function Overview(props: ViewProps) {
     retry: () => actions.retry(target()),
     run_now: () => actions.runNow(target()),
     toggle_pause: () => void actions.togglePause(target()),
+    dismiss_attention: dismissAttention,
   });
 
   return (

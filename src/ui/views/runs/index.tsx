@@ -1,8 +1,9 @@
 import type { BoxRenderable, ScrollBoxRenderable } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/solid";
-import { type Accessor, batch, createEffect, createMemo, createSignal, Show } from "solid-js";
+import { type Accessor, batch, createEffect, createMemo, createSignal, on, Show } from "solid-js";
 import { displayTimezone } from "../../../task-info.ts";
 import type { Target } from "../../actions.ts";
+import { FilterBar, useFilter } from "../../components/filter-bar.tsx";
 import { Line } from "../../components/line.tsx";
 import { useListNavigation } from "../../components/list-navigation.ts";
 import { PREVIEW_MIN_WIDTH, RunPreview } from "../../components/run-preview.tsx";
@@ -32,13 +33,14 @@ import {
 
 // The whole history, newest first, a page at a time: the next page is read
 // when the cursor, or the wheel, gets near the end of what is loaded. Above
-// the list, the filters as chips (`f` status, `S` since); on a wide terminal,
-// the selected run's preview on the right. The selection follows the run's
+// the list, the filters as chips (`f` status, `S` since) and the `/` text
+// filter (the shared filter bar, over task id and summary or reason); on a
+// wide terminal, the selected run's preview on the right. The selection follows the run's
 // ref across reloads and pages.
 
-/** What the tab keeps while a detail is open on top of it (the component is mounted again on the way back). */
+/** What the tab keeps while a detail is open on top of it (the component is mounted again on the way back). The `/` text is kept by the filter bar. */
 interface Kept {
-  filter: RunsFilter;
+  filter: Omit<RunsFilter, "text">;
   limit: number;
   cache: RunCache;
 }
@@ -52,9 +54,11 @@ function Runs(props: ViewProps) {
 
   const initial = kept.get(app) ?? { filter: DEFAULT_FILTER, limit: PAGE_SIZE, cache: new Map() };
   const cache = initial.cache;
-  const [filter, setFilter] = createSignal<RunsFilter>(initial.filter);
+  const [chips, setChips] = createSignal(initial.filter);
+  const text = useFilter("runs");
+  const filter = createMemo((): RunsFilter => ({ ...chips(), text: text.query() }));
   const [limit, setLimit] = createSignal(initial.limit);
-  createEffect(() => kept.set(app, { filter: filter(), limit: limit(), cache }));
+  createEffect(() => kept.set(app, { filter: chips(), limit: limit(), cache }));
 
   // Read again on every reload (store.version) and when the filters or the
   // page count change; not on every clock tick.
@@ -67,7 +71,7 @@ function Runs(props: ViewProps) {
 
   const emptyText = () => {
     if (!isFiltered(filter())) return "no runs yet";
-    const keys = [keyHint(app.config.keymap, "cycle_filter"), keyHint(app.config.keymap, "cycle_since")].filter((k) => k !== null);
+    const keys = [keyHint(app.config.keymap, "cycle_filter"), keyHint(app.config.keymap, "cycle_since"), ...(filter().text !== "" ? ["<Esc>"] : [])].filter((k) => k !== null);
     return `no runs match these filters${keys.length > 0 ? ` (${keys.join(" / ")} to change them)` : ""}`;
   };
 
@@ -110,21 +114,25 @@ function Runs(props: ViewProps) {
     if (needsMore(lastInView, page())) loadMore();
   };
 
-  const setFilters = (next: RunsFilter) => {
-    batch(() => {
-      setFilter(next);
-      setLimit(PAGE_SIZE); // a new filter starts again from its first page
-    });
-    // ...at its first row.
+  /** A new filter starts again from its first page, at its first row. */
+  const restart = () => {
+    setLimit(PAGE_SIZE);
     const first = page().runs[0];
     nav.select(first ? rowKey(first.ref) : null);
   };
+  const setFilters = (next: Omit<RunsFilter, "text">) => {
+    batch(() => {
+      setChips(next);
+      setLimit(PAGE_SIZE);
+    });
+    restart();
+  };
+  // The text changes as it is typed (and when Esc clears it): the same restart, but not on mount (coming back keeps the place).
+  createEffect(on(text.query, restart, { defer: true }));
 
   const open = (key = nav.selected()) => {
     if (!key) return;
     const ref = refOf(key);
-    // Opening a failure counts as having seen it (it leaves Needs attention).
-    app.seen.markSeen(ref);
     ui.push({ view: "run", params: { ref } });
   };
 
@@ -145,8 +153,11 @@ function Runs(props: ViewProps) {
       if (run) ui.push({ view: "task", params: { id: run.task_id } });
     },
     copy,
-    cycle_filter: () => setFilters({ ...filter(), status: nextStatus(filter().status) }),
-    cycle_since: () => setFilters({ ...filter(), since: nextSince(filter().since) }),
+    cycle_filter: () => setFilters({ ...chips(), status: nextStatus(chips().status) }),
+    cycle_since: () => setFilters({ ...chips(), since: nextSince(chips().since) }),
+    filter: () => text.open(),
+    // Esc dismisses the messages first, then a kept filter.
+    dismiss: () => (ui.toasts().length > 0 ? ui.dismiss() : text.clear()),
   });
 
   const showPreview = () => dims().width >= PREVIEW_MIN_WIDTH;
@@ -160,10 +171,10 @@ function Runs(props: ViewProps) {
 
   return (
     <box flexDirection="column" flexGrow={1}>
-      {/* The filter chips. The shared `/` filter bar (components/filter-bar.tsx, see doc/roadmap/tui-v2.md) goes on this line and sets filter().text. */}
       <box height={1} flexShrink={0} paddingLeft={2}>
         <Line segments={chipSegments(filter(), page())} />
       </box>
+      <FilterBar filter={text} />
       <box flexDirection="row" flexGrow={1}>
         <box ref={listBox} flexDirection="row" width={listWidth()} flexShrink={0} onMouseScroll={onWheel}>
           <SectionList sections={sections()} selected={nav.selected()} width={listWidth()} onSelect={nav.select} onOpen={open} />
