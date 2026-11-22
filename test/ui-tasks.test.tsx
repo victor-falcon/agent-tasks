@@ -73,8 +73,9 @@ async function start(opts: { width?: number; height?: number; exec?: CommandRunn
     onQuit: () => {},
     waitForKey: async () => {},
     handOver: { suspend: async () => {}, resume: async () => {} },
-    shell: async (dir) => (shells.push(dir), 0),
-    copyText: (text) => (opts.copy === false ? false : (copies.push(text), true)),
+    // `o` runs `sh -c 'cd "$1" && exec "$2"' sh <dir> <shell>`: record the folder.
+    spawn: async (argv) => (shells.push(argv[4]!), 0),
+    copy: (text) => (opts.copy === false ? false : (copies.push(text), true)),
   });
   const s = setup;
   const screen = async () => {
@@ -337,7 +338,7 @@ describe("Tasks tab", () => {
     expect(calls.at(-1)!.args).toEqual(["rm", "sentry-summary"]);
     await press("y");
     expect(copies).toEqual(["sentry-summary"]);
-    expect(await screen()).toContain("copied task id sentry-summary");
+    expect(await screen()).toContain("copied the task id");
   });
 
   test("m with every task on one machine says so; a filter that hides everything says it is the filter", async () => {
@@ -368,7 +369,7 @@ describe("Tasks tab", () => {
   test("a terminal that can't copy says so and shows the id", async () => {
     const { screen, press } = await start({ copy: false });
     await press("y");
-    expect(await screen()).toContain("the task id is sentry-summary");
+    expect(await screen()).toContain("this terminal does not take clipboard writes");
   });
 
   test("o hands the terminal to a shell in the task's folder; a missing folder or another machine says why", async () => {
@@ -454,7 +455,7 @@ describe("Task detail", () => {
     await press("j");
     expect(selectedRow(await screen())).toStartWith("✕ 09:00 failed");
     await press("<CR>");
-    expect(await screen()).toContain("Run sentry-summary/20261117T080000Z");
+    expect(await screen()).toContain("sentry-summary/20261117T080000Z  ✕ failed"); // the Run detail
     await press("q");
     const text = await screen();
     expect(selectedRow(text)).toStartWith("✕ 09:00 failed");

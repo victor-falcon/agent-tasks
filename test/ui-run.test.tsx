@@ -301,7 +301,7 @@ describe("keys", () => {
     const { screen, press, selected } = await start(FAILED);
     await press("j", "<CR>");
     await press("t");
-    expect(await screen()).toContain("Task sentry-summary is not in the new dashboard yet.");
+    expect(await screen()).toContain("Sentry summary · sentry-summary · active"); // the Task detail
     await press("h");
     expect(await screen()).toContain("▾ Details");
     expect(await selected()).toBe("Details");
