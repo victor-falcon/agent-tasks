@@ -5,8 +5,10 @@ import { isDuration } from "../duration.ts";
 import { UsageError } from "../errors.ts";
 import { interruptibleSleep, runRunner } from "../runner.ts";
 import { releaseRunnerLock } from "../runner-lock.ts";
-import type { Tui } from "../tui/app.ts";
 import { canShowDashboard, loadKeymap, startDashboard } from "../tui/index.ts";
+import { selfCommand } from "../tui/app.ts";
+import { loadTuiConfig } from "../ui/keymap/config.ts";
+import { startNewDashboard } from "../ui/load.ts";
 import type { Command } from "./types.ts";
 
 /** Ctrl-C, kill, and the terminal tab closing. */
@@ -44,14 +46,18 @@ Options:
   --quiet             Events only: no tick lines and no status line (no dashboard)
   --plain             One line per event instead of the dashboard`,
   async run(ctx, args) {
-    const { values } = parseCommandArgs(args, { every: { type: "string" }, once: { type: "boolean" }, quiet: { type: "boolean" }, plain: { type: "boolean" } }, { maxPositionals: 0 });
+    // --next: the new dashboard (src/ui), not documented until it replaces the old one.
+    const { values } = parseCommandArgs(args, { every: { type: "string" }, once: { type: "boolean" }, quiet: { type: "boolean" }, plain: { type: "boolean" }, next: { type: "boolean" } }, { maxPositionals: 0 });
     const every = values.every ?? ctx.config.config.runner?.every ?? BUILTIN_DEFAULTS.runner_every;
     if (!isDuration(every)) throw new UsageError(`--every: invalid duration "${every}" (expected e.g. 30s, 5m or 1h)`);
 
     const dashboard = !values.plain && !values.once && !values.quiet && !ctx.json && canShowDashboard(ctx.stdout);
     // Read before starting, so a broken tui.toml stops here and not with the screen taken.
-    const keymap = dashboard ? loadKeymap(ctx.paths.configDir) : null;
-    let tui = null as Tui | null;
+    const next = dashboard && values.next === true;
+    const keymap = dashboard && !next ? loadKeymap(ctx.paths.configDir) : null;
+    const nextConfig = next ? loadTuiConfig(ctx.paths.configDir) : null;
+    // The old dashboard (Tui) or the new one (AppHandle, which gives the terminal back asynchronously: `closed`).
+    let tui = null as { stop(): void; readonly isRunning: boolean; closed?: Promise<void> } | null;
 
     // The clock is the real time, shifted so that the first tick happens at `--now`.
     const offset = ctx.now.getTime() - Date.now();
@@ -80,6 +86,13 @@ Options:
           stdout: ctx.stdout,
           pid: process.pid,
           onStarted: () => {
+            if (nextConfig) {
+              void startNewDashboard({ title: "agent-tasks runner", config: nextConfig, now, context, env: ctx.env, exec: selfCommand(ctx.env), watchDir: ctx.paths.dataDir, onQuit: stop }).then((handle) => {
+                tui = handle;
+                if (controller.signal.aborted) handle.stop(); // stopped while it was starting
+              }, (err) => ctx.stderr.write(`agent-tasks: the dashboard could not start: ${(err as Error).message}\n`));
+              return;
+            }
             if (!keymap) return;
             tui = startDashboard({ title: "agent-tasks runner", keymap, now, context, env: ctx.env, watchDir: ctx.paths.dataDir, onQuit: stop });
           },
@@ -88,6 +101,7 @@ Options:
       );
     } finally {
       tui?.stop();
+      await tui?.closed;
       for (const signal of SIGNALS) process.off(signal, stop);
     }
   },
