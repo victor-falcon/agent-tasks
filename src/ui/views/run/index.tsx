@@ -1,7 +1,7 @@
 import type { BoxRenderable, MouseEvent, ScrollBoxRenderable, TextRenderable } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/solid";
 import { existsSync } from "node:fs";
-import { type Accessor, createMemo, createSignal, For, Index, Match, onCleanup, onMount, Show, Switch } from "solid-js";
+import { type Accessor, createEffect, createMemo, createSignal, For, Index, Match, onCleanup, onMount, Show, Switch, untrack } from "solid-js";
 import { displayTimezone } from "../../../task-info.ts";
 import { wrap } from "../../../tui/text.ts";
 import { fitText, type Segment } from "../../components/cells.ts";
@@ -9,6 +9,7 @@ import { Line } from "../../components/line.tsx";
 import { useApp } from "../../context.ts";
 import { keyHint } from "../../keymap/config.ts";
 import { useViewKeys } from "../../keymap/layer.ts";
+import { seeableRun } from "../../seen.ts";
 import type { UiState } from "../../state.ts";
 import type { ViewDef, ViewProps } from "../types.ts";
 import { RUN_KEYS } from "./keys.ts";
@@ -69,6 +70,15 @@ function RunDetail(props: ViewProps) {
     }
   });
   const model = () => loaded().model;
+
+  // Opened is seen: a failure shown here leaves Needs attention, however it
+  // was opened (Overview, Runs, a task's history). Checked on every reload
+  // (not on every clock tick), so a run that fails while it is open here
+  // counts as seen too.
+  createEffect(() => {
+    const run = seeableRun(store.dash()?.recent ?? [], ref(), untrack(store.now));
+    if (run) app.seen.markSeen(run.ref, run.at);
+  });
   const ids = createMemo(() => model()?.sections.map((s) => s.id) ?? [], [] as SectionId[], { equals: (a, b) => a.length === b.length && a.every((id, i) => id === b[i]) });
   const sectionOf = (id: SectionId) => model()?.sections.find((s) => s.id === id) ?? null;
 

@@ -1,14 +1,14 @@
 import type { Context } from "../../../context.ts";
 import type { Color } from "../../../output/style.ts";
 import { PENDING_MARK, RUN_MARKS, TASK_MARKS } from "../../../output/symbols.ts";
-import { agendaTime, clockTime, DAY, formatSpan, relativeTime } from "../../../output/time.ts";
+import { agendaTime, clockTime, formatSpan, relativeTime } from "../../../output/time.ts";
 import type { RunStatus } from "../../../schema.ts";
 import { readTask } from "../../../store.ts";
 import { taskOverview } from "../../../task-info.ts";
 import type { Dashboard, DashNext, DashRun } from "../../../tui/snapshot.ts";
 import type { Target } from "../../actions.ts";
 import { buildRunPreview, type RunPreviewData } from "../../components/run-preview-model.ts";
-import type { Seen } from "../../seen.ts";
+import { ATTENTION_WINDOW_MS, SEEABLE, type Seen } from "../../seen.ts";
 
 // What the Overview shows, as plain data (cells with a color name), so it is
 // tested without a renderer: the sections of the list, the target of a
@@ -35,11 +35,6 @@ export interface Section {
   empty: string | null;
 }
 
-/** Failures and missed runs older than this leave Needs attention. */
-export const ATTENTION_WINDOW_MS = DAY;
-
-const ATTENTION: readonly RunStatus[] = ["failed", "timed_out", "missed"];
-
 export interface OverviewInput {
   dash: Dashboard;
   now: Date;
@@ -50,7 +45,7 @@ export interface OverviewInput {
 export function attentionRuns({ dash, now, seen }: OverviewInput): DashRun[] {
   const since = now.getTime() - ATTENTION_WINDOW_MS;
   const blocked = dash.running.filter((r) => r.status === "blocked");
-  const failures = dash.recent.filter((r) => ATTENTION.includes(r.status) && Date.parse(r.at) >= since && !seen.isSeen(r.ref));
+  const failures = dash.recent.filter((r) => SEEABLE.includes(r.status) && Date.parse(r.at) >= since && !seen.isSeen(r.ref, r.at));
   return [...blocked, ...failures];
 }
 

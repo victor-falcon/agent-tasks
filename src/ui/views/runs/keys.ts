@@ -14,18 +14,18 @@ export const RUNS_ACTIONS = {
   copy: { desc: "Copy the selected item's ref or id", keys: ["y"] },
 } as const satisfies ActionDefs;
 
-// `y` copy is left out of the footer to keep it on one line at 100 columns; `?` lists it.
+// `t` task and `y` copy are left out of the footer to keep it on one line at 100 columns; `?` lists them.
 export const RUNS_KEYS: ViewKeys = {
   id: "runs",
-  actions: [...GLOBAL_ACTIONS, ...LIST_ACTIONS, "attach", "retry", "cycle_filter", "cycle_since", "goto_task", "copy"],
+  actions: [...GLOBAL_ACTIONS, ...LIST_ACTIONS, "attach", "retry", "filter", "cycle_filter", "cycle_since", "goto_task", "copy"],
   hints: [
     { actions: ["down", "up"], label: "move" },
     { actions: ["open"], label: "open" },
+    { actions: ["filter"], label: "filter" },
     { actions: ["cycle_filter"], label: "status" },
     { actions: ["cycle_since"], label: "since" },
     { actions: ["retry"], label: "retry" },
     { actions: ["attach"], label: "attach" },
-    { actions: ["goto_task"], label: "task" },
     ...GLOBAL_HINTS,
   ],
 };

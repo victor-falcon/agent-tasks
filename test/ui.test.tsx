@@ -318,7 +318,7 @@ describe("Overview data", () => {
   test("Needs attention: blocked runs, then failures and missed runs of the last 24 hours not seen", () => {
     writeFixture(home.paths);
     const dash = buildDashboard(ctx());
-    const refs = attentionRuns({ dash, now: NOW, timezone: FIXTURE_TZ, seen: createSeen() }).map((r) => `${r.status} ${r.ref}`);
+    const refs = attentionRuns({ dash, now: NOW, timezone: FIXTURE_TZ, seen: createSeen({ file: null, now: () => NOW }) }).map((r) => `${r.status} ${r.ref}`);
     expect(refs[0]).toBe("blocked review-pr-123/20261117T083000Z");
     expect(refs).toContain("failed sentry-summary/20261117T080000Z");
     expect(refs).not.toContain("failed worktree-cleanup/20261113T070000Z"); // last week

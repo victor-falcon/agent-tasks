@@ -1,0 +1,7 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`header at narrow widths fits on one line at 60 columns 1`] = `" agent-tasks top · ● runner every 5m      today ■3 ✕1 □4 !1"`;
+
+exports[`header at narrow widths fits on one line at 80 columns 1`] = `" agent-tasks top · ● runner every 5m · next 10:05             today ■3 ✕1 □4 !1"`;
+
+exports[`header at narrow widths fits on one line at 120 columns 1`] = `" agent-tasks top · ● runner every 5m · ticked 10:00 · next 10:05                         today ■3 ✕1 □4 !1   hub: local"`;

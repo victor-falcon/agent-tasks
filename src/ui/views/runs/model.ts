@@ -10,6 +10,7 @@ import { readRun, runPath, taskIdsWithRuns } from "../../../store.ts";
 import { findTask } from "../../../task-info.ts";
 import type { DashRun } from "../../../tui/snapshot.ts";
 import type { Segment } from "../../components/cells.ts";
+import { matchesQuery } from "../../components/filter.ts";
 
 // What the Runs tab shows, as plain data: the history of every task (archived
 // ones included), newest first, read a page at a time. Run files are named
@@ -47,7 +48,7 @@ const STATUSES_OF: Record<Exclude<StatusFilter, "all">, readonly RunStatus[]> = 
 export interface RunsFilter {
   status: StatusFilter;
   since: SinceFilter;
-  /** The `/` text filter (task id and summary, any case); "" for none. Its input is the shared filter bar (wired by T6). */
+  /** The `/` text filter over the task id and the summary or reason (see matchesQuery); "" for none. Typed in the shared filter bar. */
   text: string;
 }
 
@@ -76,12 +77,7 @@ export interface RunsPage {
 function matches(run: Run, last: HistoryRun, filter: RunsFilter): boolean {
   if (HIDDEN.includes(run.status)) return false;
   if (filter.status !== "all" && !STATUSES_OF[filter.status].includes(run.status)) return false;
-  if (filter.text !== "") {
-    const needle = filter.text.toLowerCase();
-    const haystack = `${run.task_id}\n${last.summary ?? ""}\n${last.reason ?? ""}`.toLowerCase();
-    if (!haystack.includes(needle)) return false;
-  }
-  return true;
+  return matchesQuery(filter.text, [run.task_id, last.summary, last.reason]);
 }
 
 function historyRun(ref: string, run: Run, taskMachine: string | null, max: number | null): HistoryRun {
@@ -221,7 +217,7 @@ export function runCells(run: HistoryRun, timezone: string, now: Date): Segment[
   ];
 }
 
-/** The chips above the list: the filters in use and how much is loaded. */
+/** The chips above the list: the filters in use and how much is loaded (the `/` text has its own chip, the filter bar's, below). */
 export function chipSegments(filter: RunsFilter, page: RunsPage): Segment[] {
   const chip = (label: string, value: string, active: boolean): Segment[] => [
     { text: `${label} `, color: "dim" },
@@ -233,7 +229,6 @@ export function chipSegments(filter: RunsFilter, page: RunsPage): Segment[] {
     ...chip("status", filter.status, filter.status !== "all"),
     { text: "  " },
     ...chip("since", filter.since, filter.since !== "all"),
-    ...(filter.text !== "" ? [{ text: "  " }, ...chip("/", filter.text, true)] : []),
     { text: count, color: "dim" },
   ];
 }

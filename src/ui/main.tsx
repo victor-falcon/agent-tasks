@@ -1,4 +1,5 @@
 import { type CliRenderer, createCliRenderer } from "@opentui/core";
+import { join } from "node:path";
 import { render } from "@opentui/solid";
 import type { Context } from "../context.ts";
 import type { CommandRunner } from "../tui/app.ts";
@@ -100,7 +101,8 @@ export async function mountApp(renderer: CliRenderer, opts: AppOptions): Promise
     quit: () => actions.quit(),
   };
 
-  const app: App = { title: opts.title, renderer, store, ui, actions, theme, config: opts.config, keymap, seen: createSeen(), globalHandlers };
+  const seen = createSeen({ file: seenFile(opts), now: opts.now, changed: store.version });
+  const app: App = { title: opts.title, renderer, store, ui, actions, theme, config: opts.config, keymap, seen, globalHandlers };
 
   // Ctrl-C always quits, whatever tui.toml says and whatever is open.
   keymap.intercept(
@@ -131,6 +133,15 @@ export async function mountApp(renderer: CliRenderer, opts: AppOptions): Promise
     },
     closed: renderer.closed ?? Promise.resolve(),
   };
+}
+
+/** state/tui.json in the data folder this dashboard reads, or null when the config cannot be read (the store reports why). */
+function seenFile(opts: AppOptions): string | null {
+  try {
+    return join(opts.context(opts.now()).paths.stateDir, "tui.json");
+  } catch {
+    return null;
+  }
 }
 
 /** Opens the new dashboard on this process's terminal. */

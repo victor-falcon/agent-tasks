@@ -40,6 +40,6 @@ exports[`Runs tab columns, chips and the preview (160 columns) 1`] = `
   ■  Sep 21 09:00  weekly-deps-report  local  6m   1/1  deps report in notes/deps.md    │
   ■  Sep 14 09:00  weekly-deps-report  local  6m   1/1  deps report in notes/deps.md    │
                                                                                         │
- j/k move · <CR> open · f status · S since · r retry · a attach · t task · ? keys · q quit
+ j/k move · <CR> open · / filter · f status · S since · r retry · a attach · ? keys · q quit
 "
 `;
