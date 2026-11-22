@@ -1,0 +1,169 @@
+import { type CliRenderer, createCliRenderer } from "@opentui/core";
+import { render } from "@opentui/solid";
+import type { Context } from "../context.ts";
+import type { CommandRunner } from "../tui/app.ts";
+import { createActions } from "./actions.ts";
+import { Frame } from "./app.tsx";
+import { type App, AppContext } from "./context.ts";
+import type { Action } from "./keymap/actions.ts";
+import type { TuiConfig } from "./keymap/config.ts";
+import { createAppKeymap } from "./keymap/vim.ts";
+import { createSeen } from "./seen.ts";
+import { createUiState, TAB_IDS, type TabId } from "./state.ts";
+import { createStore } from "./store.ts";
+import { createTheme, paletteGuard } from "./theme.ts";
+
+// Starting the new dashboard: a renderer on this terminal (or a test
+// renderer), the store, the keymap and the actions, and the frame mounted
+// on it. Quitting goes through renderer.destroy(), which gives the terminal
+// back; the caller waits for `closed` before the process exits.
+
+export interface AppOptions {
+  /** `agent-tasks top` or `agent-tasks runner`. */
+  title: string;
+  config: TuiConfig;
+  /** The clock (the real time, shifted by `--now`). */
+  now(): Date;
+  /** A fresh context at `now` (config re-read). */
+  context(now: Date): Context;
+  env: Record<string, string | undefined>;
+  exec: CommandRunner;
+  /** Folder to watch for changes (the data folder); null to rely on the reload timer. */
+  watchDir: string | null;
+  /** The user quit (q, Ctrl-C); the renderer is already destroyed. */
+  onQuit(): void;
+  /** After a command that had the terminal fails: wait for a key so its error can be read. */
+  waitForKey?: () => Promise<void>;
+  /** How the terminal is handed to a command (attach) and taken back: the renderer's suspend/resume unless replaced (tests). */
+  handOver?: { suspend(): Promise<void>; resume(): Promise<void> };
+}
+
+export interface AppHandle {
+  app: App;
+  /** Leaves the dashboard (as quitting does). Safe to call more than once. */
+  stop(): void;
+  readonly isRunning: boolean;
+  /** Settles once the terminal is given back. */
+  closed: Promise<void>;
+}
+
+/** One key from the real terminal, in raw mode. */
+function waitForTerminalKey(): Promise<void> {
+  return new Promise((resolve) => {
+    const { stdin } = process;
+    stdin.setRawMode?.(true);
+    stdin.resume();
+    stdin.once("data", () => {
+      stdin.setRawMode?.(false);
+      stdin.pause();
+      resolve();
+    });
+  });
+}
+
+export async function mountApp(renderer: CliRenderer, opts: AppOptions): Promise<AppHandle> {
+  const theme = createTheme(opts.env, renderer);
+  renderer.addPostProcessFn(paletteGuard);
+  const keymap = createAppKeymap(renderer);
+  const store = createStore(opts);
+  const ui = createUiState();
+  let running = true;
+
+  const stop = () => {
+    if (!running) return;
+    running = false;
+    store.stop();
+    ui.dispose();
+    renderer.destroy();
+  };
+  const quit = () => {
+    if (!running) return;
+    stop();
+    opts.onQuit();
+  };
+
+  const suspend = async (run: () => Promise<number>) => {
+    const handOver = opts.handOver ?? renderer;
+    store.setPaused(true);
+    await handOver.suspend();
+    let code: number;
+    try {
+      code = await run();
+    } catch (err) {
+      code = 1;
+      process.stdout.write(`agent-tasks: ${(err as Error).message}\n`);
+    }
+    if (code !== 0) {
+      // Leave its error on screen until a key is pressed.
+      process.stdout.write("\nPress any key to go back to the dashboard…");
+      await (opts.waitForKey ?? waitForTerminalKey)();
+    }
+    store.setPaused(false);
+    if (!running) return;
+    await handOver.resume();
+    store.reload();
+  };
+
+  const actions = createActions({ store, ui, keymap: opts.config.keymap, exec: opts.exec, suspend, quit });
+  const tabHandler = (tab: TabId) => () => ui.setTab(tab);
+  const cycle = (by: number) => () => ui.setTab(TAB_IDS[(TAB_IDS.indexOf(ui.tab()) + by + TAB_IDS.length) % TAB_IDS.length]!);
+  const globalHandlers: App["globalHandlers"] = {
+    tab_overview: tabHandler("overview"),
+    tab_tasks: tabHandler("tasks"),
+    tab_runs: tabHandler("runs"),
+    tab_system: tabHandler("system"),
+    next_tab: cycle(1),
+    prev_tab: cycle(-1),
+    refresh: () => store.reload(),
+    help: () => ui.setHelp(true),
+    undo: () => actions.undo(),
+    dismiss: () => ui.dismiss(),
+    back: () => void ui.pop(),
+    quit: () => actions.quit(),
+  } satisfies Partial<Record<Action, () => void>>;
+
+  const app: App = { title: opts.title, renderer, store, ui, actions, theme, config: opts.config, keymap, seen: createSeen(), globalHandlers };
+
+  // Ctrl-C always quits, whatever tui.toml says and whatever is open.
+  keymap.intercept(
+    "key",
+    (ctx) => {
+      if (ctx.event.ctrl && ctx.event.name === "c") {
+        ctx.consume();
+        quit();
+      }
+    },
+    { priority: 1000 },
+  );
+
+  store.start();
+  await render(
+    () => (
+      <AppContext.Provider value={app}>
+        <Frame />
+      </AppContext.Provider>
+    ),
+    renderer,
+  );
+  return {
+    app,
+    stop,
+    get isRunning() {
+      return running;
+    },
+    closed: renderer.closed ?? Promise.resolve(),
+  };
+}
+
+/** Opens the new dashboard on this process's terminal. */
+export async function startApp(opts: AppOptions): Promise<AppHandle> {
+  const renderer = await createCliRenderer({
+    exitOnCtrlC: false,
+    exitSignals: [],
+    useMouse: opts.config.mouse,
+    autoFocus: false,
+    targetFps: 30,
+    openConsoleOnError: false,
+  });
+  return await mountApp(renderer, opts);
+}
