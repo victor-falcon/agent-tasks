@@ -192,4 +192,26 @@ describe("bin/agent-tasks", () => {
     const proc = Bun.spawn(["sh", "-c", `${JSON.stringify(process.execPath)} ${JSON.stringify(writer)} | (sleep 1; wc -c)`], { stdout: "pipe" });
     expect((await new Response(proc.stdout).text()).trim()).toBe("200001");
   });
+
+  test("exits even when the pending output never drains", async () => {
+    // A reader that died with output pending: Bun then emits neither drain,
+    // close nor error, and a process waiting for them spun at 100% CPU forever.
+    const writer = join(home.root, "stuck-writer.ts");
+    const flush = resolve(import.meta.dir, "..", "src", "flush.ts");
+    writeFileSync(
+      writer,
+      `import { EventEmitter } from "node:events";\n` +
+        `const { watchBackpressure, exitWhenFlushed } = await import(${JSON.stringify(flush)});\n` +
+        `const stream = Object.assign(new EventEmitter(), { write: () => false });\n` +
+        `const streams = [watchBackpressure(stream)];\n` +
+        `stream.write("pending");\n` +
+        `await exitWhenFlushed(7, streams, 200);\n`,
+    );
+    const started = Date.now();
+    const proc = Bun.spawn([process.execPath, writer], { stdout: "ignore", stderr: "pipe" });
+    const code = await Promise.race([proc.exited, Bun.sleep(5_000).then(() => "timeout")]);
+    if (code === "timeout") proc.kill("SIGKILL");
+    expect(code).toBe(7);
+    expect(Date.now() - started).toBeLessThan(4_000);
+  });
 });

@@ -3,6 +3,14 @@
 // 64 KiB, read by a slower program, arrived as broken JSON). The entry point
 // watches stdout and stderr from the start and, before exiting, waits for any
 // write that filled the pipe to drain.
+//
+// That wait is bounded: when the reader dies with output still pending (an
+// agent's terminal closed by `finish`, an ssh client gone), Bun emits neither
+// `drain` nor `close` nor `error`, and its event loop spins at 100% CPU
+// for as long as the process lives. Past the deadline the process exits anyway.
+
+/** How long exiting waits for a reader to take pending output. */
+export const FLUSH_DEADLINE_MS = 5_000;
 
 type Stream = NodeJS.WriteStream;
 
@@ -37,8 +45,13 @@ export function watchBackpressure(stream: Stream): { drained(): Promise<void> } 
   };
 }
 
-/** Waits for stdout and stderr to drain, then exits with `code`. */
-export async function exitWhenFlushed(code: number, streams: { drained(): Promise<void> }[]): Promise<never> {
-  await Promise.all(streams.map((s) => s.drained()));
+/** Waits for stdout and stderr to drain (at most `deadlineMs`), then exits with `code`. */
+export async function exitWhenFlushed(
+  code: number,
+  streams: { drained(): Promise<void> }[],
+  deadlineMs = FLUSH_DEADLINE_MS,
+): Promise<never> {
+  const deadline = new Promise<void>((resolve) => setTimeout(resolve, deadlineMs));
+  await Promise.race([Promise.all(streams.map((s) => s.drained())), deadline]);
   process.exit(code);
 }
